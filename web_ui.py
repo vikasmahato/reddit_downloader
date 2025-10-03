@@ -29,6 +29,20 @@ def inject_template_globals():
     }
     return template_globals
 
+@app.template_filter('format_datetime')
+def format_datetime_filter(value):
+    try:
+        return datetime.fromtimestamp(float(value)).strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        return ''
+
+@app.template_filter('loads')
+def loads_filter(value):
+    try:
+        return json.loads(value)
+    except Exception:
+        return []
+
 class RedditImageUI:
     def __init__(self, download_folder="reddit_downloads", metadata_db="metadata.db"):
         self.download_folder = Path(download_folder)

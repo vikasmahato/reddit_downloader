@@ -182,55 +182,42 @@ class RedditImageDownloader:
 
     def download_image(self, url: str, filename: str = None, subreddit: str = "", 
                        post_data: Dict = None) -> bool:
-        """Download a single image from URL with enhanced organization and metadata."""
+        """Download a single image from URL with enhanced organization and metadata. Efficient for large files."""
         try:
-            # Check if image was previously downloaded (for deletion tracking)
             prev_record = self._get_image_record(url)
-            
-            response = self.session.get(url, stream=True, timeout=30)
+            response = self.session.get(url, stream=True, timeout=60)
             response.raise_for_status()
-            
-            # Get file content first to calculate hash and size
-            content = b''
-            for chunk in response.iter_content(chunk_size=8192):
-                content += chunk
-            
-            # Calculate file hash and size
-            file_hash = hashlib.md5(content).hexdigest()
-            file_size = len(content)
-            
             # Determine filename if not provided
             if not filename:
                 parsed_url = urlparse(url)
                 filename = unquote(parsed_url.path.split('/')[-1])
-                
-                # If filename exists in metadata, keep it consistent
                 if prev_record and prev_record['filename']:
                     filename = prev_record['filename']
                 else:
-                    # Add timestamp if file exists locally
                     temp_path = self.download_folder / filename
                     if temp_path.exists():
                         name, ext = os.path.splitext(filename)
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         filename = f"{name}_{timestamp}{ext}"
-            
             folder = self.download_folder
-            
             if subreddit:
                 folder = folder / self._sanitize_folder_name(subreddit)
                 folder.mkdir(parents=True, exist_ok=True)
-            
             filepath = folder / filename
-            
-            # Write image to file
+            # Write image to file efficiently
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            file_hash = hashlib.md5()
             with open(filepath, 'wb') as f:
-                f.write(content)
-            
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        file_hash.update(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0 and downloaded % (1024*1024) == 0:
+                            print(f"Downloaded {downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB...")
             # Save metadata
-            self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash, file_size)
-            
-            # If this was a re-download (deletion check), restore original filename
+            self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
             if prev_record and prev_record.get('is_deleted'):
                 if '_deleted' in filename:
                     new_filename = filename.replace('_deleted', '')
@@ -242,9 +229,7 @@ class RedditImageDownloader:
                     print(f"✓ Re-downloaded: {filename}")
             else:
                 print(f"✓ Downloaded: {filename}")
-            
             return True
-            
         except Exception as e:
             print(f"✗ Failed to download {url}: {e}")
             return False
@@ -328,6 +313,18 @@ class RedditImageDownloader:
         except Exception as e:
             print(f"⚠️  Warning: Could not update file path: {e}")
 
+    def _mark_image_as_deleted(self, url: str):
+        """Mark an image as deleted in the database by setting is_deleted to True."""
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            cursor.execute('UPDATE images SET is_deleted = 1 WHERE url = ?', (url,))
+            conn.commit()
+            conn.close()
+            print(f"Marked as deleted: {url}")
+        except Exception as e:
+            print(f"Error marking image as deleted: {e}")
+
     def check_deleted_images(self, subreddit: str = None) -> List[Dict]:
         """Check which previously downloaded images are now deleted."""
         deleted_images = []
@@ -344,7 +341,7 @@ class RedditImageDownloader:
             if subreddit:
                 cursor.execute('SELECT * FROM images WHERE subreddit = ?', (subreddit,))
             else:
-                cursor.execute('SELECT * FROM images')
+                cursor.execute('SELECT * FROM images WHERE is_deleted = 0')
             
             images = cursor.fetchall()
             conn.close()
@@ -531,7 +528,7 @@ class RedditImageDownloader:
                         for item in gallery_items:
                             media_id = item['media_id']
                             meta = post.media_metadata.get(media_id)
-                            if meta and meta.get('status') == 'valid':
+                            if meta and meta.get('status') == 'valid' and 's' in meta and 'u' in meta['s']:
                                 img_url = meta['s']['u'].replace('&amp;', '&')
                                 all_urls.append(img_url)
                         if all_urls:

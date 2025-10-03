@@ -154,6 +154,8 @@
                     {% if image.file_size %}
                     <div><i class="fas fa-file"></i> {{ "%.1f"|format(image.file_size/1024) }} KB</div>
                     {% endif %}
+                    {% set comment_count = (image.comments | safe | loads | length) if image.comments else 0 %}
+                    <div><i class="fas fa-comments"></i> {{ comment_count }} comment{{ 's' if comment_count != 1 else '' }}</div>
                 </div>
             </div>
             
