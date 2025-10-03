@@ -17,6 +17,18 @@ import hashlib
 
 app = Flask(__name__)
 
+# Add Python built-ins to template context
+@app.context_processor
+def inject_template_globals():
+    import builtins
+    template_globals = {
+        'min': min,
+        'max': max,
+        'enumerate': enumerate,
+        'zip': zip,
+    }
+    return template_globals
+
 class RedditImageUI:
     def __init__(self, download_folder="reddit_downloads", metadata_db="metadata.db"):
         self.download_folder = Path(download_folder)

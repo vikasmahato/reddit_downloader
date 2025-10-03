@@ -233,6 +233,80 @@ downloads/
 - Keep this file secure and never commit it to version control
 - Consider using environment variables for production deployments
 
+## Web UI
+
+The Reddit Image Downloader includes a web-based interface for browsing your downloaded images and metadata.
+
+### Start the Web Interface
+
+```bash
+python web_ui.py
+```
+
+Then open your browser to: http://localhost:5000
+
+### Features
+
+**🖼️ Gallery View**
+- Browse images in an organized grid layout
+- Thumbnail previews with hover effects
+- Quick access to image details and full-size viewing
+
+**🔍 Search & Filter**
+- Search by title, author, or filename
+- Filter by subreddit or username
+- Real-time filtering without page reloads
+
+**📊 Statistics Dashboard**
+- Total images downloaded
+- Total size downloaded (MB)
+- Count of subreddits and unique authors
+- Top subreddits by image count
+
+**📱 Responsive Design**
+- Works on desktop, tablet, and mobile
+- Bootstrap-based modern interface
+- Dark theme with Reddit-inspired colors
+
+**🔗 Quick Navigation**
+- Direct links to Reddit posts
+- Filter by subreddit/author from image cards
+- Direct image downloads
+
+**🔍 Detailed Metadata**
+- Complete image information
+- File integrity (MD5 hash verification)
+- Download timestamps and file sizes
+- Original Reddit post links
+
+### Web UI Screenshots
+
+**Main Gallery:**
+- Modern card-based layout
+- Real-time statistics
+- Advanced filtering options
+- Top subreddits quick access
+
+**Image Details:**
+- Full-size image preview
+- Complete metadata display
+- Original Reddit post links
+- File integrity verification
+
+**Mobile Responsive:**
+- Touch-friendly interface
+- Optimized for mobile browsing
+- Swipe-friendly gallery navigation
+
+### API Endpoints
+
+The web UI also provides REST API endpoints:
+
+- `GET /api/images` - Get filtered image list (JSON)
+- `GET /api/stats` - Get download statistics (JSON)
+- `GET /image/<path>` - Serve image files
+- `GET /details/<id>` - View detailed image information
+
 ## License
 
 This script is provided as-is for educational and personal use. Please respect Reddit's terms of service and the subreddit-specific rules when downloading content.
