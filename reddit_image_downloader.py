@@ -216,17 +216,11 @@ max_images_per_subreddit = 25
             
                             
             
-            # Create organized folder structure: downloads/subreddit/username/
+            # Create organized folder structure: downloads/subreddit/ (no username subfolder)
             folder = self.download_folder
             
             if subreddit:
                 folder = folder / self._sanitize_folder_name(subreddit)
-                
-                # Add username subfolder if author info is available
-                if post_data and post_data.get('author'):
-                    username = self._sanitize_folder_name(str(post_data['author']))
-                    folder = folder / username
-                    
                 folder.mkdir(parents=True, exist_ok=True)
             
             filepath = folder / filename
@@ -527,7 +521,7 @@ max_images_per_subreddit = 25
             print(f"📸 Found {len(post_data_list)} image posts from u/{username}")
             
             urls = [post['url'] for post in post_data_list]
-            self.download_from_urls(urls, f"users/{username}", post_data_list)
+            self.download_from_urls(urls, username, post_data_list)
             
         except Exception as e:
             print(f"❌ Error fetching posts from u/{username}: {e}")

@@ -177,20 +177,17 @@ Images are downloaded to the `downloads` folder (configurable), organized by sou
 ```
 downloads/
 ├── wallpapers/                           # Subreddit: r/wallpapers
-│   ├── photographer123/                  # Username folder
-│   │   ├── sunset_beach_20231215.jpg
-│   │   └── mountain_view_deleted.png     # Deleted image marked
-│   └── artist456/
-│       └── modern_art.jpg
+│   ├── sunset_beach_20231215.jpg
+│   ├── mountain_view_deleted.png         # Deleted image marked
+│   └── modern_art.jpg
 ├── EarthPorn/                            # Subreddit: r/EarthPorn  
-│   └── naturephotographer/
-│       ├── desert_mountains.jpg
-│       └── forest_lake.jpg
-├── users/                                # User profile downloads
-│   ├── naturephotographer/
-│   │   └── portfolio_image_1.jpg
-│   └── artist123/
-│       └── digital_art.jpg
+│   ├── desert_mountains.jpg
+│   └── forest_lake.jpg
+├── naturephotographer/                   # User: u/naturephotographer
+│   ├── portfolio_image_1.jpg
+│   └── landscape_photo.jpg
+├── artist123/                           # User: u/artist123
+│   └── digital_art.jpg
 ├── saved_posts/                          # Saved posts
 │   └── image_1_20231215.jpg
 └── metadata.db                           # SQLite metadata database
