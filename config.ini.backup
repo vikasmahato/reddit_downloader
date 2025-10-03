@@ -1,0 +1,26 @@
+[reddit]
+client_id = AW6OQyD3fk05e-AVeVzJCA
+client_secret = lK1Ir_AkJEvDuiXoQtDEoN-DAAQipQ
+username = NumberAggravating576
+password = Physics@17
+user_agent = reddit_image_downloader by u/your_username
+
+[general]
+download_folder = reddit_downloads
+max_images_per_subreddit = 1000
+
+[scrape_list]
+# List of subreddits to scrape (one per line, with or without r/ prefix)
+# Example:
+# wallpapers
+"r/IndianInstaBaddies"
+"r/DesiAdultfusion"
+"r/IndianHotwife"
+
+[user_scrape_list]
+# List of usernames to scrape user posts (one per line, with or without u/ prefix)
+# Example:
+# unidan
+# u/GallowBoob
+# naturephotographer
+

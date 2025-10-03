@@ -27,7 +27,11 @@ class RedditImageDownloader:
     def __init__(self, config_file: str = "config.ini"):
         """Initialize the Reddit Image Downloader."""
         self.config = ConfigParser()
-        self.config.read(config_file)
+        self.config_file = config_file
+        
+        # Create a clean config parser that handles list sections properly
+        self._parse_config_file(config_file)
+        
         self.session = requests.Session()
         self.reddit = None
         self.download_folder = Path(self.config.get('general', 'download_folder', fallback='downloads'))
@@ -46,6 +50,59 @@ class RedditImageDownloader:
         self._init_metadata_db()
         
         self._setup_reddit_auth()
+
+    def _parse_config_file(self, config_file: str):
+        """Parse config file handling list sections properly."""
+        try:
+            # Create temporary file without list sections
+            temp_config = []
+            skip_sections = ['scrape_list', 'user_scrape_list']
+            skipping = False
+            
+            with open(config_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line_stripped = line.strip()
+                    
+                    # Check if we're entering a skip section
+                    if line_stripped in [f'[{s}]' for s in skip_sections]:
+                        skipping = True
+                        continue
+                    
+                    # Check if we're leaving a skip section
+                    if skipping and line_stripped.startswith('[') and line_stripped.endswith(']'):
+                        skipping = False
+                    elif skipping:
+                        continue
+                    
+                    temp_config.append(line)
+            
+            # Parse the cleaned config
+            temp_content = ''.join(temp_config)
+            temp_file = 'temp_config.ini'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(temp_content)
+            
+            try:
+                self.config.read(temp_file)
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            
+        except Exception as e:
+            print(f"⚠️  Config parsing error: {e}")
+            print("   Using defaults...")
+            # Fallback to minimal config
+            self.config.read_string("""
+[reddit]
+client_id = 
+client_secret = 
+user_agent = reddit_image_downloader
+
+[general]
+download_folder = downloads
+max_images_per_subreddit = 25
+""")
 
     def _init_metadata_db(self):
         """Initialize the metadata SQLite database."""
@@ -362,14 +419,38 @@ class RedditImageDownloader:
         """Parse a config section for scraping lists."""
         items = []
         try:
-            if self.config.has_section(section):
-                for key, value in self.config.items(section):
-                    # Skip comment lines (starting with # or empty)
-                    if value.strip() and not value.strip().startswith('#'):
-                        clean_name = value.strip()
-                        items.append(clean_name)
+            config_file_path = Path(self.config_file)
+            
+            if not config_file_path.exists():
+                print(f"⚠️  Config file not found: {config_file_path}")
+                return items
+            
+            # Read the raw config file to handle multiple values in a section
+            reading_section = False
+            with open(config_file_path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    
+                    # Start reading when we hit the target section
+                    if line == f'[{section}]':
+                        reading_section = True
+                        continue
+                    
+                    # Stop reading when we hit another section
+                    if reading_section:
+                        if line.startswith('[') and line.endswith(']'):
+                            break
+                        
+                        # Skip empty lines and comments
+                        if line and not line.startswith('#'):
+                            # Remove quotes and clean up the name
+                            clean_name = line.strip('"\'')
+                            if clean_name:  # Only add if not empty after cleaning
+                                items.append(clean_name)
+        
         except Exception as e:
             print(f"⚠️  Warning: Could not parse {section} list: {e}")
+        
         return items
 
     def scrape_from_config_list(self, scrape_type: str = "all"):
