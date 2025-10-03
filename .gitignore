@@ -7,6 +7,9 @@ temp/
 config.ini
 *.ini
 
+# Metadata database
+**/metadata.db
+
 # Python cache and bytecode
 __pycache__/
 *.py[cod]

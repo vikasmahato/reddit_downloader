@@ -18,6 +18,8 @@ import praw
 from configparser import ConfigParser
 import mimetypes
 import re
+import sqlite3
+import hashlib
 from typing import List, Dict, Optional
 
 
@@ -39,7 +41,42 @@ class RedditImageDownloader:
                         fallback='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         })
         
+        # Initialize metadata database
+        self.metadata_db = self.download_folder / 'metadata.db'
+        self._init_metadata_db()
+        
         self._setup_reddit_auth()
+
+    def _init_metadata_db(self):
+        """Initialize the metadata SQLite database."""
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS images (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT UNIQUE,
+                    filename TEXT,
+                    subreddit TEXT,
+                    username TEXT,
+                    author TEXT,
+                    title TEXT,
+                    permalink TEXT,
+                    download_date TEXT,
+                    download_time TEXT,
+                    file_hash TEXT,
+                    file_size INTEGER,
+                    is_deleted BOOLEAN DEFAULT FALSE,
+                    file_path TEXT
+                )
+            ''')
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not initialize metadata database: {e}")
 
     def _setup_reddit_auth(self):
         """Setup Reddit authentication using PRAW."""
@@ -85,42 +122,241 @@ class RedditImageDownloader:
             print("   You'll still be able to download directly from URLs.")
             self.reddit = None
 
-    def download_image(self, url: str, filename: str = None, subreddit: str = "") -> bool:
-        """Download a single image from URL."""
+    def download_image(self, url: str, filename: str = None, subreddit: str = "", 
+                       post_data: Dict = None) -> bool:
+        """Download a single image from URL with enhanced organization and metadata."""
         try:
+            # Check if image was previously downloaded (for deletion tracking)
+            prev_record = self._get_image_record(url)
+            
             response = self.session.get(url, stream=True, timeout=30)
             response.raise_for_status()
+            
+            # Get file content first to calculate hash and size
+            content = b''
+            for chunk in response.iter_content(chunk_size=8192):
+                content += chunk
+            
+            # Calculate file hash and size
+            file_hash = hashlib.md5(content).hexdigest()
+            file_size = len(content)
             
             # Determine filename if not provided
             if not filename:
                 parsed_url = urlparse(url)
                 filename = unquote(parsed_url.path.split('/')[-1])
                 
-                # Add timestamp if filename exists
-                if os.path.exists(self.download_folder / filename):
-                    name, ext = os.path.splitext(filename)
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"{name}_{timestamp}{ext}"
+                # If filename exists in metadata, keep it consistent
+                if prev_record and prev_record['filename']:
+                    filename = prev_record['filename']
+                else:
+                    # Add timestamp if file exists locally
+                    temp_path = self.download_folder / filename
+                    if temp_path.exists():
+                        name, ext = os.path.splitext(filename)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"{name}_{timestamp}{ext}"
             
-            # Create subreddit-specific folder
+                            
+            
+            # Create organized folder structure: downloads/subreddit/username/
             folder = self.download_folder
+            
             if subreddit:
-                folder = self.download_folder / subreddit
-                folder.mkdir(exist_ok=True)
+                folder = folder / self._sanitize_folder_name(subreddit)
+                
+                # Add username subfolder if author info is available
+                if post_data and post_data.get('author'):
+                    username = self._sanitize_folder_name(str(post_data['author']))
+                    folder = folder / username
+                    
+                folder.mkdir(parents=True, exist_ok=True)
             
             filepath = folder / filename
             
             # Write image to file
             with open(filepath, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                f.write(content)
             
-            print(f"✓ Downloaded: {filename}")
+            # Save metadata
+            self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash, file_size)
+            
+            # If this was a re-download (deletion check), restore original filename
+            if prev_record and prev_record.get('is_deleted'):
+                if '_deleted' in filename:
+                    new_filename = filename.replace('_deleted', '')
+                    new_filepath = filepath.parent / new_filename
+                    filepath.rename(new_filepath)
+                    self._update_file_path_in_db(url, str(new_filepath))
+                    print(f"✓ Restored: {new_filename}")
+                else:
+                    print(f"✓ Re-downloaded: {filename}")
+            else:
+                print(f"✓ Downloaded: {filename}")
+            
             return True
             
         except Exception as e:
             print(f"✗ Failed to download {url}: {e}")
             return False
+    
+    def _sanitize_folder_name(self, name: str) -> str:
+        """Sanitize folder names to be filesystem-safe."""
+        # Replace invalid characters with underscores
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            name = name.replace(char, '_')
+        
+        # Remove leading/trailing dots and spaces
+        name = name.strip('. ')
+        
+        # Limit length
+        return name[:100] if name else 'unknown'
+
+    def _get_image_record(self, url: str) -> Optional[Dict]:
+        """Get image record from metadata database."""
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT * FROM images WHERE url = ?', (url,))
+            result = cursor.fetchone()
+            
+            conn.close()
+            
+            if result:
+                columns = ['id', 'url', 'filename', 'subreddit', 'username', 'author', 
+                          'title', 'permalink', 'download_date', 'download_time', 
+                          'file_hash', 'file_size', 'is_deleted', 'file_path']
+                return dict(zip(columns, result))
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not query metadata database: {e}")
+        
+        return None
+
+    def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
+                            post_data: Dict, filepath: Path, file_hash: str, file_size: int):
+        """Save image metadata to database."""
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            
+            now = datetime.now()
+            download_date = now.strftime("%Y-%m-%d")
+            download_time = now.strftime("%H:%M:%S")
+            
+            # Extract post data
+            author = post_data.get('author', '') if post_data else ''
+            title = post_data.get('title', '') if post_data else ''
+            permalink = post_data.get('permalink', '') if post_data else ''
+            
+            # Insert or update record
+            cursor.execute('''
+                INSERT OR REPLACE INTO images 
+                (url, filename, subreddit, username, author, title, permalink, 
+                 download_date, download_time, file_hash, file_size, file_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (url, filename, subreddit, author, author, title, permalink, 
+                  download_date, download_time, file_hash, file_size, str(filepath)))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not save metadata: {e}")
+
+    def _update_file_path_in_db(self, url: str, new_filepath: str):
+        """Update file path in database."""
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            
+            cursor.execute('UPDATE images SET file_path = ? WHERE url = ?', 
+                          (new_filepath, url))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not update file path: {e}")
+
+    def check_deleted_images(self, subreddit: str = None) -> List[Dict]:
+        """Check which previously downloaded images are now deleted."""
+        deleted_images = []
+        
+        if not self.reddit:
+            print("❌ Reddit connection required to check for deleted images")
+            return deleted_images
+        
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            
+            # Get all previously downloaded images
+            if subreddit:
+                cursor.execute('SELECT * FROM images WHERE subreddit = ?', (subreddit,))
+            else:
+                cursor.execute('SELECT * FROM images')
+            
+            images = cursor.fetchall()
+            conn.close()
+            
+            columns = ['id', 'url', 'filename'] + [''] * 11  # Simplified for this check
+            
+            for img_data in images:
+                url = img_data[1]  # url column
+                
+                try:
+                    # Try to access the Reddit post
+                    response = self.session.head(url, timeout=10)
+                    if response.status_code == 404:
+                        deleted_images.append({
+                            'url': url,
+                            'filename': img_data[2],
+                            'file_path': img_data[13] if len(img_data) > 13 else None
+                        })
+                    
+                except Exception:
+                    # If we can't check, assume it might be deleted
+                    deleted_images.append({
+                        'url': url,
+                        'filename': img_data[2],
+                        'file_path': img_data[13] if len(img_data) > 13 else None
+                    })
+            
+            # Rename deleted files and update database
+            for img in deleted_images:
+                if img['file_path'] and os.path.exists(img['file_path']):
+                    old_path = Path(img['file_path'])
+                    if '_deleted' not in old_path.name:
+                        new_filename = old_path.stem + '_deleted' + old_path.suffix
+                        new_path = old_path.parent / new_filename
+                        
+                        old_path.rename(new_path)
+                        
+                        # Update metadata
+                        self._mark_image_as_deleted(img['url'])
+                        print(f"📝 Marked as deleted: {new_filename}")
+        
+        except Exception as e:
+            print(f"❌ Error checking deleted images: {e}")
+        
+        return deleted_images
+
+    def _mark_image_as_deleted(self, url: str):
+        """Mark image as deleted in database."""
+        try:
+            conn = sqlite3.connect(str(self.metadata_db))
+            cursor = conn.cursor()
+            
+            cursor.execute('UPDATE images SET is_deleted = TRUE WHERE url = ?', (url,))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not mark image as deleted: {e}")
 
     def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
                                     time_filter: str = 'all') -> List[Dict]:
@@ -167,7 +403,7 @@ class RedditImageDownloader:
         image_domains = ['imgur.com', 'i.imgur.com', 'i.redd.it', 'preview.redd.it']
         return any(domain in parsed_url.netloc for domain in image_domains)
 
-    def download_from_urls(self, urls: List[str], subreddit: str = ""):
+    def download_from_urls(self, urls: List[str], subreddit: str = "", url_data: List[Dict] = None):
         """Download images from a list of URLs."""
         successful = 0
         total = len(urls)
@@ -176,7 +412,8 @@ class RedditImageDownloader:
         
         for i, url in enumerate(urls, 1):
             print(f"[{i}/{total}] {url}")
-            if self.download_image(url):
+            post_data = url_data[i-1] if url_data and i <= len(url_data) else None
+            if self.download_image(url, subreddit=subreddit, post_data=post_data):
                 successful += 1
         
         print(f"\n✅ Download complete: {successful}/{total} images downloaded")
@@ -193,7 +430,7 @@ class RedditImageDownloader:
         print(f"📸 Found {len(image_posts)} image posts")
         
         urls = [post['url'] for post in image_posts]
-        self.download_from_urls(urls, subreddit)
+        self.download_from_urls(urls, subreddit, image_posts)
 
     def get_user_saved_posts(self, limit: int = 25) -> List[Dict]:
         """Get saved posts from authenticated user."""
@@ -216,7 +453,9 @@ class RedditImageDownloader:
                         'url': post.url,
                         'author': str(post.author),
                         'subreddit': str(post.subreddit),
-                        'permalink': post.permalink
+                        'permalink': post.permalink,
+                        'created_utc': post.created_utc,
+                        'score': post.score
                     })
             
             return saved_posts
@@ -260,11 +499,13 @@ def create_default_config():
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Download images from Reddit')
+    parser = argparse.ArgumentParser(description='Download images from Reddit with organization and metadata tracking')
     parser.add_argument('--urls', nargs='+', help='Direct image URLs to download')
     parser.add_argument('--subreddit', help='Subreddit to download images from')
     parser.add_argument('--limit', type=int, default=25, help='Number of images to download')
     parser.add_argument('--saved', action='store_true', help='Download from saved posts')
+    parser.add_argument('--check-deleted', help='Check for deleted images (specify subreddit or "all"')
+    parser.add_argument('--list-metadata', action='store_true', help='List metadata for downloaded images')
     parser.add_argument('--config', default='config.ini', help='Config file path')
     parser.add_argument('--setup', action='store_true', help='Create default config file')
     
@@ -286,7 +527,7 @@ def main():
             saved_posts = downloader.get_user_saved_posts(args.limit)
             if saved_posts:
                 urls = [post['url'] for post in saved_posts]
-                downloader.download_from_urls(urls, "saved_posts")
+                downloader.download_from_urls(urls, "saved_posts", saved_posts)
             else:
                 print("❌ No saved image posts found")
         
@@ -295,6 +536,20 @@ def main():
         
         elif args.urls:
             downloader.download_from_urls(args.urls)
+        
+        elif args.check_deleted:
+            if args.check_deleted.lower() == 'all':
+                deleted = downloader.check_deleted_images()
+            else:
+                deleted = downloader.check_deleted_images(args.check_deleted)
+            
+            if deleted:
+                print(f"\n📝 Found {len(deleted)} marked/moved deleted images")
+            else:
+                print("\n✅ No deleted images found")
+        
+        elif args.list_metadata:
+            pass  # TODO: Implement metadata listing
         
         else:
             parser.print_help()
