@@ -358,6 +358,99 @@ class RedditImageDownloader:
         except Exception as e:
             print(f"⚠️  Warning: Could not mark image as deleted: {e}")
 
+    def parse_scrape_list(self, section: str) -> List[str]:
+        """Parse a config section for scraping lists."""
+        items = []
+        try:
+            if self.config.has_section(section):
+                for key, value in self.config.items(section):
+                    # Skip comment lines (starting with # or empty)
+                    if value.strip() and not value.strip().startswith('#'):
+                        clean_name = value.strip()
+                        items.append(clean_name)
+        except Exception as e:
+            print(f"⚠️  Warning: Could not parse {section} list: {e}")
+        return items
+
+    def scrape_from_config_list(self, scrape_type: str = "all"):
+        """Scrape images from configured lists."""
+        if not self.reddit:
+            print("❌ Reddit connection required for batch scraping")
+            return
+        
+        total_downloads = 0
+        
+        # Scrape subreddits
+        if scrape_type in ["all", "subreddits"]:
+            subreddits = self.parse_scrape_list('scrape_list')
+            if subreddits:
+                print(f"\n📂 Found {len(subreddits)} subreddits in config")
+                for subreddit in subreddits:
+                    # Clean subreddit name (remove r/ if present)
+                    clean_name = subreddit.replace('r/', '').strip()
+                    print(f"\n🔍 Scraping r/{clean_name}...")
+                    
+                    limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
+                    self.download_from_subreddit(clean_name, limit)
+                    total_downloads += 1
+        
+        # Scrape user posts
+        if scrape_type in ["all", "users"]:
+            users = self.parse_scrape_list('user_scrape_list')
+            if users:
+                print(f"\n👤 Found {len(users)} users in config")
+                for username in users:
+                    # Clean username (remove u/ if present)
+                    clean_name = username.replace('u/', '').strip()
+                    print(f"\n🔍 Scraping u/{clean_name}...")
+                    
+                    limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
+                    self.download_from_user(clean_name, limit)
+                    total_downloads += 1
+        
+        print(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
+
+    def download_from_user(self, username: str, limit: int = 25):
+        """Download images from a specific user's posts."""
+        if not self.reddit:
+            print("❌ Reddit connection required to access user posts")
+            return
+        
+        try:
+            # Remove u/ prefix if present
+            username = username.replace('u/', '').strip()
+            
+            user = self.reddit.redditor(username)
+            post_data_list = []
+            
+            print(f"🔍 Fetching posts from u/{username}...")
+            
+            submissions = user.submissions.new(limit=limit)
+            
+            for submission in submissions:
+                if not submission.is_self and self._is_image_url(submission.url):
+                    post_data_list.append({
+                        'title': submission.title,
+                        'url': submission.url,
+                        'author': str(submission.author),
+                        'subreddit': str(submission.subreddit),
+                        'permalink': submission.permalink,
+                        'created_utc': submission.created_utc,
+                        'score': submission.score
+                    })
+            
+            if not post_data_list:
+                print(f"❌ No image posts found for u/{username}")
+                return
+            
+            print(f"📸 Found {len(post_data_list)} image posts from u/{username}")
+            
+            urls = [post['url'] for post in post_data_list]
+            self.download_from_urls(urls, f"users/{username}", post_data_list)
+            
+        except Exception as e:
+            print(f"❌ Error fetching posts from u/{username}: {e}")
+
     def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
                                     time_filter: str = 'all') -> List[Dict]:
         """Get image URLs from a subreddit."""
@@ -502,8 +595,12 @@ def main():
     parser = argparse.ArgumentParser(description='Download images from Reddit with organization and metadata tracking')
     parser.add_argument('--urls', nargs='+', help='Direct image URLs to download')
     parser.add_argument('--subreddit', help='Subreddit to download images from')
+    parser.add_argument('--user', help='Download images from a specific user (with or without u/ prefix)')
     parser.add_argument('--limit', type=int, default=25, help='Number of images to download')
     parser.add_argument('--saved', action='store_true', help='Download from saved posts')
+    parser.add_argument('--scrape-all', action='store_true', help='Scrape all subreddits and users from config')
+    parser.add_argument('--scrape-subreddits', action='store_true', help='Scrape only subreddits from config')
+    parser.add_argument('--scrape-users', action='store_true', help='Scrape only users from config')
     parser.add_argument('--check-deleted', help='Check for deleted images (specify subreddit or "all"')
     parser.add_argument('--list-metadata', action='store_true', help='List metadata for downloaded images')
     parser.add_argument('--config', default='config.ini', help='Config file path')
@@ -530,6 +627,22 @@ def main():
                 downloader.download_from_urls(urls, "saved_posts", saved_posts)
             else:
                 print("❌ No saved image posts found")
+        
+        elif args.scrape_all:
+            print("📋 Scraping all sources from config...")
+            downloader.scrape_from_config_list("all")
+        
+        elif args.scrape_subreddits:
+            print("📂 Scraping subreddits from config...")
+            downloader.scrape_from_config_list("subreddits")
+        
+        elif args.scrape_users:
+            print("👤 Scraping users from config...")
+            downloader.scrape_from_config_list("users")
+        
+        elif args.user:
+            username = args.user.replace('u/', '').strip()
+            downloader.download_from_user(username, args.limit)
         
         elif args.subreddit:
             downloader.download_from_subreddit(args.subreddit, args.limit)

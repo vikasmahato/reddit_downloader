@@ -83,9 +83,45 @@ max_images_per_subreddit = 25
 - Can download from **private subreddits** and **saved posts**
 - Required for personal/user-specific content
 
-### Download from a Subreddit
+### Basic Downloads
 ```bash
+# Download from a single subreddit
 python reddit_image_downloader.py --subreddit wallpapers --limit 50
+
+# Download from a specific user
+python reddit_image_downloader.py --user naturephotographer --limit 25
+
+# Download direct URLs
+python reddit_image_downloader.py --urls "https://i.redd.it/example.jpg"
+```
+
+### Batch Scraping from Config
+
+Configure your scraping lists in `config.ini`:
+
+```ini
+[scrape_list]
+wallpapers
+r/EarthPorn  
+r/nature
+r/photography
+
+[user_scrape_list]
+naturephotographer
+u/GallowBoob
+world_nature
+```
+
+Then run batch scraping:
+```bash
+# Scrape all configured subreddits and users
+python reddit_image_downloader.py --scrape-all
+
+# Scrape only subreddits from config
+python reddit_image_downloader.py --scrape-subreddits
+
+# Scrape only users from config
+python reddit_image_downloader.py --scrape-users
 ```
 
 ### Download from Direct URLs (No Authentication Required)
@@ -136,19 +172,28 @@ python reddit_image_downloader.py --saved --limit 50
 
 ## Output Structure
 
-Images are downloaded to the `downloads` folder (configurable), organized by subreddit:
+Images are downloaded to the `downloads` folder (configurable), organized by source:
 
 ```
 downloads/
-├── wallpapers/
-│   ├── beautiful_sunset_20231215_143022.jpg
-│   └── mountain_view_20231215_143056.png
-├── earthporn/
-│   ├── sunset_over_ocean_20231215_143201.jpg
-│   └── mountain_range_20231215_143245.png
-└── saved_posts/
-    ├── favorite_image_1_20231215_143356.jpg
-    └── favorite_image_2_20231215_143412.png
+├── wallpapers/                           # Subreddit: r/wallpapers
+│   ├── photographer123/                  # Username folder
+│   │   ├── sunset_beach_20231215.jpg
+│   │   └── mountain_view_deleted.png     # Deleted image marked
+│   └── artist456/
+│       └── modern_art.jpg
+├── EarthPorn/                            # Subreddit: r/EarthPorn  
+│   └── naturephotographer/
+│       ├── desert_mountains.jpg
+│       └── forest_lake.jpg
+├── users/                                # User profile downloads
+│   ├── naturephotographer/
+│   │   └── portfolio_image_1.jpg
+│   └── artist123/
+│       └── digital_art.jpg
+├── saved_posts/                          # Saved posts
+│   └── image_1_20231215.jpg
+└── metadata.db                           # SQLite metadata database
 ```
 
 ## Supported Image Sources
