@@ -21,6 +21,7 @@ import re
 import sqlite3
 import hashlib
 from typing import List, Dict, Optional
+import time
 
 
 class RedditImageDownloader:
@@ -285,32 +286,30 @@ class RedditImageDownloader:
 
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
                             post_data: Dict, filepath: Path, file_hash: str, file_size: int):
-        """Save image metadata to database."""
+        """Save image metadata to database. For gallery posts, url is a comma-separated list of image URLs."""
         try:
             conn = sqlite3.connect(str(self.metadata_db))
             cursor = conn.cursor()
-            
             now = datetime.now()
             download_date = now.strftime("%Y-%m-%d")
             download_time = now.strftime("%H:%M:%S")
-            
             # Extract post data
             author = post_data.get('author', '') if post_data else ''
             title = post_data.get('title', '') if post_data else ''
             permalink = post_data.get('permalink', '') if post_data else ''
-            
-            # Insert or update record
+            post_username = post_data.get('post_username', '') if post_data else ''
+            comments = post_data.get('comments', '') if post_data else ''
+            # Gallery support: url can be a comma-separated list
+            url_field = post_data.get('all_urls', url) if post_data else url
             cursor.execute('''
                 INSERT OR REPLACE INTO images 
                 (url, filename, subreddit, username, author, title, permalink, 
-                 download_date, download_time, file_hash, file_size, file_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (url, filename, subreddit, author, author, title, permalink, 
-                  download_date, download_time, file_hash, file_size, str(filepath)))
-            
+                 download_date, download_time, file_hash, file_size, file_path, post_username, comments)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (url_field, filename, subreddit, author, author, title, permalink,
+                  download_date, download_time, file_hash, file_size, str(filepath), post_username, comments))
             conn.commit()
             conn.close()
-            
         except Exception as e:
             print(f"⚠️  Warning: Could not save metadata: {e}")
 
@@ -477,6 +476,19 @@ class RedditImageDownloader:
             
             for submission in submissions:
                 if not submission.is_self and self._is_image_url(submission.url):
+                    # Fetch comments for each post
+                    comments_list = []
+                    try:
+                        submission.comments.replace_more(limit=0)
+                        for c in submission.comments[:10]:
+                            comments_list.append({
+                                'author': str(c.author) if c.author else '',
+                                'body': c.body,
+                                'score': c.score,
+                                'created_utc': c.created_utc
+                            })
+                    except Exception:
+                        comments_list = []
                     post_data_list.append({
                         'title': submission.title,
                         'url': submission.url,
@@ -484,7 +496,8 @@ class RedditImageDownloader:
                         'subreddit': str(submission.subreddit),
                         'permalink': submission.permalink,
                         'created_utc': submission.created_utc,
-                        'score': submission.score
+                        'score': submission.score,
+                        'comments': json.dumps(comments_list)
                     })
             
             if not post_data_list:
@@ -501,35 +514,82 @@ class RedditImageDownloader:
 
     def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
                                     time_filter: str = 'all') -> List[Dict]:
-        """Get image URLs from a subreddit, stopping when a previously downloaded image is found."""
+        """Get image URLs from a subreddit, saving gallery posts as a single record with all image URLs comma-separated."""
         if not self.reddit:
             print("❌ Authentication required to access subreddit content")
             return []
-        
         try:
             sub = self.reddit.subreddit(subreddit)
-            posts = sub.new(limit=limit)  # Ensure we use 'new' for newest posts
-
+            posts = sub.new(limit=limit)
             image_posts = []
             for post in posts:
                 if not post.is_self:
+                    # Handle gallery posts
+                    if hasattr(post, 'gallery_data') and post.gallery_data and hasattr(post, 'media_metadata') and post.media_metadata:
+                        gallery_items = post.gallery_data['items']
+                        all_urls = []
+                        for item in gallery_items:
+                            media_id = item['media_id']
+                            meta = post.media_metadata.get(media_id)
+                            if meta and meta.get('status') == 'valid':
+                                img_url = meta['s']['u'].replace('&amp;', '&')
+                                all_urls.append(img_url)
+                        if all_urls:
+                            post_username = str(post.author) if post.author else ''
+                            comments_list = []
+                            try:
+                                post.comments.replace_more(limit=0)
+                                for c in post.comments[:10]:
+                                    comments_list.append({
+                                        'author': str(c.author) if c.author else '',
+                                        'body': c.body,
+                                        'score': c.score,
+                                        'created_utc': c.created_utc
+                                    })
+                            except Exception:
+                                comments_list = []
+                            image_posts.append({
+                                'title': post.title,
+                                'url': all_urls[0],
+                                'all_urls': ','.join(all_urls),
+                                'author': str(post.author),
+                                'score': post.score,
+                                'permalink': post.permalink,
+                                'created_utc': post.created_utc,
+                                'post_username': post_username,
+                                'comments': json.dumps(comments_list)
+                            })
+                        continue  # Skip normal image handling for gallery posts
+                    # Normal image handling
                     url = post.url
                     if self._is_image_url(url):
-                        # Check if image was already downloaded
                         if self._get_image_record(url):
                             print(f"🛑 Already downloaded: {url}. Stopping further scraping for r/{subreddit}.")
                             break
+                        post_username = str(post.author) if post.author else ''
+                        comments_list = []
+                        try:
+                            post.comments.replace_more(limit=0)
+                            for c in post.comments[:10]:
+                                comments_list.append({
+                                    'author': str(c.author) if c.author else '',
+                                    'body': c.body,
+                                    'score': c.score,
+                                    'created_utc': c.created_utc
+                                })
+                        except Exception:
+                            comments_list = []
                         image_posts.append({
                             'title': post.title,
                             'url': url,
                             'author': str(post.author),
                             'score': post.score,
                             'permalink': post.permalink,
-                            'created_utc': post.created_utc
+                            'created_utc': post.created_utc,
+                            'post_username': post_username,
+                            'comments': json.dumps(comments_list)
                         })
-            
             return image_posts
-            
         except Exception as e:
             print(f"❌ Error accessing subreddit {subreddit}: {e}")
             return []
@@ -657,7 +717,8 @@ def main():
     parser.add_argument('--list-metadata', action='store_true', help='List metadata for downloaded images')
     parser.add_argument('--config', default='config.ini', help='Config file path')
     parser.add_argument('--setup', action='store_true', help='Create default config file')
-    
+    parser.add_argument('--loop', action='store_true', help='Run in a loop every 5 minutes with --scrape-all')
+
     args = parser.parse_args()
     
     if args.setup:
@@ -667,7 +728,23 @@ def main():
     if not os.path.exists(args.config):
         print("❌ Config file not found. Run with --setup to create one.")
         return
-    
+
+    # Loop mode: run --scrape-all every 5 minutes
+    if args.loop:
+        while True:
+            print("\n⏳ Running batch scrape (--scrape-all)...")
+            try:
+                downloader = RedditImageDownloader(args.config)
+                downloader.scrape_from_config_list("all")
+            except KeyboardInterrupt:
+                print("\n⏹️  Download cancelled by user")
+                break
+            except Exception as e:
+                print(f"❌ Error: {e}")
+            print("🕒 Sleeping for 5 minutes...")
+            time.sleep(300)
+        return
+
     try:
         downloader = RedditImageDownloader(args.config)
         

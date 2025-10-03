@@ -24,13 +24,32 @@
                 </div>
             </div>
             <div class="card-body">
-                {% if image.web_path %}
+                {% set image_urls = image.url.split(',') %}
                 <div class="text-center mb-4">
-                    <img src="/image/{{ image.web_path }}" class="img-fluid rounded shadow" 
-                         alt="{{ image.title or 'Reddit Image' }}" style="max-height: 600px;">
+                    {% if image_urls|length > 1 %}
+                    <!-- Bootstrap Carousel for gallery -->
+                    <div id="galleryCarousel" class="carousel slide" data-bs-ride="carousel">
+                        <div class="carousel-inner">
+                            {% for img_url in image_urls %}
+                            <div class="carousel-item {% if loop.index0 == 0 %}active{% endif %}">
+                                <img src="{{ img_url.strip() }}" class="d-block w-100 rounded shadow" style="max-height: 600px; margin:auto;" alt="Gallery Image">
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button class="carousel-control-prev" type="button" data-bs-target="#galleryCarousel" data-bs-slide="prev">
+                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Previous</span>
+                        </button>
+                        <button class="carousel-control-next" type="button" data-bs-target="#galleryCarousel" data-bs-slide="next">
+                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Next</span>
+                        </button>
+                    </div>
+                    {% else %}
+                    <img src="{{ image_urls[0].strip() }}" class="img-fluid rounded shadow" alt="{{ image.title or 'Reddit Image' }}" style="max-height: 600px;">
+                    {% endif %}
                 </div>
-                {% endif %}
-                
+
                 <h5>{{ image.title or 'Untitled' }}</h5>
                 
                 <div class="row mt-4">

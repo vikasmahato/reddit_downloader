@@ -132,10 +132,11 @@
 {% if images %}
 <div class="row" id="imageGallery">
     {% for image in images %}
+    {% set image_urls = image.url.split(',') %}
     <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
         <div class="card image-card h-100 {% if image.is_deleted %}deleted-image{% endif %}">
-            {% if image.web_path %}
-            <img src="/image/{{ image.web_path }}" class="image-thumbnail card-img-top" 
+            {% if image_urls[0] %}
+            <img src="{{ image_urls[0].strip() }}" class="image-thumbnail card-img-top"
                  alt="{{ image.title or 'Reddit Image' }}">
             {% else %}
             <div class="image-thumbnail bg-secondary d-flex align-items-center justify-content-center">
