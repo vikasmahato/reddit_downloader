@@ -94,15 +94,15 @@ class RedditImageDownloader:
             print("   Using defaults...")
             # Fallback to minimal config
             self.config.read_string("""
-[reddit]
-client_id = 
-client_secret = 
-user_agent = reddit_image_downloader
+                [reddit]
+                client_id = 
+                client_secret = 
+                user_agent = reddit_image_downloader
 
-[general]
-download_folder = downloads
-max_images_per_subreddit = 25
-""")
+                [general]
+                download_folder = downloads
+                max_images_per_subreddit = 25
+                """)
 
     def _init_metadata_db(self):
         """Initialize the metadata SQLite database."""
@@ -214,9 +214,6 @@ max_images_per_subreddit = 25
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         filename = f"{name}_{timestamp}{ext}"
             
-                            
-            
-            # Create organized folder structure: downloads/subreddit/ (no username subfolder)
             folder = self.download_folder
             
             if subreddit:
@@ -357,7 +354,6 @@ max_images_per_subreddit = 25
             
             for img_data in images:
                 url = img_data[1]  # url column
-                
                 try:
                     # Try to access the Reddit post
                     response = self.session.head(url, timeout=10)
@@ -367,7 +363,6 @@ max_images_per_subreddit = 25
                             'filename': img_data[2],
                             'file_path': img_data[13] if len(img_data) > 13 else None
                         })
-                    
                 except Exception:
                     # If we can't check, assume it might be deleted
                     deleted_images.append({
@@ -376,38 +371,16 @@ max_images_per_subreddit = 25
                         'file_path': img_data[13] if len(img_data) > 13 else None
                     })
             
-            # Rename deleted files and update database
+            # Only update database status, do not rename or move files
             for img in deleted_images:
-                if img['file_path'] and os.path.exists(img['file_path']):
-                    old_path = Path(img['file_path'])
-                    if '_deleted' not in old_path.name:
-                        new_filename = old_path.stem + '_deleted' + old_path.suffix
-                        new_path = old_path.parent / new_filename
-                        
-                        old_path.rename(new_path)
-                        
-                        # Update metadata
-                        self._mark_image_as_deleted(img['url'])
-                        print(f"📝 Marked as deleted: {new_filename}")
-        
+                self._mark_image_as_deleted(img['url'])
+                print(f"📝 Marked as deleted in DB: {img['filename']}")
+
         except Exception as e:
             print(f"❌ Error checking deleted images: {e}")
         
         return deleted_images
 
-    def _mark_image_as_deleted(self, url: str):
-        """Mark image as deleted in database."""
-        try:
-            conn = sqlite3.connect(str(self.metadata_db))
-            cursor = conn.cursor()
-            
-            cursor.execute('UPDATE images SET is_deleted = TRUE WHERE url = ?', (url,))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            print(f"⚠️  Warning: Could not mark image as deleted: {e}")
 
     def parse_scrape_list(self, section: str) -> List[str]:
         """Parse a config section for scraping lists."""
@@ -528,20 +501,24 @@ max_images_per_subreddit = 25
 
     def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
                                     time_filter: str = 'all') -> List[Dict]:
-        """Get image URLs from a subreddit."""
+        """Get image URLs from a subreddit, stopping when a previously downloaded image is found."""
         if not self.reddit:
             print("❌ Authentication required to access subreddit content")
             return []
         
         try:
             sub = self.reddit.subreddit(subreddit)
-            posts = sub.hot(limit=limit)
-            
+            posts = sub.new(limit=limit)  # Ensure we use 'new' for newest posts
+
             image_posts = []
             for post in posts:
                 if not post.is_self:
                     url = post.url
                     if self._is_image_url(url):
+                        # Check if image was already downloaded
+                        if self._get_image_record(url):
+                            print(f"🛑 Already downloaded: {url}. Stopping further scraping for r/{subreddit}.")
+                            break
                         image_posts.append({
                             'title': post.title,
                             'url': url,
