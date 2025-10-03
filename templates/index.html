@@ -3,6 +3,14 @@
 {% block title %}Gallery - Reddit Image Browser{% endblock %}
 
 {% block content %}
+{% set stats = stats if stats is defined else {} %}
+<!-- Select2 CSS -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<style>
+.deleted-image {
+    background-color: #ffe5e5 !important;
+}
+</style>
 <!-- Header with stats -->
 <div class="row mb-4">
     <div class="col-12">
@@ -38,38 +46,41 @@
             <div class="card-body">
                 <form method="GET" id="filterForm">
                     <div class="row g-3">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="search" class="form-label">Search</label>
                             <input type="text" class="form-control" id="search" name="search" 
                                    placeholder="Title, author, filename..." value="{{ search }}">
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="subreddit" class="form-label">Subreddit</label>
-                            <select class="form-select" id="subreddit" name="subreddit">
+                            <select class="form-select searchable-select" id="subreddit" name="subreddit">
                                 <option value="">All Subreddits</option>
                                 {% for sr in subreddits %}
-                                <option value="{{ sr }}" {% if sr == filter_subreddit %}selected{% endif %}>{{ sr }}</option>
+                                    <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-4">
-                            <label for="user" class="form-label">Author</label>
-                            <select class="form-select" id="user" name="user">
-                                <option value="">All Authors</option>
+                        <div class="col-md-3">
+                            <label for="user" class="form-label">User</label>
+                            <select class="form-select searchable-select" id="user" name="user">
+                                <option value="">All Users</option>
                                 {% for u in users %}
-                                <option value="{{ u }}" {% if u == filter_user %}selected{% endif %}>{{ u }}</option>
+                                    <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
                                 {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="deleted" class="form-label">Deleted</label>
+                            <select class="form-select searchable-select" id="deleted" name="deleted">
+                                <option value="">All</option>
+                                <option value="1" {% if filter_deleted == '1' %}selected{% endif %}>Only Deleted</option>
+                                <option value="0" {% if filter_deleted == '0' %}selected{% endif %}>Only Active</option>
                             </select>
                         </div>
                     </div>
                     <div class="row mt-3">
-                        <div class="col-12">
-                            <button type="submit" class="btn btn-light me-2">
-                                <i class="fas fa-search"></i> Filter
-                            </button>
-                            <a href="/" class="btn btn-outline-light">
-                                <i class="fas fa-times"></i> Clear
-                            </a>
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-primary">Apply Filters</button>
                         </div>
                     </div>
                 </form>
@@ -122,7 +133,7 @@
 <div class="row" id="imageGallery">
     {% for image in images %}
     <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
-        <div class="card image-card h-100">
+        <div class="card image-card h-100 {% if image.is_deleted %}deleted-image{% endif %}">
             {% if image.web_path %}
             <img src="/image/{{ image.web_path }}" class="image-thumbnail card-img-top" 
                  alt="{{ image.title or 'Reddit Image' }}">
@@ -201,14 +212,21 @@
 </div>
 {% endif %}
 
+<!-- Select2 JS -->
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
-// Auto-submit form on dropdown change
-document.getElementById('subreddit').addEventListener('change', function() {
-    document.getElementById('filterForm').submit();
-});
-
-document.getElementById('user').addEventListener('change', function() {
-    document.getElementById('filterForm').submit();
+// Initialize Select2 on all searchable selects
+$(document).ready(function() {
+    $('.searchable-select').select2({
+        width: '100%',
+        theme: 'bootstrap-5',
+        placeholder: 'Select an option',
+        allowClear: true
+    });
+    // Auto-submit form on dropdown change
+    $('#subreddit, #user, #deleted').on('change', function() {
+        $('#filterForm').submit();
+    });
 });
 
 // Loading animation for images

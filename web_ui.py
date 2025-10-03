@@ -34,8 +34,8 @@ class RedditImageUI:
         self.download_folder = Path(download_folder)
         self.metadata_db = self.download_folder / metadata_db
         
-    def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None):
-        """Get images from database with filtering."""
+    def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None):
+        """Get images from database with filtering, including deleted filter."""
         try:
             conn = sqlite3.connect(str(self.metadata_db))
             conn.row_factory = sqlite3.Row  # Enable column access by name
@@ -57,6 +57,12 @@ class RedditImageUI:
                 query += " AND author LIKE ?"
                 params.append(f"%{user}%")
             
+            if deleted is not None:
+                if deleted:
+                    query += " AND is_deleted = 1"
+                else:
+                    query += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+
             query += " ORDER BY download_date DESC, download_time DESC"
             query += f" LIMIT {limit} OFFSET {offset}"
             
@@ -153,7 +159,13 @@ def index():
     search = request.args.get('search', '')
     subreddit = request.args.get('subreddit', '')
     user = request.args.get('user', '')
-    
+    deleted = request.args.get('deleted', '')
+    deleted_filter = None
+    if deleted == '1':
+        deleted_filter = True
+    elif deleted == '0':
+        deleted_filter = False
+
     per_page = 20
     offset = (page - 1) * per_page
     
@@ -162,7 +174,8 @@ def index():
         offset=offset, 
         search=search if search else None,
         subreddit=subreddit if subreddit else None,
-        user=user if user else None
+        user=user if user else None,
+        deleted=deleted_filter
     )
     
     stats = ui_handler.get_stats()
@@ -177,7 +190,8 @@ def index():
                          current_page=page,
                          search=search,
                          filter_subreddit=subreddit,
-                         filter_user=user)
+                         filter_user=user,
+                         filter_deleted=deleted)
 
 @app.route('/api/images')
 def api_images():
@@ -186,7 +200,13 @@ def api_images():
     search = request.args.get('search', '')
     subreddit = request.args.get('subreddit', '')
     user = request.args.get('user', '')
-    
+    deleted = request.args.get('deleted', '')
+    deleted_filter = None
+    if deleted == '1':
+        deleted_filter = True
+    elif deleted == '0':
+        deleted_filter = False
+
     per_page = 20
     offset = (page - 1) * per_page
     
@@ -195,7 +215,8 @@ def api_images():
         offset=offset, 
         search=search if search else None,
         subreddit=subreddit if subreddit else None,
-        user=user if user else None
+        user=user if user else None,
+        deleted=deleted_filter
     )
     
     return jsonify(images)
@@ -234,7 +255,11 @@ def image_details(image_id):
                 relative_path = Path(image_dict['file_path']).relative_to(ui_handler.download_folder)
                 image_dict['web_path'] = str(relative_path).replace('\\', '/')
             conn.close()
-            return render_template('details.html', image=image_dict)
+            # Pass stats, subreddits, users for template compatibility
+            stats = ui_handler.get_stats()
+            subreddits = ui_handler.get_subreddits()
+            users = ui_handler.get_users()
+            return render_template('details.html', image=image_dict, stats=stats, subreddits=subreddits, users=users)
         else:
             conn.close()
             return "Image not found", 404
