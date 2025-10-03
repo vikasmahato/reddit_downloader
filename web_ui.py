@@ -29,19 +29,24 @@ def inject_template_globals():
     }
     return template_globals
 
-@app.template_filter('format_datetime')
-def format_datetime_filter(value):
-    try:
-        return datetime.fromtimestamp(float(value)).strftime('%Y-%m-%d %H:%M')
-    except Exception:
-        return ''
-
+# Register a custom Jinja2 filter for JSON loading
 @app.template_filter('loads')
-def loads_filter(value):
+def jinja_json_loads(s):
     try:
-        return json.loads(value)
+        return json.loads(s) if s else []
     except Exception:
         return []
+
+# Register a custom Jinja2 filter for formatting Unix timestamps
+@app.template_filter('format_datetime')
+def jinja_format_datetime(value):
+    try:
+        ts = float(value)
+        dt = datetime.utcfromtimestamp(ts)
+        # Format: day-Mon-year hour:minute am/pm (e.g., 03-Oct-2025 02:15 PM)
+        return dt.strftime('%d-%b-%Y %I:%M %p')
+    except Exception:
+        return ''
 
 class RedditImageUI:
     def __init__(self, download_folder="reddit_downloads", metadata_db="metadata.db"):
@@ -280,6 +285,74 @@ def image_details(image_id):
             
     except Exception as e:
         return f"Error: {e}", 500
+
+@app.route('/api/post_comment', methods=['POST'])
+def post_comment():
+    """Post a comment to Reddit and save it locally."""
+    import json
+    data = request.get_json()
+    image_id = data.get('image_id')
+    comment_text = data.get('comment', '').strip()
+    if not image_id or not comment_text:
+        return jsonify({'success': False, 'error': 'Missing image ID or comment.'}), 400
+
+    # Get image info from DB
+    conn = sqlite3.connect(str(ui_handler.metadata_db))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM images WHERE id = ?", (image_id,))
+    image = cursor.fetchone()
+    if not image:
+        return jsonify({'success': False, 'error': 'Image not found.'}), 404
+
+    # Get Reddit post ID or permalink
+    reddit_post_id = image['reddit_id'] if 'reddit_id' in image.keys() else None
+    permalink = image['permalink'] if 'permalink' in image.keys() else None
+    if not reddit_post_id and not permalink:
+        return jsonify({'success': False, 'error': 'No Reddit post info.'}), 400
+
+    # Post comment to Reddit
+    try:
+        from reddit_image_downloader import RedditImageDownloader
+        rid = RedditImageDownloader()
+        reddit = rid.reddit
+        submission = None
+        if reddit_post_id:
+            submission = reddit.submission(id=reddit_post_id)
+        elif permalink:
+            # Extract ID from permalink
+            import re
+            m = re.search(r'/comments/([a-z0-9]+)/', permalink)
+            if m:
+                submission = reddit.submission(id=m.group(1))
+        if not submission:
+            return jsonify({'success': False, 'error': 'Could not resolve Reddit submission.'}), 400
+        # Actually post the comment
+        reddit_comment = submission.reply(comment_text)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Reddit error: {e}'}), 500
+
+    # Save comment locally
+    try:
+        # Load existing comments
+        comments_json = image['comments'] if 'comments' in image.keys() else '[]'
+        comments = json.loads(comments_json) if comments_json else []
+        new_comment = {
+            'author': reddit_comment.author.name if reddit_comment.author else 'You',
+            'body': reddit_comment.body,
+            'score': reddit_comment.score,
+            'created_utc': reddit_comment.created_utc
+        }
+        comments.insert(0, new_comment)
+        # Save back to DB
+        cursor.execute("UPDATE images SET comments = ? WHERE id = ?", (json.dumps(comments), image_id))
+        conn.commit()
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Local save error: {e}'}), 500
+    finally:
+        conn.close()
+
+    return jsonify({'success': True, 'comment': new_comment})
 
 if __name__ == '__main__':
     # Check if metadata database exists

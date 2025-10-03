@@ -150,28 +150,45 @@
     <div class="col-md-4">
 
          {% if image.comments %}
-                <div class="card">
-                    <div class="card-header">
-                        <h6><i class="fas fa-comments"></i> Top Comments</h6>
-                    </div>
-                    <div class="card-body">
-                        {% set comments = image.comments | safe | loads %}
-                        {% if comments and comments|length > 0 %}
-                        <ul class="list-group">
-                            {% for comment in comments %}
-                            <li class="list-group-item">
-                                <div class="fw-bold" style="font-size:0.80em;">{{ comment.author or 'Unknown' }}</div>
-                                <div class="text-muted" style="font-size:0.50em;">Score: {{ comment.score }} | {{ comment.created_utc | format_datetime }}</div>
-                                <div style="font-size:0.80em;">{{ comment.body }}</div>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                        {% else %}
-                        <div class="text-muted">No comments found.</div>
-                        {% endif %}
-                    </div>
+    <!-- Comment Input Box -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <h6><i class="fas fa-plus"></i> Add a Comment</h6>
+        </div>
+        <div class="card-body">
+            <form id="commentForm">
+                <div class="mb-2">
+                    <textarea class="form-control" id="commentText" name="comment" rows="2" placeholder="Write your comment..."></textarea>
                 </div>
-                {% endif %}
+                <button type="submit" class="btn btn-primary btn-sm">Post Comment</button>
+                <div id="commentStatus" class="mt-2" style="display:none;"></div>
+            </form>
+        </div>
+    </div>
+    <!-- End Comment Input Box -->
+
+    <div class="card">
+        <div class="card-header">
+            <h6><i class="fas fa-comments"></i> Top Comments</h6>
+        </div>
+        <div class="card-body">
+            {% set comments = image.comments | safe | loads %}
+            {% if comments and comments|length > 0 %}
+            <ul class="list-group" id="commentsList">
+                {% for comment in comments %}
+                <li class="list-group-item">
+                    <div class="fw-bold" style="font-size:0.80em;">{{ comment.author or 'Unknown' }}</div>
+                    <div class="text-muted" style="font-size:0.50em;">Score: {{ comment.score }} | {{ comment.created_utc | format_datetime }}</div>
+                    <div style="font-size:0.80em;">{{ comment.body }}</div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="text-muted">No comments found.</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 
         <div class="card">
             <div class="card-header">
@@ -260,6 +277,58 @@ document.querySelectorAll('code').forEach(code => {
     
     code.style.cursor = 'pointer';
     code.title = 'Click to copy';
+});
+
+// AJAX for comment submission
+document.getElementById('commentForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var commentText = document.getElementById('commentText').value.trim();
+    var statusDiv = document.getElementById('commentStatus');
+    if (!commentText) {
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-warning';
+        statusDiv.textContent = 'Comment cannot be empty.';
+        return;
+    }
+    statusDiv.style.display = 'none';
+    fetch('/api/post_comment', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            image_id: '{{ image.id }}',
+            comment: commentText
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Add new comment to the top of the list
+            var commentsList = document.getElementById('commentsList');
+            var newComment = document.createElement('li');
+            newComment.className = 'list-group-item';
+            newComment.innerHTML = `<div class='fw-bold' style='font-size:0.80em;'>${data.comment.author || 'You'}</div>
+                <div class='text-muted' style='font-size:0.50em;'>Score: ${data.comment.score || 1} | just now</div>
+                <div style='font-size:0.80em;'>${data.comment.body}</div>`;
+            if (commentsList) {
+                commentsList.prepend(newComment);
+            }
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'alert alert-success';
+            statusDiv.textContent = 'Comment posted successfully!';
+            document.getElementById('commentText').value = '';
+        } else {
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'alert alert-danger';
+            statusDiv.textContent = data.error || 'Failed to post comment.';
+        }
+    })
+    .catch(() => {
+        statusDiv.style.display = 'block';
+        statusDiv.className = 'alert alert-danger';
+        statusDiv.textContent = 'Network error.';
+    });
 });
 </script>
 
