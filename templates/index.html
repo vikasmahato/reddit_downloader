@@ -88,7 +88,8 @@
             </div>
             <div class="card-body">
                 <div class="row">
-                    {% for subreddit, count in stats.subreddit_counts|dictsort(by='value', reverse=True)[:6] %}
+                    {% set sorted_subs = stats.subreddit_counts.items() | list | sort(attribute='1', reverse=True) %}
+                    {% for subreddit, count in sorted_subs[:6] %}
                     <div class="col-md-2 text-center">
                         <div class="border rounded p-2">
                             <a href="?subreddit={{ subreddit }}" class="text-decoration-none">
