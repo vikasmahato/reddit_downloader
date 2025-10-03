@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}Gallery - Reddit Image Browser{% endblock %}
+
+{% block content %}
+<!-- Header with stats -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <h3>{{ stats.total_images or 0 }}</h3>
+                        <small>Total Images</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h3>{{ "%.1f"|format(stats.total_size_mb or 0) }}</h3>
+                        <small>MB Downloaded</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h3>{{ stats.total_subreddits or 0 }}</h3>
+                        <small>Subreddits</small>
+                    </div>
+                    <div class="col-md-3">
+                        <h3>{{ stats.total_users or 0 }}</h3>
+                        <small>Unique Authors</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card filter-card">
+            <div class="card-body">
+                <form method="GET" id="filterForm">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="search" class="form-label">Search</label>
+                            <input type="text" class="form-control" id="search" name="search" 
+                                   placeholder="Title, author, filename..." value="{{ search }}">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="subreddit" class="form-label">Subreddit</label>
+                            <select class="form-select" id="subreddit" name="subreddit">
+                                <option value="">All Subreddits</option>
+                                {% for sr in subreddits %}
+                                <option value="{{ sr }}" {% if sr == filter_subreddit %}selected{% endif %}>{{ sr }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="user" class="form-label">Author</label>
+                            <select class="form-select" id="user" name="user">
+                                <option value="">All Authors</option>
+                                {% for u in users %}
+                                <option value="{{ u }}" {% if u == filter_user %}selected{% endif %}>{{ u }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-light me-2">
+                                <i class="fas fa-search"></i> Filter
+                            </button>
+                            <a href="/" class="btn btn-outline-light">
+                                <i class="fas fa-times"></i> Clear
+                            </a>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Top Subreddits -->
+{% if stats.subreddit_counts %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-bar"></i> Top Subreddits</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for subreddit, count in stats.subreddit_counts|dictsort(by='value', reverse=True)[:6] %}
+                    <div class="col-md-2 text-center">
+                        <div class="border rounded p-2">
+                            <a href="?subreddit={{ subreddit }}" class="text-decoration-none">
+                                <strong>{{ subreddit }}</strong><br>
+                                <small class="text-muted">{{ count }} images</small>
+                            </a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Image Gallery -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4><i class="fas fa-images"></i> Image Gallery</h4>
+            <div>
+                <span class="badge bg-primary">{{ images|length }} shown</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if images %}
+<div class="row" id="imageGallery">
+    {% for image in images %}
+    <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
+        <div class="card image-card h-100">
+            {% if image.web_path %}
+            <img src="/image/{{ image.web_path }}" class="image-thumbnail card-img-top" 
+                 alt="{{ image.title or 'Reddit Image' }}">
+            {% else %}
+            <div class="image-thumbnail bg-secondary d-flex align-items-center justify-content-center">
+                <i class="fas fa-image fa-3x text-white"></i>
+            </div>
+            {% endif %}
+            
+            <div class="card-body">
+                <h6 class="card-title">{{ image.title[:50] + '...' if image.title and image.title|length > 50 else image.title or 'Untitled' }}</h6>
+                
+                <div class="metadata-text">
+                    <div><i class="fas fa-subreddit"></i> <strong>r/{{ image.subreddit or 'Unknown' }}</strong></div>
+                    <div><i class="fas fa-user"></i> u/{{ image.author or 'Unknown' }}</div>
+                    <div><i class="fas fa-calendar"></i> {{ image.download_date }}</div>
+                    {% if image.file_size %}
+                    <div><i class="fas fa-file"></i> {{ "%.1f"|format(image.file_size/1024) }} KB</div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="card-footer bg-transparent border-0">
+                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                    <a href="/details/{{ image.id }}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-info-circle"></i> Details
+                    </a>
+                    {% if image.web_path %}
+                    <a href="/image/{{ image.web_path }}" target="_blank" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-external-link-alt"></i> View
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+<div class="row">
+    <div class="col-12 d-flex justify-content-center">
+        <nav aria-label="Page navigation">
+            <ul class="pagination">
+                {% if current_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ current_page - 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">Previous</a>
+                </li>
+                {% endif %}
+                
+                {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
+                <li class="page-item {% if page_num == current_page %}active{% endif %}">
+                    <a class="page-link" href="?page={{ page_num }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">{{ page_num }}</a>
+                </li>
+                {% endfor %}
+                
+                {% if images|length == 20 %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ current_page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">Next</a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+</div>
+
+{% else %}
+<div class="row">
+    <div class="col-12">
+        <div class="alert alert-info text-center">
+            <i class="fas fa-info-circle fa-3x mb-3"></i>
+            <h4>No images found</h4>
+            <p>Try adjusting your search filters or download some images first!</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script>
+// Auto-submit form on dropdown change
+document.getElementById('subreddit').addEventListener('change', function() {
+    document.getElementById('filterForm').submit();
+});
+
+document.getElementById('user').addEventListener('change', function() {
+    document.getElementById('filterForm').submit();
+});
+
+// Loading animation for images
+document.addEventListener('DOMContentLoaded', function() {
+    const images = document.querySelectorAll('.image-thumbnail');
+    images.forEach(img => {
+        img.addEventListener('load', function() {
+            this.style.opacity = '1';
+        });
+        img.addEventListener('error', function() {
+            this.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="300" height="200"%3E%3Crect width="300" height="200" fill="%23ddd"/%3E%3Ctext x="150" y="100" text-anchor="middle" dy=".3em"%3EBroken Image%3C/text%3E%3C/svg%3E';
+        });
+    });
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Image Details - Reddit Image Browser{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4><i class="fas fa-info-circle"></i> Image Details</h4>
+                    <span class="badge bg-{% if image.is_deleted %}danger{% else %}success{% endif %}">
+                        {% if image.is_deleted %}
+                        <i class="fas fa-trash"></i> Deleted
+                        {% else %}
+                        <i class="fas fa-check"></i> Active
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if image.web_path %}
+                <div class="text-center mb-4">
+                    <img src="/image/{{ image.web_path }}" class="img-fluid rounded shadow" 
+                         alt="{{ image.title or 'Reddit Image' }}" style="max-height: 600px;">
+                </div>
+                {% endif %}
+                
+                <h5>{{ image.title or 'Untitled' }}</h5>
+                
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-subreddit"></i> Reddit Information</h6>
+                        <table class="table table-borderless table-sm">
+                            <tr>
+                                <td><strong>Subreddit:</strong></td>
+                                <td><a href="/?subreddit={{ image.subreddit }}" class="text-decoration-none">
+                                    r/{{ image.subreddit or 'Unknown' }}
+                                </a></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Author:</strong></td>
+                                {% if image.author %}
+                                <td><a href="/?user={{ image.author }}" class="text-decoration-none">
+                                    u/{{ image.author }}
+                                </a></td>
+                                {% else %}
+                                <td>Unknown</td>
+                                {% endif %}
+                            </tr>
+                            <tr>
+                                <td><strong>Posted:</strong></td>
+                                <td>{{ image.download_date }} {{ image.download_time }}</td>
+                            </tr>
+                            {% if image.permalink %}
+                            <tr>
+                                <td><strong>Reddit Link:</strong></td>
+                                <td><a href="https://reddit.com{{ image.permalink }}" target="_blank" 
+                                       class="btn btn-sm btn-outline-primary">
+                                    <i class="fab fa-reddit"></i> View on Reddit
+                                </a></td>
+                            </tr>
+                            {% endif %}
+                        </table>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-file"></i> File Information</h6>
+                        <table class="table table-borderless table-sm">
+                            <tr>
+                                <td><strong>Filename:</strong></td>
+                                <td><code>{{ image.filename or 'Unknown' }}</code></td>
+                            </tr>
+                            {% if image.file_size %}
+                            <tr>
+                                <td><strong>Size:</strong></td>
+                                <td>{{ "%.1f"|format(image.file_size/1024) }} KB ({{ "%.1f"|format(image.file_size/1024/1024) }} MB)</td>
+                            </tr>
+                            {% endif %}
+                            {% if image.file_hash -->
+                            <tr>
+                                <td><strong>MD5 Hash:</strong></td>
+                                <td><code style="font-size: 0.8rem;">{{ image.file_hash }}</code></td>
+                            </tr>
+                            {% endif %}
+                            <tr>
+                                <td><strong>Downloaded:</strong></td>
+                                <td>{{ image.download_date }} at {{ image.download_time }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>File Path:</strong></td>
+                                <td><code style="font-size: 0.8rem;">{{ image.file_path }}</code></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        {% if image.web_path %}
+                        <a href="/image/{{ image.web_path }}" target="_blank" class="btn btn-primary">
+                            <i class="fas fa-external-link-alt"></i> View Full Size
+                        </a>
+                        <a href="/image/{{ image.web_path }}" download="{{ image.filename }}" class="btn btn-outline-primary">
+                            <i class="fas fa-download"></i> Download
+                        </a>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <a href="/" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to Gallery
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-chart-bar"></i> Quick Stats</h6>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item d-flex justify-content-between">
+                        <span>Database ID:</span>
+                        <code>{{ image.id }}</code>
+                    </div>
+                    <div class="list-group-item d-flex justify-content-between">
+                        <span>Status:</span>
+                        <span class="badge bg-{% if image.is_deleted %}danger{% else %}success{% endif %}">
+                            {% if image.is_deleted %}Deleted{% else %}Active{% endif %}
+                        </span>
+                    </div>
+                    {% if image.file_hash %}
+                    <div class="list-group-item">
+                        <small class="text-muted">File Integrity Verified</small><br>
+                        <code style="font-size: 0.7rem;">{{ image.file_hash }}</code>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6><i class="fas fa-link"></i> Quick Links</h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    {% if image.subreddit %}
+                    <a href="/?subreddit={{ image.subreddit }}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-filter"></i> More from r/{{ image.subreddit }}
+                    </a>
+                    {% endif %}
+                    {% if image.author %}
+                    <a href="/?user={{ image.author }}" class="btn btn-outline-info btn-sm">
+                        <i class="fas fa-user"></i> More from u/{{ image.author }}
+                    </a>
+                    {% endif %}
+                    {% if image.permalink %}
+                    <a href="https://reddit.com{{ image.permalink }}" target="_blank" class="btn btn-outline-danger btn-sm">
+                        <i class="fab fa-reddit"></i> Original Reddit Post
+                    </a>
+                    {% endif %}
+                    <a href="/" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-home"></i> Gallery Home
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Raw JSON Data (for debugging) -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6><i class="fas fa-code"></i> Raw Metadata</h6>
+            </div>
+            <div class="card-body">
+                <pre><code>{{ image | tojson(indent=2) }}</code></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Auto-copy filename on click
+document.querySelectorAll('code').forEach(code => {
+    code.addEventListener('click', function() {
+        const text = this.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            // Show a small toast notification
+            const toast = document.createElement('div');
+            toast.className = 'position-fixed top-0 end-0 p-3';
+            toast.innerHTML = '<div class="toast show" role="alert"><div class="toast-body">Copied to clipboard!</div></div>';
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2000);
+        });
+    });
+    
+    code.style.cursor = 'pointer';
+    code.title = 'Click to copy';
+});
+</script>
+
+{% endblock %}
