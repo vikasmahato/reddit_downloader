@@ -1,0 +1,9 @@
+[reddit]
+client_id = YOUR_ACTUAL_CLIENT_ID_HERE
+client_secret = YOUR_ACTUAL_SECRET_HERE
+user_agent = reddit_image_downloader
+# username and password are optional - leave empty for client credentials only
+
+[general]
+download_folder = downloads
+max_images_per_subreddit = 25
