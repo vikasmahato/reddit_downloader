@@ -80,7 +80,7 @@
                         <small style="font-size:0.8em;">GB Downloaded</small>
                     </div>
                     <div class="col-md-4">
-                        <h6 style="margin-bottom:0.1em; font-size:1.1em;">{{ stats.total_users or 0 }}</h6>
+                        <h6 style="margin-bottom:0.1em; font-size:1.1em;">{{ stats.yth or 0 }}</h6>
                         <small style="font-size:0.8em;">Authors</small>
                     </div>
                 </div>
@@ -119,12 +119,27 @@
                                 {% endfor %}
                             </select>
                         </div>
+                        <div class="col-md-3">
+                            <label for="hidden_users" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Hide Authors</label>
+                            <select class="form-select form-select-sm searchable-select" id="hidden_users" name="hidden_users" multiple style="font-size:0.90em;">
+                                {% for u in users %}
+                                    <option value="{{ u }}" {% if hidden_users and u in hidden_users %}selected{% endif %}>{{ u }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                         <div class="col-md-2">
                             <label for="deleted" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Status</label>
                             <select class="form-select form-select-sm" id="deleted" name="deleted" style="font-size:0.90em;">
                                 <option value="">All</option>
                                 <option value="0" {% if filter_deleted == '0' %}selected{% endif %}>Active</option>
                                 <option value="1" {% if filter_deleted == '1' %}selected{% endif %}>Deleted</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label for="sort" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Sort By</label>
+                            <select class="form-select form-select-sm" id="sort" name="sort" style="font-size:0.90em;">
+                                <option value="">Newest</option>
+                                <option value="comments" {% if sort == 'comments' %}selected{% endif %}>Most Comments</option>
                             </select>
                         </div>
                         <div class="col-md-1 d-flex align-items-end gap-1">
@@ -189,8 +204,23 @@
     <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
         <div class="card image-card h-100 {% if image.is_deleted %}deleted-image{% endif %}">
             {% if image_urls[0] %}
-            <img src="{{ image_urls[0].strip() }}" class="image-thumbnail card-img-top"
+            <img src="/image/{{ image.web_path }}" class="image-thumbnail card-img-top"
                  alt="{{ image.title or 'Reddit Image' }}">
+            {% if image.exif %}
+            <div class="mt-2">
+                <h6>EXIF Information</h6>
+                <table class="table table-bordered table-sm">
+                    <tbody>
+                    {% for key, value in image.exif.items() %}
+                        <tr>
+                            <th>{{ key }}</th>
+                            <td>{{ value }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
             {% else %}
             <div class="image-thumbnail bg-secondary d-flex align-items-center justify-content-center">
                 <i class="fas fa-image fa-3x text-white"></i>
@@ -280,7 +310,11 @@ $(document).ready(function() {
         allowClear: true
     });
     // Auto-submit form on dropdown change
-    $('#subreddit, #user, #deleted').on('change', function() {
+    $('#subreddit, #user, #deleted, #sort').on('change', function() {
+        $('#filterForm').submit();
+    });
+    // Auto-submit form on hidden_users change
+    $('#hidden_users').on('change', function() {
         $('#filterForm').submit();
     });
     // Clear button functionality
@@ -288,7 +322,9 @@ $(document).ready(function() {
         $('#search').val('');
         $('#subreddit').val('').trigger('change');
         $('#user').val('').trigger('change');
+        $('#hidden_users').val('').trigger('change');
         $('#deleted').val('').trigger('change');
+        $('#sort').val('').trigger('change');
         $('#filterForm').submit();
     });
     // Scroll to gallery section on page load if hash is present

@@ -3,3 +3,4 @@ requests>=2.25.0
 pathlib
 configparser
 flask>=2.0.0
+Pillow

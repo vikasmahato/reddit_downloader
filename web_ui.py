@@ -14,6 +14,7 @@ import json
 from datetime import datetime
 import mimetypes
 import hashlib
+from PIL import Image, ExifTags
 
 app = Flask(__name__)
 
@@ -53,52 +54,53 @@ class RedditImageUI:
         self.download_folder = Path(download_folder)
         self.metadata_db = self.download_folder / metadata_db
         
-    def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None):
-        """Get images from database with filtering, including deleted filter."""
+    def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None, sort=None, hidden_users=None):
+        """Get images from database with filtering, including deleted filter, sorting, and hidden users."""
         try:
             conn = sqlite3.connect(str(self.metadata_db))
             conn.row_factory = sqlite3.Row  # Enable column access by name
             cursor = conn.cursor()
-            
             query = "SELECT * FROM images WHERE 1=1"
             params = []
-            
             if search:
                 query += " AND (title LIKE ? OR author LIKE ? OR filename LIKE ?)"
                 search_term = f"%{search}%"
                 params.extend([search_term, search_term, search_term])
-            
             if subreddit:
                 query += " AND subreddit LIKE ?"
                 params.append(f"%{subreddit}%")
-            
             if user:
                 query += " AND author LIKE ?"
                 params.append(f"%{user}%")
-            
             if deleted is not None:
                 if deleted:
                     query += " AND is_deleted = 1"
                 else:
                     query += " AND (is_deleted = 0 OR is_deleted IS NULL)"
-
             query += " ORDER BY download_date DESC, download_time DESC"
             query += f" LIMIT {limit} OFFSET {offset}"
-            
             cursor.execute(query, params)
             results = cursor.fetchall()
-            
-            # Convert to list of dictionaries
             images = []
             for row in results:
                 img_dict = dict(row)
-                # Convert paths to relative paths for web access
                 if img_dict['file_path']:
                     relative_path = Path(img_dict['file_path']).relative_to(self.download_folder)
                     img_dict['web_path'] = str(relative_path).replace('\\', '/')
+                # Count comments
+                try:
+                    comments = json.loads(img_dict.get('comments', '[]')) if img_dict.get('comments') else []
+                    img_dict['comment_count'] = len(comments)
+                except Exception:
+                    img_dict['comment_count'] = 0
                 images.append(img_dict)
-            
             conn.close()
+            # Filter out hidden users
+            if hidden_users:
+                images = [img for img in images if img.get('author') not in hidden_users]
+            # Sort by comment count if requested
+            if sort == 'comments':
+                images.sort(key=lambda x: x.get('comment_count', 0), reverse=True)
             return images
             
         except Exception as e:
@@ -174,6 +176,33 @@ class RedditImageUI:
 # Initialize the UI handler
 ui_handler = RedditImageUI()
 
+def extract_exif_data(image_path):
+    try:
+        from PIL.TiffImagePlugin import IFDRational
+        with Image.open(image_path) as img:
+            exif_data = img._getexif()
+            if not exif_data:
+                return None
+            exif = {}
+            for tag, value in exif_data.items():
+                tag_name = ExifTags.TAGS.get(tag, tag)
+                # Convert bytes to string for JSON serialization
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8', errors='replace')
+                    except Exception:
+                        value = value.hex()
+                # Convert IFDRational to float
+                elif 'IFDRational' in str(type(value)):
+                    try:
+                        value = float(value)
+                    except Exception:
+                        value = str(value)
+                exif[tag_name] = value
+            return exif
+    except Exception:
+        return None
+
 @app.route('/')
 def index():
     """Main gallery page."""
@@ -182,30 +211,33 @@ def index():
     subreddit = request.args.get('subreddit', '')
     user = request.args.get('user', '')
     deleted = request.args.get('deleted', '')
+    sort = request.args.get('sort', '')
+    hidden_users = request.args.getlist('hidden_users')
     deleted_filter = None
     if deleted == '1':
         deleted_filter = True
     elif deleted == '0':
         deleted_filter = False
-
     per_page = 20
     offset = (page - 1) * per_page
-    
     images = ui_handler.get_all_images(
         limit=per_page, 
         offset=offset, 
         search=search if search else None,
         subreddit=subreddit if subreddit else None,
         user=user if user else None,
-        deleted=deleted_filter
+        deleted=deleted_filter,
+        sort=sort if sort else None,
+        hidden_users=hidden_users if hidden_users else None
     )
-    
+    for img in images:
+        if img.get('file_path'):
+            img['exif'] = extract_exif_data(img['file_path'])
     stats = ui_handler.get_stats()
     subreddits = ui_handler.get_subreddits()
     users = ui_handler.get_users()
-    
-    return render_template('index.html', 
-                         images=images, 
+    return render_template('index.html',
+                         images=images,
                          stats=stats,
                          subreddits=subreddits,
                          users=users,
@@ -213,7 +245,9 @@ def index():
                          search=search,
                          filter_subreddit=subreddit,
                          filter_user=user,
-                         filter_deleted=deleted)
+                         filter_deleted=deleted,
+                         sort=sort,
+                         hidden_users=hidden_users)
 
 @app.route('/api/images')
 def api_images():
@@ -276,6 +310,9 @@ def image_details(image_id):
             if image_dict['file_path']:
                 relative_path = Path(image_dict['file_path']).relative_to(ui_handler.download_folder)
                 image_dict['web_path'] = str(relative_path).replace('\\', '/')
+                # Extract EXIF data
+                exif = extract_exif_data(image_dict['file_path'])
+                image_dict['exif'] = exif
             conn.close()
             # Pass stats, subreddits, users for template compatibility
             stats = ui_handler.get_stats()
@@ -356,6 +393,25 @@ def post_comment():
         conn.close()
 
     return jsonify({'success': True, 'comment': new_comment})
+
+@app.route('/api/comments/<int:image_id>')
+def get_comments(image_id):
+    """Return latest comments for an image."""
+    try:
+        conn = sqlite3.connect(str(ui_handler.metadata_db))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT comments FROM images WHERE id = ?", (image_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row['comments']:
+            import json
+            comments = json.loads(row['comments'])
+            return jsonify({'success': True, 'comments': comments})
+        else:
+            return jsonify({'success': True, 'comments': []})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
     # Check if metadata database exists
