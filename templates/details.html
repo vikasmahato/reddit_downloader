@@ -116,7 +116,7 @@ pre code {
                             <div class="carousel-inner">
                                 {% for img_url in image_urls %}
                                 <div class="carousel-item {% if loop.index0 == 0 %}active{% endif %}">
-                                    <img src="/reddit_downloads/{{ image.web_path }}" class="d-block rounded shadow mx-auto" style="max-width: 100%; height: auto; max-height: 600px;" alt="Gallery Image">
+                                    <img src="{{ img_url.strip() }}" class="d-block rounded shadow mx-auto" style="max-width: 100%; height: auto; max-height: 600px;" alt="Gallery Image">
                                 </div>
                                 {% endfor %}
                             </div>
