@@ -110,34 +110,37 @@ class RedditImageUI:
         try:
             conn = sqlite3.connect(str(self.metadata_db))
             cursor = conn.cursor()
-            
+
             # Total images
             cursor.execute("SELECT COUNT(*) FROM images")
             total_images = cursor.fetchone()[0]
-            
+
             # Images by subreddit
             cursor.execute("SELECT subreddit, COUNT(*) FROM images GROUP BY subreddit ORDER BY COUNT(*) DESC")
             subreddit_counts = dict(cursor.fetchall())
-            
-            # Images by user
+
+            # Top authors (for display)
             cursor.execute("SELECT author, COUNT(*) FROM images WHERE author != '' GROUP BY author ORDER BY COUNT(*) DESC LIMIT 10")
             user_counts = dict(cursor.fetchall())
-            
+
+            # All unique authors (for stats)
+            cursor.execute("SELECT COUNT(DISTINCT author) FROM images WHERE author != ''")
+            total_users = cursor.fetchone()[0]
+
             # File size stats
             cursor.execute("SELECT SUM(file_size) FROM images WHERE file_size > 0")
             total_size = cursor.fetchone()[0] or 0
-            
+
             conn.close()
-            
+
             return {
                 'total_images': total_images,
                 'total_size_mb': round(total_size / (1024 * 1024), 2),
                 'subreddit_counts': subreddit_counts,
                 'top_users': user_counts,
                 'total_subreddits': len(subreddit_counts),
-                'total_users': len(user_counts)
+                'total_users': total_users
             }
-            
         except Exception as e:
             print(f"Stats error: {e}")
             return {}

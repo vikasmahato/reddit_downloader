@@ -10,28 +10,47 @@
 .deleted-image {
     background-color: #ffe5e5 !important;
 }
+.image-thumbnail {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 8px 8px 0 0;
+    background: #181a1b !important;
+    border: 1px solid #222 !important;
+}
+.card-body {
+    padding: 0.5rem 0.5rem;
+}
+.card-title {
+    font-size: 0.95em;
+    margin-bottom: 0.3em;
+}
+.metadata-text {
+    font-size: 0.80em;
+    color: #b0b0b0 !important;
+}
+.card-footer .btn {
+    font-size: 0.85em;
+    padding: 0.2em 0.6em;
+}
 </style>
-<!-- Header with stats -->
-<div class="row mb-4">
+<!-- Compact Header with stats -->
+<div class="row mb-1">
     <div class="col-12">
-        <div class="card stat-card">
-            <div class="card-body">
-                <div class="row text-center">
-                    <div class="col-md-3">
-                        <h3>{{ stats.total_images or 0 }}</h3>
-                        <small>Total Images</small>
+        <div class="card stat-card" style="padding:0.25rem 0.25rem;">
+            <div class="card-body py-1 px-1">
+                <div class="row text-center align-items-center">
+                    <div class="col-md-4">
+                        <h6 style="margin-bottom:0.1em; font-size:1.1em;">{{ stats.total_images or 0 }}</h6>
+                        <small style="font-size:0.8em;">Total Images</small>
                     </div>
-                    <div class="col-md-3">
-                        <h3>{{ "%.1f"|format(stats.total_size_mb or 0) }}</h3>
-                        <small>MB Downloaded</small>
+                    <div class="col-md-4">
+                        <h6 style="margin-bottom:0.1em; font-size:1.1em;">{{ "%.1f"|format((stats.total_size_mb or 0)/1024) }}</h6>
+                        <small style="font-size:0.8em;">GB Downloaded</small>
                     </div>
-                    <div class="col-md-3">
-                        <h3>{{ stats.total_subreddits or 0 }}</h3>
-                        <small>Subreddits</small>
-                    </div>
-                    <div class="col-md-3">
-                        <h3>{{ stats.total_users or 0 }}</h3>
-                        <small>Unique Authors</small>
+                    <div class="col-md-4">
+                        <h6 style="margin-bottom:0.1em; font-size:1.1em;">{{ stats.total_users or 0 }}</h6>
+                        <small style="font-size:0.8em;">Authors</small>
                     </div>
                 </div>
             </div>
@@ -39,21 +58,21 @@
     </div>
 </div>
 
-<!-- Filters -->
-<div class="row mb-4">
+<!-- Compact Filters with Clear Button -->
+<div class="row mb-1">
     <div class="col-12">
-        <div class="card filter-card">
-            <div class="card-body">
+        <div class="card filter-card" style="padding:0.25rem 0.25rem;">
+            <div class="card-body py-1 px-1">
                 <form method="GET" id="filterForm">
-                    <div class="row g-3">
+                    <div class="row g-1 align-items-center">
                         <div class="col-md-3">
-                            <label for="search" class="form-label">Search</label>
-                            <input type="text" class="form-control" id="search" name="search" 
-                                   placeholder="Title, author, filename..." value="{{ search }}">
+                            <label for="search" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Search</label>
+                            <input type="text" class="form-control form-control-sm" id="search" name="search"
+                                   placeholder="Title, author, filename..." value="{{ search }}" style="font-size:0.90em;">
                         </div>
                         <div class="col-md-3">
-                            <label for="subreddit" class="form-label">Subreddit</label>
-                            <select class="form-select searchable-select" id="subreddit" name="subreddit">
+                            <label for="subreddit" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Subreddit</label>
+                            <select class="form-select form-select-sm searchable-select" id="subreddit" name="subreddit" style="font-size:0.90em;">
                                 <option value="">All Subreddits</option>
                                 {% for sr in subreddits %}
                                     <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
@@ -61,26 +80,29 @@
                             </select>
                         </div>
                         <div class="col-md-3">
-                            <label for="user" class="form-label">User</label>
-                            <select class="form-select searchable-select" id="user" name="user">
-                                <option value="">All Users</option>
+                            <label for="user" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Author</label>
+                            <select class="form-select form-select-sm searchable-select" id="user" name="user" style="font-size:0.90em;">
+                                <option value="">All Authors</option>
                                 {% for u in users %}
                                     <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <label for="deleted" class="form-label">Deleted</label>
-                            <select class="form-select searchable-select" id="deleted" name="deleted">
+                        <div class="col-md-2">
+                            <label for="deleted" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Status</label>
+                            <select class="form-select form-select-sm" id="deleted" name="deleted" style="font-size:0.90em;">
                                 <option value="">All</option>
-                                <option value="1" {% if filter_deleted == '1' %}selected{% endif %}>Only Deleted</option>
-                                <option value="0" {% if filter_deleted == '0' %}selected{% endif %}>Only Active</option>
+                                <option value="0" {% if filter_deleted == '0' %}selected{% endif %}>Active</option>
+                                <option value="1" {% if filter_deleted == '1' %}selected{% endif %}>Deleted</option>
                             </select>
                         </div>
-                    </div>
-                    <div class="row mt-3">
-                        <div class="col-12 text-end">
-                            <button type="submit" class="btn btn-primary">Apply Filters</button>
+                        <div class="col-md-1 d-flex align-items-end gap-1">
+                            <button type="submit" class="btn btn-primary btn-sm w-50" title="Filter">
+                                <i class="fas fa-filter"></i>
+                            </button>
+                            <button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm w-50" title="Clear">
+                                <i class="fas fa-times"></i>
+                            </button>
                         </div>
                     </div>
                 </form>
@@ -91,22 +113,22 @@
 
 <!-- Top Subreddits -->
 {% if stats.subreddit_counts %}
-<div class="row mb-4">
+<div class="row mb-2">
     <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-chart-bar"></i> Top Subreddits</h5>
+        <div class="card" style="padding:0.25rem 0.25rem;">
+            <div class="card-header py-1 px-2">
+                <h6 style="margin-bottom:0; font-size:1em;"><i class="fas fa-chart-bar"></i> Top Subreddits</h6>
             </div>
-            <div class="card-body">
-                <div class="row">
+            <div class="card-body py-1 px-2">
+                <div class="row g-1">
                     {% set sorted_subs = stats.subreddit_counts.items() | list | sort(attribute='1', reverse=True) %}
                     {% for subreddit, count in sorted_subs[:6] %}
-                    <div class="col-md-2 text-center">
-                        <div class="border rounded p-2">
-                            <a href="?subreddit={{ subreddit }}" class="text-decoration-none">
-                                <strong>{{ subreddit }}</strong><br>
-                                <small class="text-muted">{{ count }} images</small>
-                            </a>
+                    <div class="col-md-2 col-6 text-center">
+                        <div class="border rounded p-1" style="background: #232526;">
+                            <a href="?subreddit={{ subreddit }}" class="text-decoration-none" style="color: #fff; font-weight:600; font-size:0.95em;">
+                                {{ subreddit }}
+                            </a><br>
+                            <small class="text-muted" style="font-size:0.85em;">{{ count }} images</small>
                         </div>
                     </div>
                     {% endfor %}
@@ -118,7 +140,7 @@
 {% endif %}
 
 <!-- Image Gallery -->
-<div class="row mb-4">
+<div class="row mb-4" id="gallerySection">
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h4><i class="fas fa-images"></i> Image Gallery</h4>
@@ -183,19 +205,19 @@
             <ul class="pagination">
                 {% if current_page > 1 %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page - 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">Previous</a>
+                    <a class="page-link" href="?page={{ current_page - 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Previous</a>
                 </li>
                 {% endif %}
                 
                 {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
                 <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                    <a class="page-link" href="?page={{ page_num }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">{{ page_num }}</a>
+                    <a class="page-link" href="?page={{ page_num }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">{{ page_num }}</a>
                 </li>
                 {% endfor %}
                 
                 {% if images|length == 20 %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">Next</a>
+                    <a class="page-link" href="?page={{ current_page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Next</a>
                 </li>
                 {% endif %}
             </ul>
@@ -230,6 +252,21 @@ $(document).ready(function() {
     $('#subreddit, #user, #deleted').on('change', function() {
         $('#filterForm').submit();
     });
+    // Clear button functionality
+    $('#clearFilters').on('click', function() {
+        $('#search').val('');
+        $('#subreddit').val('').trigger('change');
+        $('#user').val('').trigger('change');
+        $('#deleted').val('').trigger('change');
+        $('#filterForm').submit();
+    });
+    // Scroll to gallery section on page load if hash is present
+    if(window.location.hash === '#gallerySection') {
+        var gallery = document.getElementById('gallerySection');
+        if(gallery) {
+            gallery.scrollIntoView({behavior: 'smooth'});
+        }
+    }
 });
 
 // Loading animation for images

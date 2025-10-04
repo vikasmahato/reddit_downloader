@@ -469,7 +469,7 @@ class RedditImageDownloader:
             
             print(f"🔍 Fetching posts from u/{username}...")
             
-            submissions = user.submissions.new(limit=limit)
+            submissions = user.submissions.hot(limit=limit)
             
             for submission in submissions:
                 if not submission.is_self and self._is_image_url(submission.url):
