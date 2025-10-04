@@ -33,6 +33,37 @@
     font-size: 0.85em;
     padding: 0.2em 0.6em;
 }
+.pagination {
+    --bs-pagination-bg: #232526;
+    --bs-pagination-border-color: #444;
+    --bs-pagination-color: #e0e0e0;
+    --bs-pagination-hover-bg: #414345;
+    --bs-pagination-hover-color: #fff;
+    --bs-pagination-active-bg: #0984e3;
+    --bs-pagination-active-color: #fff;
+    --bs-pagination-focus-bg: #414345;
+    --bs-pagination-focus-color: #fff;
+}
+.page-link {
+    background-color: #232526 !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #444 !important;
+}
+.page-link:hover, .page-link:focus {
+    background-color: #414345 !important;
+    color: #fff !important;
+    border-color: #0984e3 !important;
+}
+.page-item.active .page-link {
+    background-color: #0984e3 !important;
+    color: #fff !important;
+    border-color: #0984e3 !important;
+}
+.page-item.disabled .page-link {
+    background-color: #232526 !important;
+    color: #888 !important;
+    border-color: #444 !important;
+}
 </style>
 <!-- Compact Header with stats -->
 <div class="row mb-1">
