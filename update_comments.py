@@ -70,7 +70,7 @@ def extract_post_id(permalink, url):
         return match.group(1)
     return None
 
-def fetch_comments(reddit, post_id, limit=10):
+def fetch_comments(reddit, post_id, limit=100):
     try:
         submission = reddit.submission(id=post_id)
         submission.comments.replace_more(limit=0)
@@ -91,7 +91,7 @@ def update_comments(db_path, config_path):
     reddit = get_reddit_instance(config_path)
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
-    cursor.execute("SELECT id, url, permalink, comments FROM images")
+    cursor.execute("SELECT id, url, permalink, comments FROM images order by id desc limit 3000")
     rows = cursor.fetchall()
     total = len(rows)
     updated = 0

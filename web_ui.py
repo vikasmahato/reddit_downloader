@@ -77,7 +77,14 @@ class RedditImageUI:
                     query += " AND is_deleted = 1"
                 else:
                     query += " AND (is_deleted = 0 OR is_deleted IS NULL)"
-            query += " ORDER BY download_date DESC, download_time DESC"
+            # Sorting logic
+            if sort == 'comments':
+                order_by = ''  # Will sort in Python after fetch
+            elif sort == 'filesize':
+                order_by = ' ORDER BY file_size DESC'
+            else:
+                order_by = ' ORDER BY download_date DESC, download_time DESC'
+            query += order_by
             query += f" LIMIT {limit} OFFSET {offset}"
             cursor.execute(query, params)
             results = cursor.fetchall()
@@ -425,7 +432,7 @@ if __name__ == '__main__':
     print(f"📁 Download folder: {ui_handler.download_folder}")
     print(f"🗄️  Database: {ui_handler.metadata_db}")
     print("\n🌐 Access the UI at:")
-    print("   http://localhost:5000")
+    print("   http://localhost:4000")
     print("\n💡 Features:")
     print("   - Browse images in gallery view")
     print("   - Search by title, author, or filename")
@@ -433,4 +440,4 @@ if __name__ == '__main__':
     print("   - View detailed metadata")
     print("   - Statistics dashboard")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=4000)

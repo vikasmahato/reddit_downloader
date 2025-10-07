@@ -140,6 +140,7 @@
                             <select class="form-select form-select-sm" id="sort" name="sort" style="font-size:0.90em;">
                                 <option value="">Newest</option>
                                 <option value="comments" {% if sort == 'comments' %}selected{% endif %}>Most Comments</option>
+                                <option value="filesize" {% if sort == 'filesize' %}selected{% endif %}>File Size</option>
                             </select>
                         </div>
                         <div class="col-md-1 d-flex align-items-end gap-1">
