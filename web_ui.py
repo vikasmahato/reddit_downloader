@@ -308,6 +308,11 @@ def image_details(image_id):
         image = cursor.fetchone()
         if image:
             image_dict = dict(image)
+            # Convert timedelta fields to string for JSON serialization
+            from datetime import timedelta
+            for k, v in image_dict.items():
+                if isinstance(v, timedelta):
+                    image_dict[k] = str(v)
             if image_dict.get('file_path'):
                 relative_path = Path(image_dict['file_path']).relative_to(ui_handler.download_folder)
                 image_dict['web_path'] = str(relative_path).replace('\\', '/')
