@@ -199,60 +199,25 @@
 </div>
 
 {% if images %}
-<div class="row" id="imageGallery">
+<div class="row">
     {% for image in images %}
-    {% set image_urls = image.url.split(',') %}
-    <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
-        <div class="card image-card h-100 {% if image.is_deleted %}deleted-image{% endif %}">
-            {% if image_urls[0] %}
-            <img src="/image/{{ image.web_path }}" class="image-thumbnail card-img-top"
-                 alt="{{ image.title or 'Reddit Image' }}">
-            {% if image.exif %}
-            <div class="mt-2">
-                <h6>EXIF Information</h6>
-                <table class="table table-bordered table-sm">
-                    <tbody>
-                    {% for key, value in image.exif.items() %}
-                        <tr>
-                            <th>{{ key }}</th>
-                            <td>{{ value }}</td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
+    <div class="col-md-3 col-6 mb-4">
+        <div class="card h-100">
+            <div class="card-body p-0">
+                {% set ext = image.filename.split('.')[-1].lower() %}
+                {% if ext == 'mp4' %}
+                    <video controls class="image-thumbnail" style="width:100%;height:140px;object-fit:cover;">
+                        <source src="{{ image.file_path }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                {% else %}
+                    <img src="{{ image.file_path }}" class="image-thumbnail" alt="Image">
+                {% endif %}
             </div>
-            {% endif %}
-            {% else %}
-            <div class="image-thumbnail bg-secondary d-flex align-items-center justify-content-center">
-                <i class="fas fa-image fa-3x text-white"></i>
-            </div>
-            {% endif %}
-            
-            <div class="card-body">
-                <h6 class="card-title">{{ image.title[:50] + '...' if image.title and image.title|length > 50 else image.title or 'Untitled' }}</h6>
-                
-                <div class="metadata-text">
-                    <div><i class="fas fa-subreddit"></i> <strong>r/{{ image.subreddit or 'Unknown' }}</strong></div>
-                    <div><i class="fas fa-user"></i> u/{{ image.author or 'Unknown' }}</div>
-                    <div><i class="fas fa-calendar"></i> {{ image.download_date }}</div>
-                    {% if image.file_size %}
-                    <div><i class="fas fa-file"></i> {{ "%.1f"|format(image.file_size/1024) }} KB</div>
-                    {% endif %}
-                    {% set comment_count = (image.comments | safe | loads | length) if image.comments else 0 %}
-                    <div><i class="fas fa-comments"></i> {{ comment_count }} comment{{ 's' if comment_count != 1 else '' }}</div>
-                </div>
-            </div>
-            
-            <div class="card-footer bg-transparent border-0">
-                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                    <a href="/details/{{ image.id }}" class="btn btn-primary btn-sm">
-                        <i class="fas fa-info-circle"></i> Details
-                    </a>
-                    {% if image.web_path %}
-                    <a href="/image/{{ image.web_path }}" target="_blank" class="btn btn-outline-secondary btn-sm">
-                        <i class="fas fa-external-link-alt"></i> View
-                    </a>
-                    {% endif %}
+            <div class="card-footer">
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="card-title">{{ image.title or image.filename }}</span>
+                    <a href="/details/{{ image.id }}" class="btn btn-outline-primary btn-sm">Details</a>
                 </div>
             </div>
         </div>

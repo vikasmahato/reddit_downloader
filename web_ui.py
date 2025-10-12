@@ -8,7 +8,7 @@ Provides search, filtering, and gallery view capabilities.
 
 import os
 import sqlite3
-from flask import Flask, render_template, request, jsonify, send_file, url_for
+from flask import Flask, render_template, request, jsonify, send_file, url_for, send_from_directory
 from pathlib import Path
 import json
 from datetime import datetime
@@ -292,17 +292,11 @@ def api_stats():
     """API endpoint for statistics."""
     return jsonify(ui_handler.get_stats())
 
-@app.route('/image/<path:layout>')
-def serve_image(layout):
-    """Serve image files."""
-    try:
-        image_path = ui_handler.download_folder / layout.replace('/', os.sep)
-        if image_path.exists():
-            return send_file(str(image_path))
-        else:
-            return "Image not found", 404
-    except Exception as e:
-        return f"Error: {e}", 500
+@app.route('/image/<path:filename>')
+def serve_image(filename):
+    # Serve files (images/videos) from reddit_downloads
+    download_dir = os.path.join(os.getcwd(), 'reddit_downloads')
+    return send_from_directory(download_dir, filename)
 
 @app.route('/details/<int:image_id>')
 def image_details(image_id):

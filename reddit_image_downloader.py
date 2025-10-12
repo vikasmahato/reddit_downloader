@@ -198,8 +198,48 @@ class RedditImageDownloader:
                         downloaded += len(chunk)
                         if total_size > 0 and downloaded % (1024*1024) == 0:
                             print(f"Downloaded {downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB...")
-            # Save metadata
-            self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
+            # GIF to MP4 conversion and size reporting using ffmpeg
+            if filepath.suffix.lower() == '.gif':
+                import subprocess
+                import os
+                gif_size = os.path.getsize(filepath)
+                mp4_path = filepath.with_suffix('.mp4')
+                print(f"Converting {filepath} to {mp4_path} using ffmpeg...")
+                cmd = [
+                    'ffmpeg', '-y', '-i', str(filepath),
+                    '-movflags', 'faststart', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+                    str(mp4_path)
+                ]
+                try:
+                    result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    mp4_size = os.path.getsize(mp4_path)
+                    percent_diff = ((gif_size - mp4_size) / gif_size) * 100 if gif_size else 0
+                    print(f"GIF size: {gif_size/1024:.2f} KB, MP4 size: {mp4_size/1024:.2f} KB, Size reduced by: {percent_diff:.2f}%")
+                    # Remove GIF file
+                    os.remove(filepath)
+                    print(f"Deleted original GIF: {filepath}")
+                    # Save ffmpeg details (stderr output)
+                    ffmpeg_details = result.stderr.decode(errors='ignore')
+                    # Update DB with MP4 details
+                    filepath = mp4_path
+                    filename = mp4_path.name
+                    downloaded = mp4_size
+                    # Save metadata with ffmpeg details
+                    self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
+                    # Optionally, save ffmpeg details in a new DB column if available
+                    try:
+                        conn = mysql.connector.connect(**mysql_config)
+                        cursor = conn.cursor()
+                        cursor.execute('UPDATE images SET ffmpeg_details=%s WHERE filename=%s', (ffmpeg_details, filename))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        print(f"Failed to save ffmpeg details: {e}")
+                except Exception as conv_err:
+                    print(f"GIF to MP4 conversion failed: {conv_err}")
+            else:
+                # Save metadata for non-GIF files
+                self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
             if prev_record and prev_record.get('is_deleted'):
                 if '_deleted' in filename:
                     new_filename = filename.replace('_deleted', '')

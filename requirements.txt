@@ -5,3 +5,4 @@ configparser
 flask>=2.0.0
 Pillow
 mysql-connector-python
+moviepy
