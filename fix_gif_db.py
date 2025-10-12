@@ -19,7 +19,7 @@ def main():
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT COUNT(*) FROM images WHERE filename LIKE '%.gif'")
-    initial_count = cursor.fetchone()[0]
+    initial_count = cursor.fetchone()
     print(f"Rows with GIF filenames before update: {initial_count}")
     cursor.execute("SELECT id, filename, file_path FROM images WHERE filename LIKE '%.gif'")
     rows = cursor.fetchall()
@@ -39,7 +39,7 @@ def main():
             updated += 1
     conn.commit()
     cursor.execute("SELECT COUNT(*) FROM images WHERE filename LIKE '%.gif'")
-    remaining_count = cursor.fetchone()[0]
+    remaining_count = cursor.fetchone()
     conn.close()
     print(f"\nTotal rows updated: {updated}")
     print(f"Rows still with GIF filenames after update: {remaining_count}")

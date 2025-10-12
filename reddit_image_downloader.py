@@ -227,14 +227,14 @@ class RedditImageDownloader:
                     # Save metadata with ffmpeg details
                     self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
                     # Optionally, save ffmpeg details in a new DB column if available
-                    try:
-                        conn = mysql.connector.connect(**mysql_config)
-                        cursor = conn.cursor()
-                        cursor.execute('UPDATE images SET ffmpeg_details=%s WHERE filename=%s', (ffmpeg_details, filename))
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
-                        print(f"Failed to save ffmpeg details: {e}")
+                    # try:
+                    #     conn = mysql.connector.connect(**mysql_config)
+                    #     cursor = conn.cursor()
+                    #     cursor.execute('UPDATE images SET ffmpeg_details=%s WHERE filename=%s', (ffmpeg_details, filename))
+                    #     conn.commit()
+                    #     conn.close()
+                    # except Exception as e:
+                    #     print(f"Failed to save ffmpeg details: {e}")
                 except Exception as conv_err:
                     print(f"GIF to MP4 conversion failed: {conv_err}")
             else:
