@@ -18,10 +18,27 @@ import praw
 from configparser import ConfigParser
 import mimetypes
 import re
-import sqlite3
+import mysql.connector
+import configparser
 import hashlib
 from typing import List, Dict, Optional
 import time
+
+
+# Load MySQL config
+mysql_config = None
+try:
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    mysql_config = {
+        'host': config.get('mysql', 'host', fallback='localhost'),
+        'port': config.getint('mysql', 'port', fallback=3306),
+        'user': config.get('mysql', 'user', fallback='root'),
+        'password': config.get('mysql', 'password', fallback=''),
+        'database': config.get('mysql', 'database', fallback='reddit_images')
+    }
+except Exception as e:
+    print(f"Error loading MySQL config: {e}")
 
 
 class RedditImageDownloader:
@@ -45,10 +62,6 @@ class RedditImageDownloader:
             'User-Agent': self.config.get('reddit', 'user_agent', 
                         fallback='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         })
-        
-        # Initialize metadata database
-        self.metadata_db = self.download_folder / 'metadata.db'
-        self._init_metadata_db()
         
         self._setup_reddit_auth()
 
@@ -104,37 +117,6 @@ class RedditImageDownloader:
                 download_folder = downloads
                 max_images_per_subreddit = 25
                 """)
-
-    def _init_metadata_db(self):
-        """Initialize the metadata SQLite database."""
-        try:
-            conn = sqlite3.connect(str(self.metadata_db))
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS images (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT UNIQUE,
-                    filename TEXT,
-                    subreddit TEXT,
-                    username TEXT,
-                    author TEXT,
-                    title TEXT,
-                    permalink TEXT,
-                    download_date TEXT,
-                    download_time TEXT,
-                    file_hash TEXT,
-                    file_size INTEGER,
-                    is_deleted BOOLEAN DEFAULT FALSE,
-                    file_path TEXT
-                )
-            ''')
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            print(f"⚠️  Warning: Could not initialize metadata database: {e}")
 
     def _setup_reddit_auth(self):
         """Setup Reddit authentication using PRAW."""
@@ -250,47 +232,38 @@ class RedditImageDownloader:
     def _get_image_record(self, url: str) -> Optional[Dict]:
         """Get image record from metadata database."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            
-            cursor.execute('SELECT * FROM images WHERE url = ?', (url,))
+            cursor.execute('SELECT * FROM images WHERE url = %s', (url,))
             result = cursor.fetchone()
-            
             conn.close()
-            
             if result:
-                columns = ['id', 'url', 'filename', 'subreddit', 'username', 'author', 
-                          'title', 'permalink', 'download_date', 'download_time', 
-                          'file_hash', 'file_size', 'is_deleted', 'file_path']
+                columns = [desc[0] for desc in cursor.description]
                 return dict(zip(columns, result))
-            
         except Exception as e:
             print(f"⚠️  Warning: Could not query metadata database: {e}")
-        
         return None
 
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
                             post_data: Dict, filepath: Path, file_hash: str, file_size: int):
-        """Save image metadata to database. For gallery posts, url is a comma-separated list of image URLs."""
+        """Save image metadata to MySQL database."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             now = datetime.now()
             download_date = now.strftime("%Y-%m-%d")
             download_time = now.strftime("%H:%M:%S")
-            # Extract post data
             author = post_data.get('author', '') if post_data else ''
             title = post_data.get('title', '') if post_data else ''
             permalink = post_data.get('permalink', '') if post_data else ''
             post_username = post_data.get('post_username', '') if post_data else ''
             comments = post_data.get('comments', '') if post_data else ''
-            # Gallery support: url can be a comma-separated list
             url_field = post_data.get('all_urls', url) if post_data else url
             cursor.execute('''
-                INSERT OR REPLACE INTO images 
-                (url, filename, subreddit, username, author, title, permalink, 
+                INSERT INTO images (url, filename, subreddit, username, author, title, permalink, 
                  download_date, download_time, file_hash, file_size, file_path, post_username, comments)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE filename=VALUES(filename), subreddit=VALUES(subreddit), username=VALUES(username), author=VALUES(author), title=VALUES(title), permalink=VALUES(permalink), download_date=VALUES(download_date), download_time=VALUES(download_time), file_hash=VALUES(file_hash), file_size=VALUES(file_size), file_path=VALUES(file_path), post_username=VALUES(post_username), comments=VALUES(comments)
             ''', (url_field, filename, subreddit, author, author, title, permalink,
                   download_date, download_time, file_hash, file_size, str(filepath), post_username, comments))
             conn.commit()
@@ -299,26 +272,22 @@ class RedditImageDownloader:
             print(f"⚠️  Warning: Could not save metadata: {e}")
 
     def _update_file_path_in_db(self, url: str, new_filepath: str):
-        """Update file path in database."""
+        """Update file path in MySQL database."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            
-            cursor.execute('UPDATE images SET file_path = ? WHERE url = ?', 
-                          (new_filepath, url))
-            
+            cursor.execute('UPDATE images SET file_path = %s WHERE url = %s', (new_filepath, url))
             conn.commit()
             conn.close()
-            
         except Exception as e:
             print(f"⚠️  Warning: Could not update file path: {e}")
 
     def _mark_image_as_deleted(self, url: str):
-        """Mark an image as deleted in the database by setting is_deleted to True."""
+        """Mark an image as deleted in MySQL database by setting is_deleted to True."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute('UPDATE images SET is_deleted = 1 WHERE url = ?', (url,))
+            cursor.execute('UPDATE images SET is_deleted = 1 WHERE url = %s', (url,))
             conn.commit()
             conn.close()
             print(f"Marked as deleted: {url}")
@@ -328,53 +297,41 @@ class RedditImageDownloader:
     def check_deleted_images(self, subreddit: str = None) -> List[Dict]:
         """Check which previously downloaded images are now deleted."""
         deleted_images = []
-        
         if not self.reddit:
             print("❌ Reddit connection required to check for deleted images")
             return deleted_images
-        
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            
-            # Get all previously downloaded images
             if subreddit:
-                cursor.execute('SELECT * FROM images WHERE subreddit = ?', (subreddit,))
+                cursor.execute('SELECT * FROM images WHERE subreddit = %s', (subreddit,))
             else:
                 cursor.execute('SELECT * FROM images WHERE is_deleted = 0')
-            
             images = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
             conn.close()
-            
-            columns = ['id', 'url', 'filename'] + [''] * 11  # Simplified for this check
-            
             for img_data in images:
-                url = img_data[1]  # url column
+                img_dict = dict(zip(columns, img_data))
+                url = img_dict['url']
                 try:
-                    # Try to access the Reddit post
                     response = self.session.head(url, timeout=10)
                     if response.status_code == 404:
                         deleted_images.append({
                             'url': url,
-                            'filename': img_data[2],
-                            'file_path': img_data[13] if len(img_data) > 13 else None
+                            'filename': img_dict['filename'],
+                            'file_path': img_dict.get('file_path')
                         })
                 except Exception:
-                    # If we can't check, assume it might be deleted
                     deleted_images.append({
                         'url': url,
-                        'filename': img_data[2],
-                        'file_path': img_data[13] if len(img_data) > 13 else None
+                        'filename': img_dict['filename'],
+                        'file_path': img_dict.get('file_path')
                     })
-            
-            # Only update database status, do not rename or move files
             for img in deleted_images:
                 self._mark_image_as_deleted(img['url'])
                 print(f"📝 Marked as deleted in DB: {img['filename']}")
-
         except Exception as e:
             print(f"❌ Error checking deleted images: {e}")
-        
         return deleted_images
 
 
@@ -426,7 +383,8 @@ class RedditImageDownloader:
         
         # Scrape subreddits
         if scrape_type in ["all", "subreddits"]:
-            subreddits = self.parse_scrape_list('scrape_list')
+            #subreddits = self.parse_scrape_list('scrape_list')
+            subreddits = [line.strip() for line in config['scrape_list']['list'].splitlines() if line.strip()]
             if subreddits:
                 print(f"\n📂 Found {len(subreddits)} subreddits in config")
                 for subreddit in subreddits:

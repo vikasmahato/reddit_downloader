@@ -15,8 +15,21 @@ from datetime import datetime
 import mimetypes
 import hashlib
 from PIL import Image, ExifTags
+import mysql.connector
+import configparser
 
 app = Flask(__name__)
+
+# Load MySQL config
+config = configparser.ConfigParser()
+config.read('config.ini')
+mysql_config = {
+    'host': config.get('mysql', 'host', fallback='localhost'),
+    'port': config.getint('mysql', 'port', fallback=3306),
+    'user': config.get('mysql', 'user', fallback='root'),
+    'password': config.get('mysql', 'password', fallback=''),
+    'database': config.get('mysql', 'database', fallback='reddit_images')
+}
 
 # Add Python built-ins to template context
 @app.context_processor
@@ -50,27 +63,25 @@ def jinja_format_datetime(value):
         return ''
 
 class RedditImageUI:
-    def __init__(self, download_folder="reddit_downloads", metadata_db="metadata.db"):
+    def __init__(self, download_folder="reddit_downloads"):
         self.download_folder = Path(download_folder)
-        self.metadata_db = self.download_folder / metadata_db
-        
+
     def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None, sort=None, hidden_users=None):
-        """Get images from database with filtering, including deleted filter, sorting, and hidden users."""
+        """Get images from MySQL database with filtering, including deleted filter, sorting, and hidden users."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
-            conn.row_factory = sqlite3.Row  # Enable column access by name
-            cursor = conn.cursor()
-            query = "SELECT * FROM images WHERE 1=1"
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor(dictionary=True)
+            query = "SELECT * FROM images WHERE 1=1 AND author != 'BusPsychological3243'"
             params = []
             if search:
-                query += " AND (title LIKE ? OR author LIKE ? OR filename LIKE ?)"
+                query += " AND (title LIKE %s OR author LIKE %s OR filename LIKE %s)"
                 search_term = f"%{search}%"
                 params.extend([search_term, search_term, search_term])
             if subreddit:
-                query += " AND subreddit LIKE ?"
+                query += " AND subreddit LIKE %s"
                 params.append(f"%{subreddit}%")
             if user:
-                query += " AND author LIKE ?"
+                query += " AND author LIKE %s"
                 params.append(f"%{user}%")
             if deleted is not None:
                 if deleted:
@@ -91,7 +102,7 @@ class RedditImageUI:
             images = []
             for row in results:
                 img_dict = dict(row)
-                if img_dict['file_path']:
+                if img_dict.get('file_path'):
                     relative_path = Path(img_dict['file_path']).relative_to(self.download_folder)
                     img_dict['web_path'] = str(relative_path).replace('\\', '/')
                 # Count comments
@@ -109,39 +120,31 @@ class RedditImageUI:
             if sort == 'comments':
                 images.sort(key=lambda x: x.get('comment_count', 0), reverse=True)
             return images
-            
         except Exception as e:
             print(f"Database error: {e}")
             return []
-    
-    def get_stats(self):
-        """Get download statistics."""
-        try:
-            conn = sqlite3.connect(str(self.metadata_db))
-            cursor = conn.cursor()
 
+    def get_stats(self):
+        """Get download statistics from MySQL."""
+        try:
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
             # Total images
             cursor.execute("SELECT COUNT(*) FROM images")
             total_images = cursor.fetchone()[0]
-
             # Images by subreddit
             cursor.execute("SELECT subreddit, COUNT(*) FROM images GROUP BY subreddit ORDER BY COUNT(*) DESC")
             subreddit_counts = dict(cursor.fetchall())
-
             # Top authors (for display)
             cursor.execute("SELECT author, COUNT(*) FROM images WHERE author != '' GROUP BY author ORDER BY COUNT(*) DESC LIMIT 10")
             user_counts = dict(cursor.fetchall())
-
             # All unique authors (for stats)
             cursor.execute("SELECT COUNT(DISTINCT author) FROM images WHERE author != ''")
             total_users = cursor.fetchone()[0]
-
             # File size stats
             cursor.execute("SELECT SUM(file_size) FROM images WHERE file_size > 0")
             total_size = cursor.fetchone()[0] or 0
-
             conn.close()
-
             return {
                 'total_images': total_images,
                 'total_size_mb': round(total_size / (1024 * 1024), 2),
@@ -153,11 +156,11 @@ class RedditImageUI:
         except Exception as e:
             print(f"Stats error: {e}")
             return {}
-    
+
     def get_subreddits(self):
-        """Get list of unique subreddits."""
+        """Get list of unique subreddits from MySQL."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT subreddit FROM images WHERE subreddit != '' ORDER BY subreddit")
             results = [row[0] for row in cursor.fetchall()]
@@ -166,11 +169,11 @@ class RedditImageUI:
         except Exception as e:
             print(f"Subreddits error: {e}")
             return []
-    
+
     def get_users(self):
-        """Get list of unique users."""
+        """Get list of unique users from MySQL."""
         try:
-            conn = sqlite3.connect(str(self.metadata_db))
+            conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT author FROM images WHERE author != '' ORDER BY author")
             results = [row[0] for row in cursor.fetchall()]
@@ -305,16 +308,13 @@ def serve_image(layout):
 def image_details(image_id):
     """Show detailed information for a specific image."""
     try:
-        conn = sqlite3.connect(str(ui_handler.metadata_db))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM images WHERE id = ?", (image_id,))
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM images WHERE id = %s", (image_id,))
         image = cursor.fetchone()
-        
         if image:
             image_dict = dict(image)
-            if image_dict['file_path']:
+            if image_dict.get('file_path'):
                 relative_path = Path(image_dict['file_path']).relative_to(ui_handler.download_folder)
                 image_dict['web_path'] = str(relative_path).replace('\\', '/')
                 # Extract EXIF data
@@ -329,35 +329,32 @@ def image_details(image_id):
         else:
             conn.close()
             return "Image not found", 404
-            
     except Exception as e:
         return f"Error: {e}", 500
 
 @app.route('/api/post_comment', methods=['POST'])
 def post_comment():
-    """Post a comment to Reddit and save it locally."""
+    """Post a comment to Reddit and save it locally in MySQL."""
     import json
     data = request.get_json()
     image_id = data.get('image_id')
     comment_text = data.get('comment', '').strip()
     if not image_id or not comment_text:
         return jsonify({'success': False, 'error': 'Missing image ID or comment.'}), 400
-
-    # Get image info from DB
-    conn = sqlite3.connect(str(ui_handler.metadata_db))
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM images WHERE id = ?", (image_id,))
+    # Get image info from MySQL
+    conn = mysql.connector.connect(**mysql_config)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM images WHERE id = %s", (image_id,))
     image = cursor.fetchone()
     if not image:
+        conn.close()
         return jsonify({'success': False, 'error': 'Image not found.'}), 404
-
     # Get Reddit post ID or permalink
-    reddit_post_id = image['reddit_id'] if 'reddit_id' in image.keys() else None
-    permalink = image['permalink'] if 'permalink' in image.keys() else None
+    reddit_post_id = image.get('reddit_id')
+    permalink = image.get('permalink')
     if not reddit_post_id and not permalink:
+        conn.close()
         return jsonify({'success': False, 'error': 'No Reddit post info.'}), 400
-
     # Post comment to Reddit
     try:
         from reddit_image_downloader import RedditImageDownloader
@@ -367,22 +364,20 @@ def post_comment():
         if reddit_post_id:
             submission = reddit.submission(id=reddit_post_id)
         elif permalink:
-            # Extract ID from permalink
             import re
             m = re.search(r'/comments/([a-z0-9]+)/', permalink)
             if m:
                 submission = reddit.submission(id=m.group(1))
         if not submission:
+            conn.close()
             return jsonify({'success': False, 'error': 'Could not resolve Reddit submission.'}), 400
-        # Actually post the comment
         reddit_comment = submission.reply(comment_text)
     except Exception as e:
+        conn.close()
         return jsonify({'success': False, 'error': f'Reddit error: {e}'}), 500
-
-    # Save comment locally
+    # Save comment locally in MySQL
     try:
-        # Load existing comments
-        comments_json = image['comments'] if 'comments' in image.keys() else '[]'
+        comments_json = image.get('comments', '[]')
         comments = json.loads(comments_json) if comments_json else []
         new_comment = {
             'author': reddit_comment.author.name if reddit_comment.author else 'You',
@@ -391,27 +386,25 @@ def post_comment():
             'created_utc': reddit_comment.created_utc
         }
         comments.insert(0, new_comment)
-        # Save back to DB
-        cursor.execute("UPDATE images SET comments = ? WHERE id = ?", (json.dumps(comments), image_id))
+        cursor.execute("UPDATE images SET comments = %s WHERE id = %s", (json.dumps(comments), image_id))
         conn.commit()
     except Exception as e:
+        conn.close()
         return jsonify({'success': False, 'error': f'Local save error: {e}'}), 500
     finally:
         conn.close()
-
     return jsonify({'success': True, 'comment': new_comment})
 
 @app.route('/api/comments/<int:image_id>')
 def get_comments(image_id):
-    """Return latest comments for an image."""
+    """Return latest comments for an image from MySQL."""
     try:
-        conn = sqlite3.connect(str(ui_handler.metadata_db))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("SELECT comments FROM images WHERE id = ?", (image_id,))
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT comments FROM images WHERE id = %s", (image_id,))
         row = cursor.fetchone()
         conn.close()
-        if row and row['comments']:
+        if row and row.get('comments'):
             import json
             comments = json.loads(row['comments'])
             return jsonify({'success': True, 'comments': comments})
@@ -421,23 +414,4 @@ def get_comments(image_id):
         return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
-    # Check if metadata database exists
-    if not ui_handler.metadata_db.exists():
-        print("❌ Metadata database not found!")
-        print(f"   Expected location: {ui_handler.metadata_db}")
-        print("   Please run the downloader script first to create the database.")
-        exit(1)
-    
-    print("🚀 Starting Reddit Image Browser UI...")
-    print(f"📁 Download folder: {ui_handler.download_folder}")
-    print(f"🗄️  Database: {ui_handler.metadata_db}")
-    print("\n🌐 Access the UI at:")
-    print("   http://localhost:4000")
-    print("\n💡 Features:")
-    print("   - Browse images in gallery view")
-    print("   - Search by title, author, or filename")
-    print("   - Filter by subreddit or user")
-    print("   - View detailed metadata")
-    print("   - Statistics dashboard")
-    
     app.run(debug=True, host='0.0.0.0', port=4000)

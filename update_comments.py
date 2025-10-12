@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Update comments for all entries in metadata.db using Reddit API (PRAW).
+Update comments for all entries in metadata1.db using Reddit API (PRAW).
 """
-import sqlite3
 import json
 import praw
 import re
@@ -10,8 +9,25 @@ import os
 from configparser import ConfigParser
 from pathlib import Path
 import logging
+import mysql.connector
+import configparser
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+
+# Load MySQL config
+mysql_config = None
+try:
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    mysql_config = {
+        'host': config.get('mysql', 'host', fallback='localhost'),
+        'port': config.getint('mysql', 'port', fallback=3306),
+        'user': config.get('mysql', 'user', fallback='root'),
+        'password': config.get('mysql', 'password', fallback=''),
+        'database': config.get('mysql', 'database', fallback='reddit_images')
+    }
+except Exception as e:
+    print(f"Error loading MySQL config: {e}")
 
 def parse_config_file(config_file: str) -> ConfigParser:
     config = ConfigParser()
@@ -87,11 +103,11 @@ def fetch_comments(reddit, post_id, limit=100):
         print(f"Error fetching comments for post {post_id}: {e}")
         return []
 
-def update_comments(db_path, config_path):
+def update_comments(config_path):
     reddit = get_reddit_instance(config_path)
-    conn = sqlite3.connect(str(db_path))
+    conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, url, permalink, comments FROM images order by id desc limit 3000")
+    cursor.execute("SELECT id, url, permalink, comments FROM images order by id desc limit 4000")
     rows = cursor.fetchall()
     total = len(rows)
     updated = 0
@@ -126,7 +142,7 @@ def update_comments(db_path, config_path):
         # Add new comments
         merged_comments.extend(new_comments)
         comments_json = json.dumps(merged_comments)
-        cursor.execute("UPDATE images SET comments = ? WHERE id = ?", (comments_json, img_id))
+        cursor.execute("UPDATE images SET comments = %s WHERE id = %s", (comments_json, img_id))
         updated += 1
         if idx % 10 == 0:
             logging.info(f"Progress: {idx}/{total} processed.")
@@ -135,6 +151,5 @@ def update_comments(db_path, config_path):
     logging.info(f"Comments updated for {updated} entries out of {total}.")
 
 if __name__ == "__main__":
-    db_path = Path("reddit_downloads/metadata.db")
     config_path = Path("config.ini")
-    update_comments(db_path, config_path)
+    update_comments(config_path)

@@ -9,7 +9,7 @@ config.ini
 *.ini
 
 # Metadata database
-**/metadata.db
+reddit_downloads/metadata1.db
 
 # Python cache and bytecode
 __pycache__/
