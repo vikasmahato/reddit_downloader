@@ -18,7 +18,7 @@ from PIL import Image, ExifTags
 import mysql.connector
 import configparser
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/reddit_downloads', static_folder='reddit_downloads')
 
 # Load MySQL config
 config = configparser.ConfigParser()
