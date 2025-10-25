@@ -107,17 +107,17 @@ pre code {
                     <span class="badge bg-primary">r/{{ image.subreddit or 'Unknown' }}</span>
                     <span class="badge bg-info text-dark">u/{{ image.author or 'Unknown' }}</span>
                 </div>
-                {% set image_urls = image.url.split(',') if image.url else [] %}
+                {# Use only the local served file on the details page; do NOT use remote URLs or fallbacks #}
                 <div class="text-center mb-4">
-                    {% if image_urls and image_urls[0].strip() %}
+                    {% if image.web_path %}
                         {% set ext = image.filename.split('.')[-1].lower() %}
                         {% if ext == 'mp4' %}
                             <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
-                                <source src="{{ image_urls[0].strip() }}" type="video/mp4">
+                                <source src="/image/{{ image.web_path }}" type="video/mp4">
                                 Your browser does not support the video tag.
                             </video>
                         {% else %}
-                            <img src="{{ image_urls[0].strip() }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
+                            <img src="/image/{{ image.web_path }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
                         {% endif %}
                     {% else %}
                         <div class="alert alert-warning">Image not found.</div>

@@ -64,7 +64,37 @@ def jinja_format_datetime(value):
 
 class RedditImageUI:
     def __init__(self, download_folder="reddit_downloads"):
-        self.download_folder = Path(download_folder)
+        # store an absolute resolved download folder for reliable relative-path computation
+        self.download_folder = Path(download_folder).resolve()
+
+    def make_web_path(self, file_path):
+        """Return a path relative to the download_folder suitable for use in /image/<web_path>.
+        If it cannot be computed, return None.
+        """
+        if not file_path:
+            return None
+        try:
+            fp = Path(file_path).resolve()
+        except Exception:
+            try:
+                fp = Path(file_path)
+            except Exception:
+                return None
+        # Try direct relative_to with resolved paths
+        try:
+            rel = fp.relative_to(self.download_folder)
+            return str(rel).replace('\\', '/')
+        except Exception:
+            # Fallback: look for the download folder name in parts and build relative path
+            parts = list(fp.parts)
+            try:
+                idx = parts.index(self.download_folder.name)
+                rel_parts = parts[idx+1:]
+                if rel_parts:
+                    return str(Path(*rel_parts)).replace('\\', '/')
+            except Exception:
+                return None
+        return None
 
     def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None, sort=None, hidden_users=None):
         """Get images from MySQL database with filtering, including deleted filter, sorting, and hidden users."""
@@ -103,8 +133,9 @@ class RedditImageUI:
             for row in results:
                 img_dict = dict(row)
                 if img_dict.get('file_path'):
-                    relative_path = Path(img_dict['file_path']).relative_to(self.download_folder)
-                    img_dict['web_path'] = str(relative_path).replace('\\', '/')
+                    web = self.make_web_path(img_dict['file_path'])
+                    if web:
+                        img_dict['web_path'] = web
                 # Count comments
                 try:
                     comments = json.loads(img_dict.get('comments', '[]')) if img_dict.get('comments') else []
@@ -314,11 +345,12 @@ def image_details(image_id):
                 if isinstance(v, timedelta):
                     image_dict[k] = str(v)
             if image_dict.get('file_path'):
-                relative_path = Path(image_dict['file_path']).relative_to(ui_handler.download_folder)
-                image_dict['web_path'] = str(relative_path).replace('\\', '/')
-                # Extract EXIF data
-                exif = extract_exif_data(image_dict['file_path'])
-                image_dict['exif'] = exif
+                web = ui_handler.make_web_path(image_dict['file_path'])
+                if web:
+                    image_dict['web_path'] = web
+            # Extract EXIF data
+            exif = extract_exif_data(image_dict['file_path'])
+            image_dict['exif'] = exif
             conn.close()
             # Pass stats, subreddits, users for template compatibility
             stats = ui_handler.get_stats()

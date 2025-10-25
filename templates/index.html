@@ -205,13 +205,21 @@
         <div class="card h-100">
             <div class="card-body p-0">
                 {% set ext = image.filename.split('.')[-1].lower() %}
-                {% if ext == 'mp4' %}
-                    <video controls class="image-thumbnail" style="width:100%;height:140px;object-fit:cover;">
-                        <source src="{{ image.file_path }}" type="video/mp4">
-                        Your browser does not support the video tag.
-                    </video>
+                {# Use remote Reddit URL only for thumbnails; do NOT use local files or fallbacks #}
+                {% if image.url %}
+                    {% set thumb = image.url.split(',')[0].strip() %}
+                    {% if ext == 'mp4' %}
+                        <video controls class="image-thumbnail" style="width:100%;height:140px;object-fit:cover;">
+                            <source src="{{ thumb }}" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                    {% else %}
+                        <img src="{{ thumb }}" class="image-thumbnail" alt="Image">
+                    {% endif %}
                 {% else %}
-                    <img src="{{ image.file_path }}" class="image-thumbnail" alt="Image">
+                    <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:140px;">
+                        <small class="text-muted">Image not available</small>
+                    </div>
                 {% endif %}
             </div>
             <div class="card-footer">
