@@ -8,7 +8,7 @@ Provides search, filtering, and gallery view capabilities.
 
 import os
 import sqlite3
-from flask import Flask, render_template, request, jsonify, send_file, url_for, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_file, url_for, send_from_directory, redirect
 from pathlib import Path
 import json
 from datetime import datetime
@@ -325,9 +325,13 @@ def api_stats():
 
 @app.route('/image/<path:filename>')
 def serve_image(filename):
-    # Serve files (images/videos) from reddit_downloads
-    download_dir = os.path.join(os.getcwd(), 'reddit_downloads')
-    return send_from_directory(download_dir, filename)
+    # Legacy route: redirect to the static file URL so clients request /reddit_downloads/... directly.
+    try:
+        return redirect(url_for('static', filename=filename))
+    except Exception:
+        # Fallback to serving directly from the downloads directory
+        download_dir = os.path.join(os.getcwd(), 'reddit_downloads')
+        return send_from_directory(download_dir, filename)
 
 @app.route('/details/<int:image_id>')
 def image_details(image_id):

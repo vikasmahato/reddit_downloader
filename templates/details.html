@@ -113,11 +113,11 @@ pre code {
                         {% set ext = image.filename.split('.')[-1].lower() %}
                         {% if ext == 'mp4' %}
                             <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
-                                <source src="/image/{{ image.web_path }}" type="video/mp4">
+                                <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
                                 Your browser does not support the video tag.
                             </video>
                         {% else %}
-                            <img src="/image/{{ image.web_path }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
+                            <img src="{{ url_for('static', filename=image.web_path) }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
                         {% endif %}
                     {% else %}
                         <div class="alert alert-warning">Image not found.</div>
@@ -208,10 +208,10 @@ pre code {
                 <div class="d-flex justify-content-between">
                     <div>
                         {% if image.web_path %}
-                        <a href="/image/{{ image.web_path }}" target="_blank" class="btn btn-primary">
+                        <a href="{{ url_for('static', filename=image.web_path) }}" target="_blank" class="btn btn-primary">
                             <i class="fas fa-external-link-alt"></i> View Full Size
                         </a>
-                        <a href="/image/{{ image.web_path }}" download="{{ image.filename }}" class="btn btn-outline-primary">
+                        <a href="{{ url_for('static', filename=image.web_path) }}" download="{{ image.filename }}" class="btn btn-outline-primary">
                             <i class="fas fa-download"></i> Download
                         </a>
                         {% endif %}
