@@ -24,10 +24,21 @@ import hashlib
 from typing import List, Dict, Optional
 import time
 from loguru import logger
+from prawcore.exceptions import Forbidden
 
 
 logger.remove()
 logger.add(sys.stdout, colorize=True, format="<lvl>{message}</lvl>")
+
+
+class SubredditAccessError(RuntimeError):
+    """Raised when a subreddit cannot be accessed due to permission issues."""
+
+    def __init__(self, subreddit: str, status_code: int = 403, message: str = "Forbidden"):
+        self.subreddit = subreddit
+        self.status_code = status_code
+        self.message = message
+        super().__init__(f"r/{subreddit} returned status {status_code}: {message}")
 
 
 # Load MySQL config
@@ -425,6 +436,8 @@ class RedditImageDownloader:
             return
         
         total_downloads = 0
+        subreddit_counts: Dict[str, int] = {}
+        forbidden_subreddits: List[str] = []
         
         # Scrape subreddits
         if scrape_type in ["all", "subreddits"]:
@@ -438,8 +451,13 @@ class RedditImageDownloader:
                     logger.info(f"\n🔍 Scraping r/{clean_name}...")
                     
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
-                    self.download_from_subreddit(clean_name, limit)
-                    total_downloads += 1
+                    try:
+                        downloaded = self.download_from_subreddit(clean_name, limit)
+                        subreddit_counts[clean_name] = downloaded
+                        total_downloads += 1
+                    except SubredditAccessError as err:
+                        forbidden_subreddits.append(clean_name)
+                        logger.warning(f"🚫 Skipping r/{clean_name}: {err}")
         
         # Scrape user posts
         if scrape_type in ["all", "users"]:
@@ -456,6 +474,16 @@ class RedditImageDownloader:
                     total_downloads += 1
         
         logger.success(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
+        
+        if subreddit_counts:
+            logger.info("\n📊 Subreddit download summary:")
+            for name, count in sorted(subreddit_counts.items()):
+                logger.info(f"   r/{name}: {count} images downloaded")
+        
+        if forbidden_subreddits:
+            logger.warning("\n🚫 Subreddits skipped due to 403/banned status:")
+            for name in sorted(set(forbidden_subreddits)):
+                logger.warning(f"   r/{name}")
 
     def download_from_user(self, username: str, limit: int = 25):
         """Download images from a specific user's posts."""
@@ -590,6 +618,9 @@ class RedditImageDownloader:
                             'comments': json.dumps(comments_list)
                         })
             return image_posts
+        except Forbidden as e:
+            status_code = getattr(getattr(e, 'response', None), 'status_code', 403)
+            raise SubredditAccessError(subreddit, status_code, "Access forbidden (possibly banned)") from e
         except Exception as e:
             logger.error(f"❌ Error accessing subreddit {subreddit}: {e}")
             return []
@@ -620,8 +651,8 @@ class RedditImageDownloader:
             post_data = url_data[i-1] if url_data and i <= len(url_data) else None
             if self.download_image(url, subreddit=subreddit, post_data=post_data):
                 successful += 1
-        
         logger.success(f"\n✅ Download complete: {successful}/{total} images downloaded")
+        return successful
 
     def download_from_subreddit(self, subreddit: str, limit: int = 25):
         """Download images from a subreddit."""
@@ -630,12 +661,12 @@ class RedditImageDownloader:
         
         if not image_posts:
             logger.warning("❌ No images found")
-            return
+            return 0
         
         logger.info(f"📸 Found {len(image_posts)} image posts")
         
         urls = [post['url'] for post in image_posts]
-        self.download_from_urls(urls, subreddit, image_posts)
+        return self.download_from_urls(urls, subreddit, image_posts)
 
     def get_user_saved_posts(self, limit: int = 25) -> List[Dict]:
         """Get saved posts from authenticated user."""
