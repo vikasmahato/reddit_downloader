@@ -23,6 +23,11 @@ import configparser
 import hashlib
 from typing import List, Dict, Optional
 import time
+from loguru import logger
+
+
+logger.remove()
+logger.add(sys.stdout, colorize=True, format="<lvl>{message}</lvl>")
 
 
 # Load MySQL config
@@ -38,7 +43,7 @@ try:
         'database': config.get('mysql', 'database', fallback='reddit_images')
     }
 except Exception as e:
-    print(f"Error loading MySQL config: {e}")
+    logger.error(f"Error loading MySQL config: {e}")
 
 
 class RedditImageDownloader:
@@ -104,8 +109,8 @@ class RedditImageDownloader:
                     os.remove(temp_file)
             
         except Exception as e:
-            print(f"⚠️  Config parsing error: {e}")
-            print("   Using defaults...")
+            logger.warning(f"⚠️  Config parsing error: {e}")
+            logger.info("   Using defaults...")
             # Fallback to minimal config
             self.config.read_string("""
                 [reddit]
@@ -124,7 +129,7 @@ class RedditImageDownloader:
         client_secret = self.config.get('reddit', 'client_secret', fallback=None)
         
         if not client_id or not client_secret:
-            print("⚠️  No Reddit API credentials found. Using anonymous access only.")
+            logger.warning("⚠️  No Reddit API credentials found. Using anonymous access only.")
             self.reddit = None
             return
         
@@ -145,7 +150,7 @@ class RedditImageDownloader:
                 )
                 # Test authentication
                 user = self.reddit.user.me()
-                print(f"✓ Authenticated as: u/{user}")
+                logger.success(f"✓ Authenticated as: u/{user}")
                 
             else:
                 # Client credentials only (read-only, public content)
@@ -155,11 +160,11 @@ class RedditImageDownloader:
                     user_agent=self.config.get('reddit', 'user_agent', 
                                 fallback='reddit_image_downloader')
                 )
-                print("✓ Connected with client credentials (read-only mode)")
+                logger.success("✓ Connected with client credentials (read-only mode)")
                 
         except Exception as e:
-            print(f"⚠️  Reddit connection failed: {e}")
-            print("   You'll still be able to download directly from URLs.")
+            logger.error(f"⚠️  Reddit connection failed: {e}")
+            logger.info("   You'll still be able to download directly from URLs.")
             self.reddit = None
 
     def download_image(self, url: str, filename: str = None, subreddit: str = "", 
@@ -197,14 +202,14 @@ class RedditImageDownloader:
                         file_hash.update(chunk)
                         downloaded += len(chunk)
                         if total_size > 0 and downloaded % (1024*1024) == 0:
-                            print(f"Downloaded {downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB...")
+                            logger.info(f"Downloaded {downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB...")
             # GIF to MP4 conversion and size reporting using ffmpeg
             if filepath.suffix.lower() == '.gif':
                 import subprocess
                 import os
                 gif_size = os.path.getsize(filepath)
                 mp4_path = filepath.with_suffix('.mp4')
-                print(f"Converting {filepath} to {mp4_path} using ffmpeg...")
+                logger.info(f"Converting {filepath} to {mp4_path} using ffmpeg...")
                 cmd = [
                     'ffmpeg', '-y', '-i', str(filepath),
                     '-movflags', 'faststart', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
@@ -214,10 +219,10 @@ class RedditImageDownloader:
                     result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     mp4_size = os.path.getsize(mp4_path)
                     percent_diff = ((gif_size - mp4_size) / gif_size) * 100 if gif_size else 0
-                    print(f"GIF size: {gif_size/1024:.2f} KB, MP4 size: {mp4_size/1024:.2f} KB, Size reduced by: {percent_diff:.2f}%")
+                    logger.info(f"GIF size: {gif_size/1024:.2f} KB, MP4 size: {mp4_size/1024:.2f} KB, Size reduced by: {percent_diff:.2f}%")
                     # Remove GIF file
                     os.remove(filepath)
-                    print(f"Deleted original GIF: {filepath}")
+                    logger.info(f"Deleted original GIF: {filepath}")
                     # Save ffmpeg details (stderr output)
                     ffmpeg_details = result.stderr.decode(errors='ignore')
                     # Update DB with MP4 details
@@ -234,9 +239,9 @@ class RedditImageDownloader:
                     #     conn.commit()
                     #     conn.close()
                     # except Exception as e:
-                    #     print(f"Failed to save ffmpeg details: {e}")
+                    #     logger.error(f"Failed to save ffmpeg details: {e}")
                 except Exception as conv_err:
-                    print(f"GIF to MP4 conversion failed: {conv_err}")
+                    logger.error(f"GIF to MP4 conversion failed: {conv_err}")
             else:
                 # Save metadata for non-GIF files
                 self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
@@ -246,14 +251,14 @@ class RedditImageDownloader:
                     new_filepath = filepath.parent / new_filename
                     filepath.rename(new_filepath)
                     self._update_file_path_in_db(url, str(new_filepath))
-                    print(f"✓ Restored: {new_filename}")
+                    logger.success(f"✓ Restored: {new_filename}")
                 else:
-                    print(f"✓ Re-downloaded: {filename}")
+                    logger.success(f"✓ Re-downloaded: {filename}")
             else:
-                print(f"✓ Downloaded: {filename}")
+                logger.success(f"✓ Downloaded: {filename}")
             return True
         except Exception as e:
-            print(f"✗ Failed to download {url}: {e}")
+            logger.error(f"✗ Failed to download {url}: {e}")
             return False
     
     def _sanitize_folder_name(self, name: str) -> str:
@@ -281,7 +286,7 @@ class RedditImageDownloader:
                 columns = [desc[0] for desc in cursor.description]
                 return dict(zip(columns, result))
         except Exception as e:
-            print(f"⚠️  Warning: Could not query metadata database: {e}")
+            logger.warning(f"⚠️  Warning: Could not query metadata database: {e}")
         return None
 
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
@@ -309,7 +314,7 @@ class RedditImageDownloader:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"⚠️  Warning: Could not save metadata: {e}")
+            logger.warning(f"⚠️  Warning: Could not save metadata: {e}")
 
     def _update_file_path_in_db(self, url: str, new_filepath: str):
         """Update file path in MySQL database."""
@@ -320,7 +325,7 @@ class RedditImageDownloader:
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"⚠️  Warning: Could not update file path: {e}")
+            logger.warning(f"⚠️  Warning: Could not update file path: {e}")
 
     def _mark_image_as_deleted(self, url: str):
         """Mark an image as deleted in MySQL database by setting is_deleted to True."""
@@ -330,15 +335,15 @@ class RedditImageDownloader:
             cursor.execute('UPDATE images SET is_deleted = 1 WHERE url = %s', (url,))
             conn.commit()
             conn.close()
-            print(f"Marked as deleted: {url}")
+            logger.info(f"Marked as deleted: {url}")
         except Exception as e:
-            print(f"Error marking image as deleted: {e}")
+            logger.error(f"Error marking image as deleted: {e}")
 
     def check_deleted_images(self, subreddit: str = None) -> List[Dict]:
         """Check which previously downloaded images are now deleted."""
         deleted_images = []
         if not self.reddit:
-            print("❌ Reddit connection required to check for deleted images")
+            logger.error("❌ Reddit connection required to check for deleted images")
             return deleted_images
         try:
             conn = mysql.connector.connect(**mysql_config)
@@ -369,9 +374,9 @@ class RedditImageDownloader:
                     })
             for img in deleted_images:
                 self._mark_image_as_deleted(img['url'])
-                print(f"📝 Marked as deleted in DB: {img['filename']}")
+                logger.info(f"📝 Marked as deleted in DB: {img['filename']}")
         except Exception as e:
-            print(f"❌ Error checking deleted images: {e}")
+            logger.error(f"❌ Error checking deleted images: {e}")
         return deleted_images
 
 
@@ -382,7 +387,7 @@ class RedditImageDownloader:
             config_file_path = Path(self.config_file)
             
             if not config_file_path.exists():
-                print(f"⚠️  Config file not found: {config_file_path}")
+                logger.warning(f"⚠️  Config file not found: {config_file_path}")
                 return items
             
             # Read the raw config file to handle multiple values in a section
@@ -409,14 +414,14 @@ class RedditImageDownloader:
                                 items.append(clean_name)
         
         except Exception as e:
-            print(f"⚠️  Warning: Could not parse {section} list: {e}")
+            logger.warning(f"⚠️  Warning: Could not parse {section} list: {e}")
         
         return items
 
     def scrape_from_config_list(self, scrape_type: str = "all"):
         """Scrape images from configured lists."""
         if not self.reddit:
-            print("❌ Reddit connection required for batch scraping")
+            logger.error("❌ Reddit connection required for batch scraping")
             return
         
         total_downloads = 0
@@ -426,11 +431,11 @@ class RedditImageDownloader:
             #subreddits = self.parse_scrape_list('scrape_list')
             subreddits = [line.strip() for line in config['scrape_list']['list'].splitlines() if line.strip()]
             if subreddits:
-                print(f"\n📂 Found {len(subreddits)} subreddits in config")
+                logger.info(f"\n📂 Found {len(subreddits)} subreddits in config")
                 for subreddit in subreddits:
                     # Clean subreddit name (remove r/ if present)
                     clean_name = subreddit.replace('r/', '').strip()
-                    print(f"\n🔍 Scraping r/{clean_name}...")
+                    logger.info(f"\n🔍 Scraping r/{clean_name}...")
                     
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
                     self.download_from_subreddit(clean_name, limit)
@@ -440,22 +445,22 @@ class RedditImageDownloader:
         if scrape_type in ["all", "users"]:
             users = self.parse_scrape_list('user_scrape_list')
             if users:
-                print(f"\n👤 Found {len(users)} users in config")
+                logger.info(f"\n👤 Found {len(users)} users in config")
                 for username in users:
                     # Clean username (remove u/ if present)
                     clean_name = username.replace('u/', '').strip()
-                    print(f"\n🔍 Scraping u/{clean_name}...")
+                    logger.info(f"\n🔍 Scraping u/{clean_name}...")
                     
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
                     self.download_from_user(clean_name, limit)
                     total_downloads += 1
         
-        print(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
+        logger.success(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
 
     def download_from_user(self, username: str, limit: int = 25):
         """Download images from a specific user's posts."""
         if not self.reddit:
-            print("❌ Reddit connection required to access user posts")
+            logger.error("❌ Reddit connection required to access user posts")
             return
         
         try:
@@ -465,7 +470,7 @@ class RedditImageDownloader:
             user = self.reddit.redditor(username)
             post_data_list = []
             
-            print(f"🔍 Fetching posts from u/{username}...")
+            logger.info(f"🔍 Fetching posts from u/{username}...")
             
             submissions = user.submissions.new(limit=limit)
             
@@ -496,22 +501,22 @@ class RedditImageDownloader:
                     })
             
             if not post_data_list:
-                print(f"❌ No image posts found for u/{username}")
+                logger.warning(f"❌ No image posts found for u/{username}")
                 return
             
-            print(f"📸 Found {len(post_data_list)} image posts from u/{username}")
+            logger.info(f"📸 Found {len(post_data_list)} image posts from u/{username}")
             
             urls = [post['url'] for post in post_data_list]
             self.download_from_urls(urls, username, post_data_list)
             
         except Exception as e:
-            print(f"❌ Error fetching posts from u/{username}: {e}")
+            logger.error(f"❌ Error fetching posts from u/{username}: {e}")
 
     def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
                                     time_filter: str = 'all') -> List[Dict]:
         """Get image URLs from a subreddit, saving gallery posts as a single record with all image URLs comma-separated."""
         if not self.reddit:
-            print("❌ Authentication required to access subreddit content")
+            logger.error("❌ Authentication required to access subreddit content")
             return []
         try:
             sub = self.reddit.subreddit(subreddit)
@@ -559,7 +564,7 @@ class RedditImageDownloader:
                     url = post.url
                     if self._is_image_url(url):
                         if self._get_image_record(url):
-                            print(f"🛑 Already downloaded: {url}. Stopping further scraping for r/{subreddit}.")
+                            logger.warning(f"🛑 Already downloaded: {url}. Stopping further scraping for r/{subreddit}.")
                             break
                         post_username = str(post.author) if post.author else ''
                         comments_list = []
@@ -586,7 +591,7 @@ class RedditImageDownloader:
                         })
             return image_posts
         except Exception as e:
-            print(f"❌ Error accessing subreddit {subreddit}: {e}")
+            logger.error(f"❌ Error accessing subreddit {subreddit}: {e}")
             return []
 
     def _is_image_url(self, url: str) -> bool:
@@ -608,26 +613,26 @@ class RedditImageDownloader:
         successful = 0
         total = len(urls)
         
-        print(f"\n📥 Downloading {total} images...")
+        logger.info(f"\n📥 Downloading {total} images...")
         
         for i, url in enumerate(urls, 1):
-            print(f"[{i}/{total}] {url}")
+            logger.info(f"[{i}/{total}] {url}")
             post_data = url_data[i-1] if url_data and i <= len(url_data) else None
             if self.download_image(url, subreddit=subreddit, post_data=post_data):
                 successful += 1
         
-        print(f"\n✅ Download complete: {successful}/{total} images downloaded")
+        logger.success(f"\n✅ Download complete: {successful}/{total} images downloaded")
 
     def download_from_subreddit(self, subreddit: str, limit: int = 25):
         """Download images from a subreddit."""
-        print(f"\n🔍 Fetching images from r/{subreddit}...")
+        logger.info(f"\n🔍 Fetching images from r/{subreddit}...")
         image_posts = self.get_image_urls_from_subreddit(subreddit, limit)
         
         if not image_posts:
-            print("❌ No images found")
+            logger.warning("❌ No images found")
             return
         
-        print(f"📸 Found {len(image_posts)} image posts")
+        logger.info(f"📸 Found {len(image_posts)} image posts")
         
         urls = [post['url'] for post in image_posts]
         self.download_from_urls(urls, subreddit, image_posts)
@@ -635,14 +640,14 @@ class RedditImageDownloader:
     def get_user_saved_posts(self, limit: int = 25) -> List[Dict]:
         """Get saved posts from authenticated user."""
         if not self.reddit:
-            print("❌ Reddit connection required to access saved posts")
+            logger.error("❌ Reddit connection required to access saved posts")
             return []
         
         try:
             # Check if we have user authentication
             if not hasattr(self.reddit.user, 'me') or self.reddit.user.me() is None:
-                print("❌ User authentication required to access saved posts")
-                print("   Add username and password to config.ini for this feature")
+                logger.error("❌ User authentication required to access saved posts")
+                logger.info("   Add username and password to config.ini for this feature")
                 return []
                 
             saved_posts = []
@@ -661,7 +666,7 @@ class RedditImageDownloader:
             return saved_posts
             
         except Exception as e:
-            print(f"❌ Error fetching saved posts: {e}")
+            logger.error(f"❌ Error fetching saved posts: {e}")
             return []
 
     def resolve_imgur_url(self, url: str) -> str:
@@ -694,8 +699,8 @@ def create_default_config():
     with open('config.ini', 'w') as f:
         config.write(f)
     
-    print("📝 Created config.ini file. Please edit it with your Reddit credentials.")
-    print("   Get Reddit API credentials at: https://www.reddit.com/prefs/apps")
+    logger.info("📝 Created config.ini file. Please edit it with your Reddit credentials.")
+    logger.info("   Get Reddit API credentials at: https://www.reddit.com/prefs/apps")
 
 
 def main():
@@ -721,22 +726,22 @@ def main():
         return
     
     if not os.path.exists(args.config):
-        print("❌ Config file not found. Run with --setup to create one.")
+        logger.error("❌ Config file not found. Run with --setup to create one.")
         return
 
     # Loop mode: run --scrape-all every 5 minutes
     if args.loop:
         while True:
-            print("\n⏳ Running batch scrape (--scrape-all)...")
+            logger.info("\n⏳ Running batch scrape (--scrape-all)...")
             try:
                 downloader = RedditImageDownloader(args.config)
                 downloader.scrape_from_config_list("all")
             except KeyboardInterrupt:
-                print("\n⏹️  Download cancelled by user")
+                logger.warning("\n⏹️  Download cancelled by user")
                 break
             except Exception as e:
-                print(f"❌ Error: {e}")
-            print("🕒 Sleeping for 5 minutes...")
+                logger.error(f"❌ Error: {e}")
+            logger.info("🕒 Sleeping for 5 minutes...")
             time.sleep(300)
         return
 
@@ -744,24 +749,24 @@ def main():
         downloader = RedditImageDownloader(args.config)
         
         if args.saved:
-            print("📖 Fetching saved posts...")
+            logger.info("📖 Fetching saved posts...")
             saved_posts = downloader.get_user_saved_posts(args.limit)
             if saved_posts:
                 urls = [post['url'] for post in saved_posts]
                 downloader.download_from_urls(urls, "saved_posts", saved_posts)
             else:
-                print("❌ No saved image posts found")
+                logger.warning("❌ No saved image posts found")
         
         elif args.scrape_all:
-            print("📋 Scraping all sources from config...")
+            logger.info("📋 Scraping all sources from config...")
             downloader.scrape_from_config_list("all")
         
         elif args.scrape_subreddits:
-            print("📂 Scraping subreddits from config...")
+            logger.info("📂 Scraping subreddits from config...")
             downloader.scrape_from_config_list("subreddits")
         
         elif args.scrape_users:
-            print("👤 Scraping users from config...")
+            logger.info("👤 Scraping users from config...")
             downloader.scrape_from_config_list("users")
         
         elif args.user:
@@ -781,9 +786,9 @@ def main():
                 deleted = downloader.check_deleted_images(args.check_deleted)
             
             if deleted:
-                print(f"\n📝 Found {len(deleted)} marked/moved deleted images")
+                logger.info(f"\n📝 Found {len(deleted)} marked/moved deleted images")
             else:
-                print("\n✅ No deleted images found")
+                logger.success("\n✅ No deleted images found")
         
         elif args.list_metadata:
             pass  # TODO: Implement metadata listing
@@ -792,9 +797,9 @@ def main():
             parser.print_help()
             
     except KeyboardInterrupt:
-        print("\n⏹️  Download cancelled by user")
+        logger.warning("\n⏹️  Download cancelled by user")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.error(f"❌ Error: {e}")
 
 
 if __name__ == "__main__":
