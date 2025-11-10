@@ -1,6 +1,8 @@
 [bot]
 # Telegram bot token from BotFather. Keep it private!
 token = 1234567890:ABCdefGhIJKlmNoPQRstuVwxyZ
+# Optional: customize where user interaction details are stored
+user_store = telegram_bot_users.json
 
 [folders]
 # Map folder labels to absolute or relative paths containing images

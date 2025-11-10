@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import json
+import logging
+from datetime import datetime
 from collections import defaultdict
 from configparser import ConfigParser
 from dataclasses import dataclass
@@ -58,6 +59,7 @@ class BotSettings:
     download_folder: Optional[Path] = None
     auto_send: "AutoSendSettings" = None
     chat_store_path: Path = None
+    user_store_path: Path = None
 
 
 @dataclass
@@ -109,6 +111,49 @@ class ChatRegistry:
     async def get_chats(self) -> List[int]:
         async with self._lock:
             return list(self._chats)
+
+
+class UserRegistry:
+    def __init__(self, path: Path):
+        self._path = path
+        self._users: Dict[int, Dict[str, object]] = {}
+        self._lock = asyncio.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            data = self._path.read_text(encoding="utf-8")
+            if data:
+                raw_users = json.loads(data)
+                if isinstance(raw_users, dict):
+                    self._users = {int(k): v for k, v in raw_users.items()}
+                elif isinstance(raw_users, list):
+                    self._users = {int(item["id"]): item for item in raw_users if "id" in item}
+        except Exception as exc:
+            logging.warning("Failed to load user registry: %s", exc)
+
+    def _save(self) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {str(user_id): data for user_id, data in self._users.items()}
+            self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logging.warning("Failed to persist user registry: %s", exc)
+
+    async def add_or_update_user(self, user_data: Dict[str, object]) -> None:
+        user_id = int(user_data["id"])
+        async with self._lock:
+            existing = self._users.get(user_id, {})
+            merged = {**existing, **user_data}
+            merged["last_interaction"] = datetime.utcnow().isoformat() + "Z"
+            self._users[user_id] = merged
+            self._save()
+
+    async def get_users(self) -> List[Dict[str, object]]:
+        async with self._lock:
+            return list(self._users.values())
 
 
 class ImageManager:
@@ -202,12 +247,16 @@ def resolve_bot_settings(args: argparse.Namespace) -> BotSettings:
     )
     chat_store_path = (config_path.parent / chat_store).resolve()
 
+    user_store = config.get("bot", "user_store", fallback="telegram_bot_users.json")
+    user_store_path = (config_path.parent / user_store).resolve()
+
     return BotSettings(
         token=token,
         folders=folders,
         download_folder=download_folder,
         auto_send=auto_send,
         chat_store_path=chat_store_path,
+        user_store_path=user_store_path,
     )
 
 
@@ -287,6 +336,7 @@ def ensure_unique_name(name: str, existing: Dict[str, Path]) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await register_user(update, context)
     manager: ImageManager = context.bot_data["image_manager"]
     folders = ", ".join(manager.folders.keys())
     message = (
@@ -303,6 +353,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def list_folders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await register_user(update, context)
     manager: ImageManager = context.bot_data["image_manager"]
     if not manager.folders:
         await update.message.reply_text("No folders configured yet.")
@@ -316,18 +367,21 @@ async def list_folders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def send_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await register_user(update, context)
     folder_key = context.args[0] if context.args else None
     await register_chat(update, context)
     await _send_image(update, context, folder_key, random_mode=False)
 
 
 async def send_random(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await register_user(update, context)
     folder_key = context.args[0] if context.args else None
     await register_chat(update, context)
     await _send_image(update, context, folder_key, random_mode=True)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await register_user(update, context)
     text = (update.message.text or "").strip().lower()
     await register_chat(update, context)
     if text in {"next", "send"}:
@@ -387,6 +441,33 @@ def resolve_display_name(path: Path, folders: Dict[str, Path]) -> str:
     return path.parent.name
 
 
+async def register_user(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_override=None,
+) -> Optional[int]:
+    user = user_override or update.effective_user
+    if not user:
+        return None
+    registry: UserRegistry = context.bot_data["user_registry"]
+    chat = update.effective_chat
+    payload = {
+        "id": user.id,
+        "is_bot": user.is_bot,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "username": user.username or "",
+        "full_name": user.full_name if hasattr(user, "full_name") else "",
+        "language_code": getattr(user, "language_code", None),
+    }
+    if chat:
+        payload["last_chat_id"] = chat.id
+        payload["last_chat_type"] = chat.type
+        payload["last_chat_title"] = chat.title or ""
+    await registry.add_or_update_user(payload)
+    return user.id
+
+
 async def register_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
     chat = update.effective_chat
     if not chat:
@@ -401,6 +482,12 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
     member_update = update.my_chat_member
     if not chat or not member_update:
         return
+
+    if member_update.from_user:
+        await register_user(update, context, member_update.from_user)
+    new_user = getattr(member_update.new_chat_member, "user", None)
+    if new_user:
+        await register_user(update, context, new_user)
 
     status = member_update.new_chat_member.status
     if status in {"member", "administrator", "creator"}:
@@ -421,6 +508,7 @@ def build_application(settings: BotSettings) -> Application:
     application.bot_data["image_manager"] = ImageManager(settings.folders)
     application.bot_data["auto_send_settings"] = settings.auto_send
     application.bot_data["chat_registry"] = ChatRegistry(settings.chat_store_path)
+    application.bot_data["user_registry"] = UserRegistry(settings.user_store_path)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
@@ -498,7 +586,7 @@ async def auto_send_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 else:
                     image_path = await manager.get_next_image(folder, chat_id)
 
-                caption = f"📸 {image_path.name}\nFolder: {folder}"
+                caption = f"📸"
                 with image_path.open("rb") as image_file:
                     await context.bot.send_photo(chat_id=chat_id, photo=image_file, caption=caption)
             except Forbidden:
