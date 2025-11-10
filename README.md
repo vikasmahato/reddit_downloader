@@ -233,6 +233,42 @@ downloads/
 - Keep this file secure and never commit it to version control
 - Consider using environment variables for production deployments
 
+## Telegram Image Bot
+
+Automatically share downloaded images via Telegram using the bundled bot.
+
+### Configure
+
+1. Install dependencies (already included in `requirements.txt`).
+2. Create `telegram_bot.ini` next to this README:
+   ```ini
+   [bot]
+   token = 8365928967:AAE-o8JSQ7IuZxdToneLsbXDfHTprrisrnA
+
+   [folders]
+   wallpapers = downloads/wallpapers
+   saved = downloads/saved_posts
+   ```
+
+   - Folder paths may be absolute or relative to the repository root.
+   - If you omit the `[folders]` section, the bot falls back to the downloader's `download_folder`
+     (from `config.ini`) when available.
+
+3. Run the bot:
+
+```bash
+python telegram_image_bot.py --config telegram_bot.ini
+```
+
+Commands:
+
+- `/start` or `/help` – show usage tips
+- `/folders` – list configured folders and their paths
+- `/next <folder>` – send the next image from a folder (cycles per chat)
+- `/random <folder>` – send a random image from a folder
+
+Plain text shortcuts: send `next` or `random` without the slash.
+
 ## Web UI
 
 The Reddit Image Downloader includes a web-based interface for browsing your downloaded images and metadata.

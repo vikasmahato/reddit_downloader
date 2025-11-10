@@ -6,3 +6,4 @@ flask>=2.0.0
 Pillow
 mysql-connector-python
 moviepy
+python-telegram-bot>=20.5,<21
