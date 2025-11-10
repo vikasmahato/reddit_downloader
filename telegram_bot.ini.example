@@ -1,0 +1,18 @@
+[bot]
+# Telegram bot token from BotFather. Keep it private!
+token = 1234567890:ABCdefGhIJKlmNoPQRstuVwxyZ
+
+[folders]
+# Map folder labels to absolute or relative paths containing images
+downloads = downloads
+wallpapers = downloads/wallpapers
+saved = downloads/saved_posts
+
+[auto_send]
+# Enable periodic delivery without manual prompts
+enabled = true
+interval_seconds = 3600
+mode = random
+# Optional comma-separated list of folder labels; omit to use all folders
+folders = downloads, wallpapers, saved
+

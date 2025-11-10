@@ -248,6 +248,12 @@ Automatically share downloaded images via Telegram using the bundled bot.
    [folders]
    wallpapers = downloads/wallpapers
    saved = downloads/saved_posts
+
+   [auto_send]
+   enabled = true
+   interval_seconds = 1800        # send every 30 minutes
+   mode = random                  # random or sequential
+   folders = wallpapers, saved    # optional subset; defaults to all when omitted
    ```
 
    - Folder paths may be absolute or relative to the repository root.
@@ -266,6 +272,7 @@ Commands:
 - `/folders` – list configured folders and their paths
 - `/next <folder>` – send the next image from a folder (cycles per chat)
 - `/random <folder>` – send a random image from a folder
+- Background auto-send – when `[auto_send]` is enabled the bot periodically pushes images to every chat without waiting for commands.
 
 Plain text shortcuts: send `next` or `random` without the slash.
 

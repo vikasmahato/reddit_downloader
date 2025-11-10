@@ -19,21 +19,24 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import json
 from collections import defaultdict
 from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
+    ChatMemberHandler,
     ContextTypes,
     MessageHandler,
     filters,
 )
+from telegram.error import Forbidden
 
 
 IMAGE_EXTENSIONS = {
@@ -53,6 +56,59 @@ class BotSettings:
     token: str
     folders: Dict[str, Path]
     download_folder: Optional[Path] = None
+    auto_send: "AutoSendSettings" = None
+    chat_store_path: Path = None
+
+
+@dataclass
+class AutoSendSettings:
+    enabled: bool
+    interval_seconds: int
+    mode: str  # "random" or "sequential"
+    folders: List[str]
+
+
+class ChatRegistry:
+    def __init__(self, path: Path):
+        self._path = path
+        self._chats: Set[int] = set()
+        self._lock = asyncio.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        if not self._path.exists():
+            return
+        try:
+            data = self._path.read_text(encoding="utf-8")
+            if data:
+                ids = json.loads(data)
+                if isinstance(ids, list):
+                    self._chats = {int(x) for x in ids}
+        except Exception as exc:
+            logging.warning("Failed to load chat registry: %s", exc)
+
+    def _save(self) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(json.dumps(sorted(self._chats)), encoding="utf-8")
+        except Exception as exc:
+            logging.warning("Failed to persist chat registry: %s", exc)
+
+    async def add_chat(self, chat_id: int) -> None:
+        async with self._lock:
+            if chat_id not in self._chats:
+                self._chats.add(chat_id)
+                self._save()
+
+    async def remove_chat(self, chat_id: int) -> None:
+        async with self._lock:
+            if chat_id in self._chats:
+                self._chats.remove(chat_id)
+                self._save()
+
+    async def get_chats(self) -> List[int]:
+        async with self._lock:
+            return list(self._chats)
 
 
 class ImageManager:
@@ -126,6 +182,7 @@ def resolve_bot_settings(args: argparse.Namespace) -> BotSettings:
 
     token = resolve_token(config)
     folders = resolve_folders(config, config_path.parent)
+    auto_send = resolve_auto_send(config, folders)
 
     download_folder = None
     if config.has_section("general"):
@@ -140,7 +197,18 @@ def resolve_bot_settings(args: argparse.Namespace) -> BotSettings:
                 "No folders configured. Add a [folders] section to the config file."
             )
 
-    return BotSettings(token=token, folders=folders, download_folder=download_folder)
+    chat_store = config.get(
+        "auto_send", "chat_store", fallback="telegram_bot_chats.json"
+    )
+    chat_store_path = (config_path.parent / chat_store).resolve()
+
+    return BotSettings(
+        token=token,
+        folders=folders,
+        download_folder=download_folder,
+        auto_send=auto_send,
+        chat_store_path=chat_store_path,
+    )
 
 
 def resolve_token(config: ConfigParser) -> str:
@@ -160,6 +228,32 @@ def resolve_folders(config: ConfigParser, base_dir: Path) -> Dict[str, Path]:
             unique_name = ensure_unique_name(label, folder_mapping)
             folder_mapping[unique_name] = path
     return folder_mapping
+
+
+def resolve_auto_send(config: ConfigParser, folders: Dict[str, Path]) -> AutoSendSettings:
+    if not config.has_section("auto_send"):
+        return AutoSendSettings(False, 0, "random", [])
+
+    enabled = config.getboolean("auto_send", "enabled", fallback=False)
+    interval = config.getint("auto_send", "interval_seconds", fallback=3600)
+    mode = config.get("auto_send", "mode", fallback="random").strip().lower()
+    if mode not in {"random", "sequential"}:
+        raise ValueError("auto_send.mode must be either 'random' or 'sequential'")
+
+    folder_list_raw = config.get("auto_send", "folders", fallback="")
+    folder_names = [
+        name.strip()
+        for name in folder_list_raw.replace("\n", ",").split(",")
+        if name.strip()
+    ]
+    # Validate specified folders
+    validated = []
+    for name in folder_names:
+        if name not in folders:
+            raise ValueError(f"auto_send folder '{name}' not found in [folders] section")
+        validated.append(name)
+
+    return AutoSendSettings(enabled, interval, mode, validated)
 
 
 def parse_folder_entry(entry: str, base_dir: Path) -> Tuple[str, Path]:
@@ -205,6 +299,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if folders:
         message += f"\n\nAvailable folders: {folders}"
     await update.message.reply_text(message)
+    await register_chat(update, context)
 
 
 async def list_folders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -217,20 +312,24 @@ async def list_folders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     for name, path in manager.folders.items():
         lines.append(f"• {name} → {path}")
     await update.message.reply_text("\n".join(lines))
+    await register_chat(update, context)
 
 
 async def send_next(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     folder_key = context.args[0] if context.args else None
+    await register_chat(update, context)
     await _send_image(update, context, folder_key, random_mode=False)
 
 
 async def send_random(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     folder_key = context.args[0] if context.args else None
+    await register_chat(update, context)
     await _send_image(update, context, folder_key, random_mode=True)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (update.message.text or "").strip().lower()
+    await register_chat(update, context)
     if text in {"next", "send"}:
         await send_next(update, context)
     elif text in {"random", "shuffle"}:
@@ -288,6 +387,29 @@ def resolve_display_name(path: Path, folders: Dict[str, Path]) -> str:
     return path.parent.name
 
 
+async def register_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
+    chat = update.effective_chat
+    if not chat:
+        return None
+    registry: ChatRegistry = context.bot_data["chat_registry"]
+    await registry.add_chat(chat.id)
+    return chat.id
+
+
+async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    member_update = update.my_chat_member
+    if not chat or not member_update:
+        return
+
+    status = member_update.new_chat_member.status
+    if status in {"member", "administrator", "creator"}:
+        await register_chat(update, context)
+    elif status in {"left", "kicked"}:
+        registry: ChatRegistry = context.bot_data["chat_registry"]
+        await registry.remove_chat(chat.id)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.exception("Telegram error: %s", context.error)
     if isinstance(update, Update) and update.effective_message:
@@ -297,14 +419,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def build_application(settings: BotSettings) -> Application:
     application = Application.builder().token(settings.token).build()
     application.bot_data["image_manager"] = ImageManager(settings.folders)
+    application.bot_data["auto_send_settings"] = settings.auto_send
+    application.bot_data["chat_registry"] = ChatRegistry(settings.chat_store_path)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
     application.add_handler(CommandHandler("folders", list_folders))
     application.add_handler(CommandHandler("next", send_next))
     application.add_handler(CommandHandler("random", send_random))
+    application.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     application.add_error_handler(error_handler)
+
+    schedule_auto_send(application)
     return application
 
 
@@ -330,6 +457,58 @@ def main() -> None:
     application = build_application(settings)
     logging.info("Bot starting. Serving folders: %s", ", ".join(settings.folders.keys()))
     application.run_polling(stop_signals=None)
+
+
+def schedule_auto_send(application: Application) -> None:
+    auto_settings: AutoSendSettings = application.bot_data.get("auto_send_settings")
+    if not auto_settings or not auto_settings.enabled:
+        return
+
+    interval = max(auto_settings.interval_seconds, 60)
+    application.job_queue.run_repeating(
+        auto_send_job,
+        interval=interval,
+        first=interval,
+        name="auto-send-images",
+    )
+
+
+async def auto_send_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    auto_settings: AutoSendSettings = context.bot_data.get("auto_send_settings")
+    manager: ImageManager = context.bot_data["image_manager"]
+    registry: ChatRegistry = context.bot_data["chat_registry"]
+
+    if not auto_settings or not auto_settings.enabled:
+        return
+
+    folders = auto_settings.folders or list(manager.folders.keys())
+    if not folders:
+        return
+
+    chat_ids = await registry.get_chats()
+    if not chat_ids:
+        return
+
+    for chat_id in chat_ids:
+        for folder in folders:
+            try:
+                await context.bot.send_chat_action(chat_id, ChatAction.UPLOAD_PHOTO)
+                if auto_settings.mode == "random":
+                    image_path = await manager.get_random_image(folder)
+                else:
+                    image_path = await manager.get_next_image(folder, chat_id)
+
+                caption = f"📸 {image_path.name}\nFolder: {folder}"
+                with image_path.open("rb") as image_file:
+                    await context.bot.send_photo(chat_id=chat_id, photo=image_file, caption=caption)
+            except Forbidden:
+                logging.info("Bot removed from chat %s; removing from registry.", chat_id)
+                await registry.remove_chat(chat_id)
+                break
+            except FileNotFoundError as exc:
+                logging.warning("Auto-send: %s", exc)
+            except Exception as exc:
+                logging.exception("Auto-send error for chat %s: %s", chat_id, exc)
 
 
 if __name__ == "__main__":
