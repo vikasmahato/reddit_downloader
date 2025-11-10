@@ -290,7 +290,7 @@ class RedditImageDownloader:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM images WHERE url = %s', (url,))
+            cursor.execute('SELECT * FROM images WHERE url = %s OR FIND_IN_SET(%s, url)', (url, url))
             result = cursor.fetchone()
             conn.close()
             if result:
@@ -503,30 +503,41 @@ class RedditImageDownloader:
             submissions = user.submissions.new(limit=limit)
             
             for submission in submissions:
-                if not submission.is_self and self._is_image_url(submission.url):
-                    # Fetch comments for each post
+                if submission.is_self:
+                    continue
+
+                gallery_urls = self._extract_gallery_urls(submission)
+                has_gallery = bool(gallery_urls)
+                if not has_gallery and not self._is_image_url(submission.url):
+                    continue
+
+                # Fetch comments for each post
+                comments_list = []
+                try:
+                    submission.comments.replace_more(limit=0)
+                    for c in submission.comments[:10]:
+                        comments_list.append({
+                            'author': str(c.author) if c.author else '',
+                            'body': c.body,
+                            'score': c.score,
+                            'created_utc': c.created_utc
+                        })
+                except Exception:
                     comments_list = []
-                    try:
-                        submission.comments.replace_more(limit=0)
-                        for c in submission.comments[:10]:
-                            comments_list.append({
-                                'author': str(c.author) if c.author else '',
-                                'body': c.body,
-                                'score': c.score,
-                                'created_utc': c.created_utc
-                            })
-                    except Exception:
-                        comments_list = []
-                    post_data_list.append({
-                        'title': submission.title,
-                        'url': submission.url,
-                        'author': str(submission.author),
-                        'subreddit': str(submission.subreddit),
-                        'permalink': submission.permalink,
-                        'created_utc': submission.created_utc,
-                        'score': submission.score,
-                        'comments': json.dumps(comments_list)
-                    })
+
+                post_entry = {
+                    'title': submission.title,
+                    'url': gallery_urls[0] if has_gallery else submission.url,
+                    'author': str(submission.author),
+                    'subreddit': str(submission.subreddit),
+                    'permalink': submission.permalink,
+                    'created_utc': submission.created_utc,
+                    'score': submission.score,
+                    'comments': json.dumps(comments_list)
+                }
+                if has_gallery:
+                    post_entry['all_urls'] = ','.join(gallery_urls)
+                post_data_list.append(post_entry)
             
             if not post_data_list:
                 logger.warning(f"❌ No image posts found for u/{username}")
@@ -539,6 +550,23 @@ class RedditImageDownloader:
             
         except Exception as e:
             logger.error(f"❌ Error fetching posts from u/{username}: {e}")
+
+    def _extract_gallery_urls(self, post) -> List[str]:
+        """Extract all direct image URLs from a Reddit gallery post."""
+        all_urls: List[str] = []
+        if hasattr(post, 'gallery_data') and post.gallery_data and hasattr(post, 'media_metadata') and post.media_metadata:
+            for item in post.gallery_data.get('items', []):
+                media_id = item.get('media_id')
+                if not media_id:
+                    continue
+                meta = post.media_metadata.get(media_id)
+                if not meta or meta.get('status') != 'valid':
+                    continue
+                source = meta.get('s') or {}
+                url = source.get('u') or source.get('gif')
+                if url:
+                    all_urls.append(url.replace('&amp;', '&'))
+        return all_urls
 
     def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
                                     time_filter: str = 'all') -> List[Dict]:
@@ -553,29 +581,22 @@ class RedditImageDownloader:
             for post in posts:
                 if not post.is_self:
                     # Handle gallery posts
-                    if hasattr(post, 'gallery_data') and post.gallery_data and hasattr(post, 'media_metadata') and post.media_metadata:
-                        gallery_items = post.gallery_data['items']
-                        all_urls = []
-                        for item in gallery_items:
-                            media_id = item['media_id']
-                            meta = post.media_metadata.get(media_id)
-                            if meta and meta.get('status') == 'valid' and 's' in meta and 'u' in meta['s']:
-                                img_url = meta['s']['u'].replace('&amp;', '&')
-                                all_urls.append(img_url)
-                        if all_urls:
-                            post_username = str(post.author) if post.author else ''
+                    all_urls = self._extract_gallery_urls(post)
+                    if all_urls:
+                        post_username = str(post.author) if post.author else ''
+                        comments_list = []
+                        try:
+                            post.comments.replace_more(limit=0)
+                            for c in post.comments[:10]:
+                                comments_list.append({
+                                    'author': str(c.author) if c.author else '',
+                                    'body': c.body,
+                                    'score': c.score,
+                                    'created_utc': c.created_utc
+                                })
+                        except Exception:
                             comments_list = []
-                            try:
-                                post.comments.replace_more(limit=0)
-                                for c in post.comments[:10]:
-                                    comments_list.append({
-                                        'author': str(c.author) if c.author else '',
-                                        'body': c.body,
-                                        'score': c.score,
-                                        'created_utc': c.created_utc
-                                    })
-                            except Exception:
-                                comments_list = []
+                        if all_urls:
                             image_posts.append({
                                 'title': post.title,
                                 'url': all_urls[0],
@@ -683,16 +704,26 @@ class RedditImageDownloader:
                 
             saved_posts = []
             for post in self.reddit.user.me().saved(limit=limit):
-                if not post.is_self and self._is_image_url(post.url):
-                    saved_posts.append({
-                        'title': post.title,
-                        'url': post.url,
-                        'author': str(post.author),
-                        'subreddit': str(post.subreddit),
-                        'permalink': post.permalink,
-                        'created_utc': post.created_utc,
-                        'score': post.score
-                    })
+                if post.is_self:
+                    continue
+
+                gallery_urls = self._extract_gallery_urls(post)
+                has_gallery = bool(gallery_urls)
+                if not has_gallery and not self._is_image_url(post.url):
+                    continue
+
+                post_entry = {
+                    'title': post.title,
+                    'url': gallery_urls[0] if has_gallery else post.url,
+                    'author': str(post.author),
+                    'subreddit': str(post.subreddit),
+                    'permalink': post.permalink,
+                    'created_utc': post.created_utc,
+                    'score': post.score
+                }
+                if has_gallery:
+                    post_entry['all_urls'] = ','.join(gallery_urls)
+                saved_posts.append(post_entry)
             
             return saved_posts
             
