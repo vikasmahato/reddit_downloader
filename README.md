@@ -275,7 +275,10 @@ Commands:
 - `/next <folder>` – send the next image from a folder (cycles per chat)
 - `/random <folder>` – send a random image from a folder
 - Background auto-send – when `[auto_send]` is enabled the bot periodically pushes images to every chat without waiting for commands.
-- Every user who interacts with the bot is logged (ID, name, username, language, last chat) in `telegram_bot_users.json` (override via `user_store`).
+- Every user who interacts with the bot is logged in `telegram_bot_users.json` (override via `user_store`) with:
+  - User identifiers and profile names
+  - Interaction count and timestamp
+  - Chat history (IDs, titles/usernames) for groups and DMs
 
 Plain text shortcuts: send `next` or `random` without the slash.
 

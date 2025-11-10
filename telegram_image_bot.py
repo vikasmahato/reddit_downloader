@@ -142,12 +142,24 @@ class UserRegistry:
         except Exception as exc:
             logging.warning("Failed to persist user registry: %s", exc)
 
-    async def add_or_update_user(self, user_data: Dict[str, object]) -> None:
+    async def add_or_update_user(
+        self,
+        user_data: Dict[str, object],
+        chat_info: Optional[Dict[str, object]] = None,
+    ) -> None:
         user_id = int(user_data["id"])
         async with self._lock:
             existing = self._users.get(user_id, {})
             merged = {**existing, **user_data}
+
+            merged["interaction_count"] = int(existing.get("interaction_count", 0)) + 1
             merged["last_interaction"] = datetime.utcnow().isoformat() + "Z"
+
+            chats: List[Dict[str, object]] = existing.get("chats", [])
+            if chat_info:
+                chats = _merge_chat_info(chats, chat_info)
+            merged["chats"] = chats
+
             self._users[user_id] = merged
             self._save()
 
@@ -460,12 +472,33 @@ async def register_user(
         "full_name": user.full_name if hasattr(user, "full_name") else "",
         "language_code": getattr(user, "language_code", None),
     }
+    chat_info = None
     if chat:
         payload["last_chat_id"] = chat.id
         payload["last_chat_type"] = chat.type
         payload["last_chat_title"] = chat.title or ""
-    await registry.add_or_update_user(payload)
+        chat_info = {
+            "id": chat.id,
+            "type": chat.type,
+            "title": chat.title or "",
+            "username": getattr(chat, "username", "") or "",
+        }
+    await registry.add_or_update_user(payload, chat_info)
     return user.id
+
+
+def _merge_chat_info(
+    existing: List[Dict[str, object]],
+    new_info: Dict[str, object],
+) -> List[Dict[str, object]]:
+    new_id = int(new_info.get("id"))
+    for idx, info in enumerate(existing):
+        if int(info.get("id", 0)) == new_id:
+            existing[idx] = {**info, **new_info}
+            break
+    else:
+        existing.append(new_info)
+    return existing
 
 
 async def register_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
