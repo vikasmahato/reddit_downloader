@@ -107,18 +107,25 @@ def update_comments(config_path):
     reddit = get_reddit_instance(config_path)
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, url, permalink, comments FROM images order by id desc limit 4000")
+    cursor.execute("SELECT id, reddit_id, permalink, comments FROM posts order by id desc limit 4000")
     rows = cursor.fetchall()
     total = len(rows)
     updated = 0
     logging.info(f"Starting comment update for {total} entries.")
     for idx, row in enumerate(rows, 1):
-        img_id, url, permalink, old_comments_json = row
-        post_id = extract_post_id(permalink, url)
+        post_db_id, reddit_id, permalink, old_comments_json = row
+        
+        # Use reddit_id if available, otherwise try to extract
+        post_id = reddit_id
         if not post_id:
-            logging.warning(f"[{idx}/{total}] Could not extract post id for entry {img_id}")
+            # We don't have URL here easily unless we join, but permalink should be enough
+            post_id = extract_post_id(permalink, "")
+        
+        if not post_id:
+            logging.warning(f"[{idx}/{total}] Could not extract post id for entry {post_db_id}")
             continue
-        logging.info(f"[{idx}/{total}] Fetching comments for post id {post_id} (db id {img_id})")
+            
+        logging.info(f"[{idx}/{total}] Fetching comments for post id {post_id} (db id {post_db_id})")
         new_comments = fetch_comments(reddit, post_id)
         # Parse old comments
         try:
@@ -142,7 +149,7 @@ def update_comments(config_path):
         # Add new comments
         merged_comments.extend(new_comments)
         comments_json = json.dumps(merged_comments)
-        cursor.execute("UPDATE images SET comments = %s WHERE id = %s", (comments_json, img_id))
+        cursor.execute("UPDATE posts SET comments = %s WHERE id = %s", (comments_json, post_db_id))
         updated += 1
         if idx % 10 == 0:
             logging.info(f"Progress: {idx}/{total} processed.")

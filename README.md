@@ -13,11 +13,49 @@ A Python script that downloads images from Reddit, including content that requir
 
 ## Installation
 
+This project uses [uv](https://github.com/astral-sh/uv) for fast, reliable dependency management.
+
 1. Clone or download this repository
 2. Install dependencies:
 ```bash
-pip install -r requirements.txt
+# Install uv if you haven't already
+pip install uv
+
+# Install project dependencies
+python -m uv sync
 ```
+
+3. Activate the virtual environment:
+```bash
+# On Windows:
+.venv\Scripts\activate
+
+# On Unix/MacOS:
+source .venv/bin/activate
+```
+
+## Project Structure
+
+```
+reddit_downloader/
+├── src/reddit_downloader/          # Main package
+│   ├── downloader.py               # Main downloader script
+│   ├── web.py                      # Web UI
+│   ├── bot.py                      # Telegram bot
+│   ├── migration.py                # Database migration
+│   ├── templates/                  # Web UI templates
+│   └── utils/                      # Utility scripts
+├── config.ini                      # Configuration (create from setup)
+├── pyproject.toml                  # Project metadata
+└── reddit_downloads/               # Downloaded images
+```
+
+**CLI Commands** (after installation):
+- `reddit-downloader` - Main image downloader
+- `reddit-web` - Start web UI server
+- `reddit-bot` - Start Telegram bot
+- `reddit-migrate` - Run database migration
+
 
 ## Setup
 
@@ -37,7 +75,7 @@ pip install -r requirements.txt
 
 1. Run the setup command:
 ```bash
-python reddit_image_downloader.py --setup
+reddit-downloader --setup
 ```
 
 2. Edit the created `config.ini` file with your credentials:
@@ -86,13 +124,13 @@ max_images_per_subreddit = 25
 ### Basic Downloads
 ```bash
 # Download from a single subreddit
-python reddit_image_downloader.py --subreddit wallpapers --limit 50
+reddit-downloader --subreddit wallpapers --limit 50
 
 # Download from a specific user
-python reddit_image_downloader.py --user naturephotographer --limit 25
+reddit-downloader --user naturephotographer --limit 25
 
 # Download direct URLs
-python reddit_image_downloader.py --urls "https://i.redd.it/example.jpg"
+reddit-downloader --urls "https://i.redd.it/example.jpg"
 ```
 
 ### Batch Scraping from Config
@@ -115,28 +153,28 @@ world_nature
 Then run batch scraping:
 ```bash
 # Scrape all configured subreddits and users
-python reddit_image_downloader.py --scrape-all
+reddit-downloader --scrape-all
 
 # Scrape only subreddits from config
-python reddit_image_downloader.py --scrape-subreddits
+reddit-downloader --scrape-subreddits
 
 # Scrape only users from config
-python reddit_image_downloader.py --scrape-users
+reddit-downloader --scrape-users
 ```
 
 ### Download from Direct URLs (No Authentication Required)
 ```bash
-python reddit_image_downloader.py --urls "https://i.redd.it/example.jpg" "https://imgur.com/example.png"
+reddit-downloader --urls "https://i.redd.it/example.jpg" "https://imgur.com/example.png"
 ```
 
 ### Download Saved Posts (Requires Authentication)
 ```bash
-python reddit_image_downloader.py --saved --limit 100
+reddit-downloader --saved --limit 100
 ```
 
 ### Download from Private Subreddit
 ```bash
-python reddit_image_downloader.py --subreddit private_subreddit_name --limit 25
+reddit-downloader --subreddit private_subreddit_name --limit 25
 ```
 
 ## Command Line Options
@@ -152,22 +190,22 @@ python reddit_image_downloader.py --subreddit private_subreddit_name --limit 25
 
 ### Download Popular Wallpapers
 ```bash
-python reddit_image_downloader.py --subreddit wallpapers --limit 100
+reddit-downloader --subreddit wallpapers --limit 100
 ```
 
 ### Download Photography Images
 ```bash
-python reddit_image_downloader.py --subreddit earthporn --limit 50
+reddit-downloader --subreddit earthporn --limit 50
 ```
 
 ### Download Memes
 ```bash
-python reddit_image_downloader.py --subreddit memes --limit 30
+reddit-downloader --subreddit memes --limit 30
 ```
 
 ### Download from Your Saved Posts
 ```bash
-python reddit_image_downloader.py --saved --limit 50
+reddit-downloader --saved --limit 50
 ```
 
 ## Output Structure
@@ -289,10 +327,10 @@ The Reddit Image Downloader includes a web-based interface for browsing your dow
 ### Start the Web Interface
 
 ```bash
-python web_ui.py
+reddit-web
 ```
 
-Then open your browser to: http://localhost:5000
+Then open your browser to: http://localhost:4000
 
 ### Features
 
@@ -356,6 +394,33 @@ The web UI also provides REST API endpoints:
 - `GET /image/<path>` - Serve image files
 - `GET /details/<id>` - View detailed image information
 
+## Database Schema & Migration
+
+The project uses a normalized MySQL database with separate tables for posts, images, and their relationships. This prevents duplicate image storage and organizes metadata efficiently.
+
+### Schema Overview
+
+- **`posts`**: Reddit post metadata (title, author, subreddit, score, comments)
+- **`images`**: Physical file information (filename, path, size, hash)
+- **`post_images`**: Links posts to images (many-to-many relationship)
+
+### Migration from Old Schema
+
+If you have an existing database from a previous version:
+
+1. **Backup your database** before proceeding
+2. **Ensure MySQL is running** and `config.ini` has correct `[mysql]` credentials
+3. **Run the migration**:
+   ```bash
+   reddit-migrate
+   ```
+
+The migration script will:
+- Create new tables (`posts`, `images`, `post_images`)
+- Migrate existing data from the old `images` table
+- Calculate file hashes for duplicate detection
+- Preserve the old table as `images_old` (backup)
+
 ## License
 
-This script is provided as-is for educational and personal use. Please respect Reddit's terms of service and the subreddit-specific rules when downloading content.
+This script is provided as-is for educational and personal use. Please respect Reddit's terms of service and subreddit-specific rules when downloading content.

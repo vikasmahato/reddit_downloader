@@ -1,0 +1,32 @@
+[project]
+name = "reddit-downloader"
+version = "2.0.0"
+description = "A Python tool to download images from Reddit with MySQL metadata storage"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "vikasmahato" }
+]
+dependencies = [
+    "praw>=7.8.1",
+    "requests>=2.25.0",
+    "flask>=2.0.0",
+    "pillow>=9.0.0",
+    "mysql-connector-python>=8.0.0",
+    "moviepy>=1.0.0",
+    "python-telegram-bot>=20.5,<21",
+    "loguru>=0.7.0",
+]
+
+[project.scripts]
+reddit-downloader = "reddit_downloader.downloader:main"
+reddit-web = "reddit_downloader.web:main"
+reddit-bot = "reddit_downloader.bot:main"
+reddit-migrate = "reddit_downloader.migration:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []

@@ -18,7 +18,15 @@ from PIL import Image, ExifTags
 import mysql.connector
 import configparser
 
-app = Flask(__name__, static_url_path='/reddit_downloads', static_folder='reddit_downloads')
+# Get the directory where this file is located
+_current_dir = Path(__file__).parent
+_template_dir = _current_dir / 'templates'
+_static_folder = Path.cwd() / 'reddit_downloads'
+
+app = Flask(__name__, 
+            template_folder=str(_template_dir),
+            static_url_path='/reddit_downloads', 
+            static_folder=str(_static_folder))
 
 # Load MySQL config
 config = configparser.ConfigParser()
@@ -392,7 +400,7 @@ def post_comment():
         return jsonify({'success': False, 'error': 'No Reddit post info.'}), 400
     # Post comment to Reddit
     try:
-        from reddit_image_downloader import RedditImageDownloader
+        from reddit_downloader.downloader import RedditImageDownloader
         rid = RedditImageDownloader()
         reddit = rid.reddit
         submission = None
@@ -448,5 +456,9 @@ def get_comments(image_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-if __name__ == '__main__':
+def main():
+    """Main entry point for the web UI."""
     app.run(debug=True, host='0.0.0.0', port=4000)
+
+if __name__ == '__main__':
+    main()

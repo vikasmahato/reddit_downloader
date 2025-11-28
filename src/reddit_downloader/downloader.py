@@ -255,6 +255,21 @@ class RedditImageDownloader:
                     logger.error(f"GIF to MP4 conversion failed: {conv_err}")
             else:
                 # Save metadata for non-GIF files
+                
+                # Deduplication Check
+                existing_image = self._get_image_by_hash(file_hash.hexdigest())
+                if existing_image:
+                    logger.info(f"♻️  Duplicate file found (Hash: {file_hash.hexdigest()}). Using existing file.")
+                    # Delete the newly downloaded file
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
+                    # Use existing file details
+                    filepath = Path(existing_image['file_path'])
+                    filename = existing_image['filename']
+                    downloaded = existing_image['file_size']
+                    
                 self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
             if prev_record and prev_record.get('is_deleted'):
                 if '_deleted' in filename:
@@ -289,39 +304,89 @@ class RedditImageDownloader:
         """Get image record from metadata database."""
         try:
             conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM images WHERE url = %s OR FIND_IN_SET(%s, url)', (url, url))
+            cursor = conn.cursor(dictionary=True)
+            # Join post_images and images to get full record
+            query = '''
+                SELECT i.*, pi.url 
+                FROM post_images pi 
+                JOIN images i ON pi.image_id = i.id 
+                WHERE pi.url = %s
+            '''
+            cursor.execute(query, (url,))
             result = cursor.fetchone()
             conn.close()
-            if result:
-                columns = [desc[0] for desc in cursor.description]
-                return dict(zip(columns, result))
+            return result
         except Exception as e:
             logger.warning(f"⚠️  Warning: Could not query metadata database: {e}")
         return None
 
+    def _get_image_by_hash(self, file_hash: str) -> Optional[Dict]:
+        """Get image record by file hash."""
+        try:
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute('SELECT * FROM images WHERE file_hash = %s', (file_hash,))
+            result = cursor.fetchone()
+            conn.close()
+            return result
+        except Exception as e:
+            logger.warning(f"⚠️  Warning: Could not query metadata database by hash: {e}")
+        return None
+
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
                             post_data: Dict, filepath: Path, file_hash: str, file_size: int):
-        """Save image metadata to MySQL database."""
+        """Save image metadata to MySQL database using normalized schema."""
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            now = datetime.now()
-            download_date = now.strftime("%Y-%m-%d")
-            download_time = now.strftime("%H:%M:%S")
-            author = post_data.get('author', '') if post_data else ''
-            title = post_data.get('title', '') if post_data else ''
-            permalink = post_data.get('permalink', '') if post_data else ''
-            post_username = post_data.get('post_username', '') if post_data else ''
-            comments = post_data.get('comments', '') if post_data else ''
-            url_field = post_data.get('all_urls', url) if post_data else url
+            
+            # 1. Insert/Update Post
+            post_id = None
+            if post_data:
+                author = post_data.get('author', '')
+                title = post_data.get('title', '')
+                permalink = post_data.get('permalink', '')
+                post_username = post_data.get('post_username', '')
+                comments = post_data.get('comments', '')
+                reddit_id = None
+                if permalink:
+                    # Try to extract reddit_id from permalink
+                    match = re.search(r'/comments/([a-z0-9]+)/', permalink)
+                    if match:
+                        reddit_id = match.group(1)
+
+                cursor.execute('''
+                    INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                        title=VALUES(title), 
+                        score=VALUES(score), 
+                        comments=VALUES(comments),
+                        id=LAST_INSERT_ID(id)
+                ''', (reddit_id, title, author, subreddit, permalink, 
+                      post_data.get('created_utc', 0), post_data.get('score', 0), 
+                      post_username, comments))
+                post_id = cursor.lastrowid
+            
+            # 2. Insert/Update Image
+            # Check if image exists by hash (handled in download_image, but we ensure here)
             cursor.execute('''
-                INSERT INTO images (url, filename, subreddit, username, author, title, permalink, 
-                 download_date, download_time, file_hash, file_size, file_path, post_username, comments)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE filename=VALUES(filename), subreddit=VALUES(subreddit), username=VALUES(username), author=VALUES(author), title=VALUES(title), permalink=VALUES(permalink), download_date=VALUES(download_date), download_time=VALUES(download_time), file_hash=VALUES(file_hash), file_size=VALUES(file_size), file_path=VALUES(file_path), post_username=VALUES(post_username), comments=VALUES(comments)
-            ''', (url_field, filename, subreddit, author, author, title, permalink,
-                  download_date, download_time, file_hash, file_size, str(filepath), post_username, comments))
+                INSERT INTO images (file_hash, filename, file_path, file_size, download_date, download_time)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    file_path=VALUES(file_path),
+                    id=LAST_INSERT_ID(id)
+            ''', (file_hash, filename, str(filepath), file_size, 
+                  datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")))
+            image_id = cursor.lastrowid
+            
+            # 3. Link Post and Image
+            if post_id and image_id:
+                cursor.execute('''
+                    INSERT IGNORE INTO post_images (post_id, image_id, url)
+                    VALUES (%s, %s, %s)
+                ''', (post_id, image_id, url))
+            
             conn.commit()
             conn.close()
         except Exception as e:
@@ -332,7 +397,15 @@ class RedditImageDownloader:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute('UPDATE images SET file_path = %s WHERE url = %s', (new_filepath, url))
+            # Update in images table based on join with post_images? 
+            # Or just update images table directly if we know the file path?
+            # But we only have URL here.
+            cursor.execute('''
+                UPDATE images i 
+                JOIN post_images pi ON i.id = pi.image_id 
+                SET i.file_path = %s 
+                WHERE pi.url = %s
+            ''', (new_filepath, url))
             conn.commit()
             conn.close()
         except Exception as e:
@@ -343,7 +416,12 @@ class RedditImageDownloader:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute('UPDATE images SET is_deleted = 1 WHERE url = %s', (url,))
+            cursor.execute('''
+                UPDATE images i
+                JOIN post_images pi ON i.id = pi.image_id
+                SET i.is_deleted = 1 
+                WHERE pi.url = %s
+            ''', (url,))
             conn.commit()
             conn.close()
             logger.info(f"Marked as deleted: {url}")
@@ -360,9 +438,20 @@ class RedditImageDownloader:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             if subreddit:
-                cursor.execute('SELECT * FROM images WHERE subreddit = %s', (subreddit,))
+                cursor.execute('''
+                    SELECT pi.url, i.filename, i.file_path 
+                    FROM post_images pi
+                    JOIN posts p ON pi.post_id = p.id
+                    JOIN images i ON pi.image_id = i.id
+                    WHERE p.subreddit = %s AND i.is_deleted = 0
+                ''', (subreddit,))
             else:
-                cursor.execute('SELECT * FROM images WHERE is_deleted = 0')
+                cursor.execute('''
+                    SELECT pi.url, i.filename, i.file_path 
+                    FROM post_images pi
+                    JOIN images i ON pi.image_id = i.id
+                    WHERE i.is_deleted = 0
+                ''')
             images = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
             conn.close()
