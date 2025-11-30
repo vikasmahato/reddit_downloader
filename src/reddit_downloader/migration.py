@@ -62,7 +62,7 @@ def create_tables(cursor):
         created_utc FLOAT,
         score INT,
         post_username VARCHAR(255),
-        comments JSON,
+        comments text,
         INDEX idx_subreddit (subreddit),
         INDEX idx_author (author)
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
