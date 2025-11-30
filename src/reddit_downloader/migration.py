@@ -1,10 +1,5 @@
 import mysql.connector
 import configparser
-import hashlib
-import os
-import sys
-from datetime import datetime
-import json
 import re
 
 def load_config():
@@ -99,14 +94,6 @@ def create_tables(cursor):
 
 def migrate_data(conn, cursor):
     print("Starting migration...")
-    
-    # Check if old images table exists
-    cursor.execute("SHOW TABLES LIKE 'images'")
-    if not cursor.fetchone():
-        print("No 'images' table found. Skipping migration.")
-        return
-
-    # Get all existing images
     cursor.execute("SELECT * FROM images")
     old_images = cursor.fetchall()
     columns = [desc[0] for desc in cursor.description]
@@ -159,22 +146,6 @@ def migrate_data(conn, cursor):
                 if res:
                     post_id = res[0]
 
-        # 2. Handle Image
-        file_hash = img_data.get('file_hash')
-        file_path = img_data.get('file_path')
-        
-        # If hash is missing, calculate it from file
-        if not file_hash and file_path and os.path.exists(file_path):
-            try:
-                with open(file_path, "rb") as f:
-                    file_hash = hashlib.md5(f.read()).hexdigest()
-            except Exception as e:
-                print(f"Could not calculate hash for {file_path}: {e}")
-        
-        if not file_hash:
-            # Fallback for missing file/hash: use md5 of url
-            file_hash = hashlib.md5(img_data['url'].encode()).hexdigest()
-
         image_id = None
         try:
             cursor.execute("""
@@ -182,8 +153,8 @@ def migrate_data(conn, cursor):
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(), is_deleted=VALUES(is_deleted)
             """, (
-                file_hash,
-                file_path,
+                img_data.get('file_hash'),
+                f"reddit_downloads/{img_data.get('subreddit')}/{img_data.get('filename')}",
                 img_data.get('filename'),
                 img_data.get('file_size'),
                 img_data.get('download_date'),
@@ -193,7 +164,7 @@ def migrate_data(conn, cursor):
             image_id = cursor.lastrowid
         except mysql.connector.Error as err:
              print(f"Error inserting image {img_data.get('filename')}: {err}")
-             cursor.execute("SELECT id FROM images_new WHERE file_hash = %s", (file_hash,))
+             cursor.execute("SELECT id FROM images_new WHERE file_hash = %s", (img_data.get('file_hash'),))
              res = cursor.fetchone()
              if res:
                  image_id = res[0]
@@ -209,39 +180,7 @@ def migrate_data(conn, cursor):
             except mysql.connector.Error as err:
                 print(f"Error linking post {post_id} and image {image_id}: {err}")
         else:
-            # If no post (e.g. direct url download without reddit metadata), we might want to create a dummy post or just skip?
-            # For now, if we have an image but no post, we can't link them in post_images if post_id is required.
-            # But wait, direct downloads usually don't have permalinks.
-            # Let's create a "Direct Download" post or similar if permalink is missing.
             if not post_id and image_id:
-                 # Create a dummy post for this download
-                 dummy_permalink = f"direct_download_{hashlib.md5(img_data['url'].encode()).hexdigest()}"
-                 try:
-                    cursor.execute("""
-                        INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID()
-                    """, (
-                        None,
-                        img_data.get('title') or 'Direct Download',
-                        img_data.get('author') or 'Unknown',
-                        img_data.get('subreddit') or 'Direct',
-                        dummy_permalink,
-                        datetime.now().timestamp(),
-                        0,
-                        None,
-                        None
-                    ))
-                    post_id = cursor.lastrowid
-                    cursor.execute("""
-                        INSERT IGNORE INTO post_images (post_id, image_id, url)
-                        VALUES (%s, %s, %s)
-                    """, (post_id, image_id, img_data['url']))
-                    migrated_count += 1
-                 except Exception as e:
-                     print(f"Failed to handle orphan image: {e}")
-                     skipped_count += 1
-            else:
                 skipped_count += 1
 
     print(f"Migration finished. Migrated: {migrated_count}, Skipped/Failed: {skipped_count}")
