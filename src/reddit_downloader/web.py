@@ -109,30 +109,40 @@ class RedditImageUI:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor(dictionary=True)
-            query = "SELECT * FROM images WHERE 1=1 AND author != 'BusPsychological3243'"
+            # Join posts, images, and post_images tables
+            query = """SELECT 
+                i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
+                i.download_date, i.download_time, i.is_deleted,
+                p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
+                p.score, p.post_username, p.comments,
+                pi.url
+            FROM images i
+            LEFT JOIN post_images pi ON i.id = pi.image_id
+            LEFT JOIN posts p ON pi.post_id = p.id
+            WHERE 1=1 AND (p.author IS NULL OR p.author != 'BusPsychological3243')"""
             params = []
             if search:
-                query += " AND (title LIKE %s OR author LIKE %s OR filename LIKE %s)"
+                query += " AND (p.title LIKE %s OR p.author LIKE %s OR i.filename LIKE %s)"
                 search_term = f"%{search}%"
                 params.extend([search_term, search_term, search_term])
             if subreddit:
-                query += " AND subreddit LIKE %s"
+                query += " AND p.subreddit LIKE %s"
                 params.append(f"%{subreddit}%")
             if user:
-                query += " AND author LIKE %s"
+                query += " AND p.author LIKE %s"
                 params.append(f"%{user}%")
             if deleted is not None:
                 if deleted:
-                    query += " AND is_deleted = 1"
+                    query += " AND i.is_deleted = 1"
                 else:
-                    query += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+                    query += " AND (i.is_deleted = 0 OR i.is_deleted IS NULL)"
             # Sorting logic
             if sort == 'comments':
                 order_by = ''  # Will sort in Python after fetch
             elif sort == 'filesize':
-                order_by = ' ORDER BY file_size DESC'
+                order_by = ' ORDER BY i.file_size DESC'
             else:
-                order_by = ' ORDER BY download_date DESC, download_time DESC'
+                order_by = ' ORDER BY i.download_date DESC, i.download_time DESC'
             query += order_by
             query += f" LIMIT {limit} OFFSET {offset}"
             cursor.execute(query, params)
@@ -171,14 +181,29 @@ class RedditImageUI:
             # Total images
             cursor.execute("SELECT COUNT(*) FROM images")
             total_images = cursor.fetchone()[0]
-            # Images by subreddit
-            cursor.execute("SELECT subreddit, COUNT(*) FROM images GROUP BY subreddit ORDER BY COUNT(*) DESC")
+            # Images by subreddit (from posts table via post_images)
+            cursor.execute("""SELECT p.subreddit, COUNT(DISTINCT i.id) 
+                FROM images i
+                LEFT JOIN post_images pi ON i.id = pi.image_id
+                LEFT JOIN posts p ON pi.post_id = p.id
+                WHERE p.subreddit IS NOT NULL AND p.subreddit != ''
+                GROUP BY p.subreddit 
+                ORDER BY COUNT(DISTINCT i.id) DESC""")
             subreddit_counts = dict(cursor.fetchall())
-            # Top authors (for display)
-            cursor.execute("SELECT author, COUNT(*) FROM images WHERE author != '' GROUP BY author ORDER BY COUNT(*) DESC LIMIT 10")
+            # Top authors (for display) - from posts table
+            cursor.execute("""SELECT p.author, COUNT(DISTINCT i.id) 
+                FROM images i
+                LEFT JOIN post_images pi ON i.id = pi.image_id
+                LEFT JOIN posts p ON pi.post_id = p.id
+                WHERE p.author IS NOT NULL AND p.author != ''
+                GROUP BY p.author 
+                ORDER BY COUNT(DISTINCT i.id) DESC 
+                LIMIT 10""")
             user_counts = dict(cursor.fetchall())
-            # All unique authors (for stats)
-            cursor.execute("SELECT COUNT(DISTINCT author) FROM images WHERE author != ''")
+            # All unique authors (for stats) - from posts table
+            cursor.execute("""SELECT COUNT(DISTINCT p.author) 
+                FROM posts p
+                WHERE p.author IS NOT NULL AND p.author != ''""")
             total_users = cursor.fetchone()[0]
             # File size stats
             cursor.execute("SELECT SUM(file_size) FROM images WHERE file_size > 0")
@@ -201,7 +226,7 @@ class RedditImageUI:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT subreddit FROM images WHERE subreddit != '' ORDER BY subreddit")
+            cursor.execute("SELECT DISTINCT subreddit FROM posts WHERE subreddit IS NOT NULL AND subreddit != '' ORDER BY subreddit")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
             return results
@@ -214,7 +239,7 @@ class RedditImageUI:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT author FROM images WHERE author != '' ORDER BY author")
+            cursor.execute("SELECT DISTINCT author FROM posts WHERE author IS NOT NULL AND author != '' ORDER BY author")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
             return results
@@ -347,7 +372,17 @@ def image_details(image_id):
     try:
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM images WHERE id = %s", (image_id,))
+        # Join posts, images, and post_images tables
+        cursor.execute("""SELECT 
+            i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
+            i.download_date, i.download_time, i.is_deleted,
+            p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
+            p.score, p.post_username, p.comments, p.reddit_id,
+            pi.url
+        FROM images i
+        LEFT JOIN post_images pi ON i.id = pi.image_id
+        LEFT JOIN posts p ON pi.post_id = p.id
+        WHERE i.id = %s""", (image_id,))
         image = cursor.fetchone()
         if image:
             image_dict = dict(image)
@@ -384,10 +419,16 @@ def post_comment():
     comment_text = data.get('comment', '').strip()
     if not image_id or not comment_text:
         return jsonify({'success': False, 'error': 'Missing image ID or comment.'}), 400
-    # Get image info from MySQL
+    # Get image and post info from MySQL
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM images WHERE id = %s", (image_id,))
+    # Join to get post information
+    cursor.execute("""SELECT 
+        i.id, p.id as post_id, p.reddit_id, p.permalink, p.comments
+    FROM images i
+    LEFT JOIN post_images pi ON i.id = pi.image_id
+    LEFT JOIN posts p ON pi.post_id = p.id
+    WHERE i.id = %s""", (image_id,))
     image = cursor.fetchone()
     if not image:
         conn.close()
@@ -395,6 +436,7 @@ def post_comment():
     # Get Reddit post ID or permalink
     reddit_post_id = image.get('reddit_id')
     permalink = image.get('permalink')
+    post_id = image.get('post_id')
     if not reddit_post_id and not permalink:
         conn.close()
         return jsonify({'success': False, 'error': 'No Reddit post info.'}), 400
@@ -418,7 +460,7 @@ def post_comment():
     except Exception as e:
         conn.close()
         return jsonify({'success': False, 'error': f'Reddit error: {e}'}), 500
-    # Save comment locally in MySQL
+    # Save comment locally in MySQL (in posts table)
     try:
         comments_json = image.get('comments', '[]')
         comments = json.loads(comments_json) if comments_json else []
@@ -429,7 +471,8 @@ def post_comment():
             'created_utc': reddit_comment.created_utc
         }
         comments.insert(0, new_comment)
-        cursor.execute("UPDATE images SET comments = %s WHERE id = %s", (json.dumps(comments), image_id))
+        if post_id:
+            cursor.execute("UPDATE posts SET comments = %s WHERE id = %s", (json.dumps(comments), post_id))
         conn.commit()
     except Exception as e:
         conn.close()
@@ -444,7 +487,12 @@ def get_comments(image_id):
     try:
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT comments FROM images WHERE id = %s", (image_id,))
+        # Join to get comments from posts table
+        cursor.execute("""SELECT p.comments
+        FROM images i
+        LEFT JOIN post_images pi ON i.id = pi.image_id
+        LEFT JOIN posts p ON pi.post_id = p.id
+        WHERE i.id = %s""", (image_id,))
         row = cursor.fetchone()
         conn.close()
         if row and row.get('comments'):
