@@ -119,8 +119,10 @@ class RedditImageUI:
             FROM images i
             LEFT JOIN post_images pi ON i.id = pi.image_id
             LEFT JOIN posts p ON pi.post_id = p.id
-            WHERE 1=1 AND (p.author IS NULL OR p.author != 'BusPsychological3243')"""
+            WHERE 1=1"""
             params = []
+            # Filter out hidden user
+            query += " AND (p.author IS NULL OR p.author != 'BusPsychological3243')"
             if search:
                 query += " AND (p.title LIKE %s OR p.author LIKE %s OR i.filename LIKE %s)"
                 search_term = f"%{search}%"
@@ -178,35 +180,36 @@ class RedditImageUI:
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            # Total images
+            # Total images (count distinct images, not posts)
             cursor.execute("SELECT COUNT(*) FROM images")
             total_images = cursor.fetchone()[0]
-            # Images by subreddit (from posts table via post_images)
-            cursor.execute("""SELECT p.subreddit, COUNT(DISTINCT i.id) 
+            # Images by subreddit (optimized query with LIMIT)
+            cursor.execute("""SELECT p.subreddit, COUNT(DISTINCT i.id) as cnt
                 FROM images i
                 LEFT JOIN post_images pi ON i.id = pi.image_id
                 LEFT JOIN posts p ON pi.post_id = p.id
                 WHERE p.subreddit IS NOT NULL AND p.subreddit != ''
                 GROUP BY p.subreddit 
-                ORDER BY COUNT(DISTINCT i.id) DESC""")
+                ORDER BY cnt DESC
+                LIMIT 20""")
             subreddit_counts = dict(cursor.fetchall())
-            # Top authors (for display) - from posts table
-            cursor.execute("""SELECT p.author, COUNT(DISTINCT i.id) 
+            # Top authors (for display) - optimized
+            cursor.execute("""SELECT p.author, COUNT(DISTINCT i.id) as cnt
                 FROM images i
                 LEFT JOIN post_images pi ON i.id = pi.image_id
                 LEFT JOIN posts p ON pi.post_id = p.id
                 WHERE p.author IS NOT NULL AND p.author != ''
                 GROUP BY p.author 
-                ORDER BY COUNT(DISTINCT i.id) DESC 
+                ORDER BY cnt DESC 
                 LIMIT 10""")
             user_counts = dict(cursor.fetchall())
-            # All unique authors (for stats) - from posts table
+            # All unique authors (for stats) - optimized
             cursor.execute("""SELECT COUNT(DISTINCT p.author) 
                 FROM posts p
                 WHERE p.author IS NOT NULL AND p.author != ''""")
             total_users = cursor.fetchone()[0]
-            # File size stats
-            cursor.execute("SELECT SUM(file_size) FROM images WHERE file_size > 0")
+            # File size stats - optimized
+            cursor.execute("SELECT COALESCE(SUM(file_size), 0) FROM images WHERE file_size > 0")
             total_size = cursor.fetchone()[0] or 0
             conn.close()
             return {

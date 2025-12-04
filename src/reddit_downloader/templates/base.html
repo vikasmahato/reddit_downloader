@@ -7,71 +7,139 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
+        * {
+            transition: all 0.2s ease;
+        }
         body.bg-light {
-            background-color: #181a1b !important;
+            background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%) !important;
             color: #e0e0e0;
+            min-height: 100vh;
         }
         .navbar {
-            background: linear-gradient(135deg, #232526 0%, #414345 100%) !important;
-            color: #e0e0e0;
-            border-bottom: 1px solid #222;
+            background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
+            color: #fff;
+            border-bottom: none;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            padding: 0.75rem 0;
         }
-        .navbar-brand, .navbar-text, .nav-item, .navbar .fa-images, .navbar .fab {
-            color: #e0e0e0 !important;
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: #fff !important;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .navbar-text, .nav-item, .navbar .fa-images, .navbar .fab {
+            color: #fff !important;
         }
         .container {
             background: none !important;
             color: #e0e0e0;
         }
         .card, .stat-card, .filter-card {
-            background: #232526 !important;
+            background: rgba(35, 37, 38, 0.8) !important;
+            backdrop-filter: blur(10px);
             color: #e0e0e0 !important;
-            border: 1px solid #222 !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
         }
         .card-header, .card-footer {
-            background: #232526 !important;
+            background: rgba(35, 37, 38, 0.6) !important;
             color: #e0e0e0 !important;
-            border-bottom: 1px solid #222 !important;
+            border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+            border-radius: 12px 12px 0 0;
         }
         .form-control, .form-select {
-            background: #181a1b !important;
+            background: rgba(24, 26, 27, 0.8) !important;
             color: #e0e0e0 !important;
-            border: 1px solid #444 !important;
+            border: 1px solid rgba(255,255,255,0.15) !important;
+            border-radius: 8px;
         }
         .form-control:focus, .form-select:focus {
-            background: #232526 !important;
+            background: rgba(35, 37, 38, 0.9) !important;
             color: #fff !important;
-            border-color: #0984e3 !important;
+            border-color: #ff4500 !important;
+            box-shadow: 0 0 0 0.2rem rgba(255, 69, 0, 0.25);
         }
         .btn-primary, .btn-outline-primary {
-            background: #0984e3 !important;
+            background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
             color: #fff !important;
             border: none !important;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .btn-primary:hover, .btn-outline-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(255, 69, 0, 0.4);
         }
         .btn-outline-secondary, .btn-secondary {
-            background: #232526 !important;
+            background: rgba(35, 37, 38, 0.8) !important;
             color: #e0e0e0 !important;
-            border: 1px solid #444 !important;
+            border: 1px solid rgba(255,255,255,0.15) !important;
+            border-radius: 8px;
+        }
+        .btn-outline-secondary:hover, .btn-secondary:hover {
+            background: rgba(255,255,255,0.1) !important;
+            transform: translateY(-1px);
         }
         .alert-info, .alert-warning, .alert-danger, .alert-success {
-            background: #232526 !important;
+            background: rgba(35, 37, 38, 0.9) !important;
             color: #e0e0e0 !important;
-            border: 1px solid #444 !important;
+            border: 1px solid rgba(255,255,255,0.15) !important;
+            border-radius: 8px;
         }
         .image-card {
-            background: #232526 !important;
+            background: rgba(35, 37, 38, 0.8) !important;
             color: #e0e0e0 !important;
-            border: 1px solid #222 !important;
+            border: 1px solid rgba(255,255,255,0.1) !important;
+            border-radius: 12px;
+            overflow: hidden;
         }
         .image-thumbnail {
             background: #181a1b !important;
-            border: 1px solid #222 !important;
+            border: none !important;
+            transition: transform 0.3s ease;
+        }
+        .image-thumbnail:hover {
+            transform: scale(1.05);
         }
         .metadata-text {
             color: #b0b0b0 !important;
         }
         .gradient-bg {
-            background: linear-gradient(135deg, #232526 0%, #414345 100%) !important;
+            background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
+        }
+        .stat-compact {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            background: rgba(255, 69, 0, 0.15);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 69, 0, 0.3);
+            font-size: 0.85rem;
+        }
+        .stat-compact strong {
+            color: #ff6b35;
+            font-weight: 700;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .lazy-load {
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .lazy-load.loaded {
+            opacity: 1;
         }
     </style>
 </head>
@@ -86,7 +154,7 @@
             <div class="nav-item">
                 <span class="navbar-text">
                     <i class="fas fa-images"></i>
-                    <span id="image-count">{{ stats.total_images or 0 }}</span> images
+                    <span id="image-count">{{ stats.total_images or 0 }}</span>
                 </span>
             </div>
         </div>
@@ -120,10 +188,36 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/api/stats')
             .then(response => response.json())
             .then(data => {
-                imageCount.textContent = data.total_images || 0;
-            });
+                if (imageCount) {
+                    imageCount.textContent = data.total_images || 0;
+                }
+            })
+            .catch(() => {}); // Silently fail
     }
 });
+
+// Lazy loading for images
+if ('IntersectionObserver' in window) {
+    const imageObserver = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const img = entry.target;
+                if (img.dataset.src) {
+                    img.src = img.dataset.src;
+                    img.classList.add('loaded');
+                    img.removeAttribute('data-src');
+                }
+                observer.unobserve(img);
+            }
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('img[data-src]').forEach(img => {
+            imageObserver.observe(img);
+        });
+    });
+}
 </script>
 
 </body>
