@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block title %}Scrape Lists - Reddit Image Browser{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2><i class="fas fa-list"></i> Scrape Lists Management</h2>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+                <i class="fas fa-plus"></i> Add New
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Subreddits Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fab fa-reddit"></i> Subreddits ({{ items|selectattr('type', 'equalto', 'subreddit')|list|length }})</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Last Scraped</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            {% if item.type == 'subreddit' %}
+                            <tr id="row-{{ item.id }}">
+                                <td>
+                                    <strong>r/{{ item.name }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge {% if item.enabled %}bg-success{% else %}bg-secondary{% endif %}" id="status-{{ item.id }}">
+                                        {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
+                                    </span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% if item.last_scraped_at %}{{ item.last_scraped_at }}{% else %}Never{% endif %}
+                                    </small>
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ item.created_at }}</small>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', {% if item.enabled %}true{% else %}false{% endif %})">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})">
+                                            <i class="fas fa-toggle-{% if item.enabled %}on{% else %}off{% endif %}"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" onclick="deleteItem({{ item.id }}, 'r/{{ item.name }}')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                            {% if items|selectattr('type', 'equalto', 'subreddit')|list|length == 0 %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">No subreddits found</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Users Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-user"></i> Users ({{ items|selectattr('type', 'equalto', 'user')|list|length }})</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Last Scraped</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            {% if item.type == 'user' %}
+                            <tr id="row-{{ item.id }}">
+                                <td>
+                                    <strong>u/{{ item.name }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge {% if item.enabled %}bg-success{% else %}bg-secondary{% endif %}" id="status-{{ item.id }}">
+                                        {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
+                                    </span>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {% if item.last_scraped_at %}{{ item.last_scraped_at }}{% else %}Never{% endif %}
+                                    </small>
+                                </td>
+                                <td>
+                                    <small class="text-muted">{{ item.created_at }}</small>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', {% if item.enabled %}true{% else %}false{% endif %})">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})">
+                                            <i class="fas fa-toggle-{% if item.enabled %}on{% else %}off{% endif %}"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" onclick="deleteItem({{ item.id }}, 'u/{{ item.name }}')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                            {% if items|selectattr('type', 'equalto', 'user')|list|length == 0 %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">No users found</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Modal -->
+<div class="modal fade" id="addModal" tabindex="-1" aria-labelledby="addModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background: rgba(35, 37, 38, 0.95); color: #e0e0e0; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addModalLabel">Add New Item</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addForm">
+                    <div class="mb-3">
+                        <label for="addType" class="form-label">Type</label>
+                        <select class="form-select" id="addType" required>
+                            <option value="">Select type...</option>
+                            <option value="subreddit">Subreddit</option>
+                            <option value="user">User</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addName" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="addName" placeholder="e.g., BarelyLegalTeens or u/username" required>
+                        <small class="text-muted">You can include r/ or u/ prefix, it will be cleaned automatically</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="addItem()">Add</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background: rgba(35, 37, 38, 0.95); color: #e0e0e0; border: 1px solid rgba(255,255,255,0.1);">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editModalLabel">Edit Item</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editForm">
+                    <input type="hidden" id="editId">
+                    <div class="mb-3">
+                        <label for="editType" class="form-label">Type</label>
+                        <input type="text" class="form-control" id="editType" readonly style="background: rgba(24, 26, 27, 0.8);">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editName" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="editName" required>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="editEnabled">
+                            <label class="form-check-label" for="editEnabled">
+                                Enabled
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="updateItem()">Update</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentEditId = null;
+
+function addItem() {
+    const type = document.getElementById('addType').value;
+    const name = document.getElementById('addName').value.trim();
+    
+    if (!type || !name) {
+        alert('Please fill in all fields');
+        return;
+    }
+    
+    fetch('/api/scrape-lists', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type, name })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to add item'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
+}
+
+function editItem(id, type, name, enabled) {
+    currentEditId = id;
+    document.getElementById('editId').value = id;
+    document.getElementById('editType').value = type === 'subreddit' ? 'Subreddit' : 'User';
+    document.getElementById('editName').value = name;
+    document.getElementById('editEnabled').checked = enabled;
+    
+    const editModal = new bootstrap.Modal(document.getElementById('editModal'));
+    editModal.show();
+}
+
+function updateItem() {
+    const id = currentEditId;
+    const name = document.getElementById('editName').value.trim();
+    const enabled = document.getElementById('editEnabled').checked;
+    
+    if (!name) {
+        alert('Name is required');
+        return;
+    }
+    
+    fetch(`/api/scrape-lists/${id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, enabled })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to update item'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
+}
+
+function toggleItem(id) {
+    if (!confirm('Are you sure you want to toggle this item?')) {
+        return;
+    }
+    
+    fetch(`/api/scrape-lists/${id}/toggle`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const statusBadge = document.getElementById(`status-${id}`);
+            statusBadge.textContent = data.enabled ? 'Enabled' : 'Disabled';
+            statusBadge.className = `badge ${data.enabled ? 'bg-success' : 'bg-secondary'}`;
+            
+            // Update toggle button icon
+            const row = document.getElementById(`row-${id}`);
+            const toggleBtn = row.querySelector('button[onclick*="toggleItem"]');
+            const icon = toggleBtn.querySelector('i');
+            icon.className = `fas fa-toggle-${data.enabled ? 'on' : 'off'}`;
+        } else {
+            alert('Error: ' + (data.error || 'Failed to toggle item'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
+}
+
+function deleteItem(id, name) {
+    if (!confirm(`Are you sure you want to delete ${name}? This action cannot be undone.`)) {
+        return;
+    }
+    
+    fetch(`/api/scrape-lists/${id}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById(`row-${id}`).remove();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to delete item'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
+}
+
+// Reset add form when modal is closed
+document.getElementById('addModal').addEventListener('hidden.bs.modal', function () {
+    document.getElementById('addForm').reset();
+});
+</script>
+
+<style>
+.table-dark {
+    background-color: rgba(35, 37, 38, 0.8) !important;
+    color: #e0e0e0 !important;
+}
+.table-dark th {
+    border-color: rgba(255,255,255,0.1) !important;
+    background-color: rgba(24, 26, 27, 0.8) !important;
+}
+.table-dark td {
+    border-color: rgba(255,255,255,0.1) !important;
+}
+.table-dark tbody tr:hover {
+    background-color: rgba(255, 69, 0, 0.1) !important;
+}
+.modal-content {
+    border-radius: 12px;
+}
+.btn-group-sm .btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+</style>
+
+{% endblock %}
+

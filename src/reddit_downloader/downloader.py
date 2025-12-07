@@ -480,8 +480,77 @@ class RedditImageDownloader:
         return deleted_images
 
 
+    def get_scrape_lists_from_db(self, list_type: str) -> List[str]:
+        """Get subreddits or users from the database, ordered by oldest scraped first.
+        
+        Args:
+            list_type: 'subreddit' or 'user'
+        
+        Returns:
+            List of names (subreddit names or usernames), ordered by last_scraped_at ASC (NULL first)
+        """
+        items = []
+        try:
+            if not mysql_config:
+                logger.warning("⚠️  MySQL config not available, cannot read from database")
+                return items
+            
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            
+            # Order by last_scraped_at ASC (NULL values come first in MySQL), then by name for consistency
+            cursor.execute("""
+                SELECT name FROM scrape_lists
+                WHERE type = %s AND enabled = TRUE
+                ORDER BY last_scraped_at ASC, name ASC
+            """, (list_type,))
+            
+            results = cursor.fetchall()
+            items = [row[0] for row in results]
+            
+            conn.close()
+            
+        except mysql.connector.Error as e:
+            logger.warning(f"⚠️  Warning: Could not read {list_type} list from database: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️  Warning: Error reading {list_type} list: {e}")
+        
+        return items
+
+    def update_last_scraped_at(self, list_type: str, name: str):
+        """Update the last_scraped_at timestamp for a subreddit or user.
+        
+        Args:
+            list_type: 'subreddit' or 'user'
+            name: The subreddit or user name
+        """
+        try:
+            if not mysql_config:
+                return
+            
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE scrape_lists
+                SET last_scraped_at = CURRENT_TIMESTAMP
+                WHERE type = %s AND name = %s
+            """, (list_type, name))
+            
+            conn.commit()
+            conn.close()
+            
+        except mysql.connector.Error as e:
+            logger.warning(f"⚠️  Warning: Could not update last_scraped_at for {list_type} {name}: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️  Warning: Error updating last_scraped_at: {e}")
+
     def parse_scrape_list(self, section: str) -> List[str]:
-        """Parse a config section for scraping lists."""
+        """Parse a config section for scraping lists.
+        
+        DEPRECATED: This method is kept for backward compatibility.
+        Use get_scrape_lists_from_db() instead.
+        """
         items = []
         try:
             config_file_path = Path(self.config_file)
@@ -530,13 +599,12 @@ class RedditImageDownloader:
         
         # Scrape subreddits
         if scrape_type in ["all", "subreddits"]:
-            #subreddits = self.parse_scrape_list('scrape_list')
-            subreddits = [line.strip() for line in config['scrape_list']['list'].splitlines() if line.strip()]
+            subreddits = self.get_scrape_lists_from_db('subreddit')
             if subreddits:
-                logger.info(f"\n📂 Found {len(subreddits)} subreddits in config")
+                logger.info(f"\n📂 Found {len(subreddits)} subreddits in database")
                 for subreddit in subreddits:
-                    # Clean subreddit name (remove r/ if present)
-                    clean_name = subreddit.replace('r/', '').strip()
+                    # Name is already cleaned from database
+                    clean_name = subreddit.strip()
                     logger.info(f"\n🔍 Scraping r/{clean_name}...")
                     
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
@@ -544,23 +612,27 @@ class RedditImageDownloader:
                         downloaded = self.download_from_subreddit(clean_name, limit)
                         subreddit_counts[clean_name] = downloaded
                         total_downloads += 1
+                        # Update last_scraped_at timestamp
+                        self.update_last_scraped_at('subreddit', clean_name)
                     except SubredditAccessError as err:
                         forbidden_subreddits.append(clean_name)
                         logger.warning(f"🚫 Skipping r/{clean_name}: {err}")
         
         # Scrape user posts
         if scrape_type in ["all", "users"]:
-            users = self.parse_scrape_list('user_scrape_list')
+            users = self.get_scrape_lists_from_db('user')
             if users:
-                logger.info(f"\n👤 Found {len(users)} users in config")
+                logger.info(f"\n👤 Found {len(users)} users in database")
                 for username in users:
-                    # Clean username (remove u/ if present)
-                    clean_name = username.replace('u/', '').strip()
+                    # Name is already cleaned from database
+                    clean_name = username.strip()
                     logger.info(f"\n🔍 Scraping u/{clean_name}...")
                     
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
                     self.download_from_user(clean_name, limit)
                     total_downloads += 1
+                    # Update last_scraped_at timestamp
+                    self.update_last_scraped_at('user', clean_name)
         
         logger.success(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
         

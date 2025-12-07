@@ -507,6 +507,238 @@ def get_comments(image_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/scrape-lists')
+def scrape_lists():
+    """Page for managing scrape lists."""
+    try:
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Check if table exists, create if not
+        try:
+            cursor.execute("""
+                SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
+                FROM scrape_lists
+                ORDER BY type, name
+            """)
+        except mysql.connector.Error as e:
+            if e.errno == 1146:  # Table doesn't exist
+                # Create the table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scrape_lists (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        type ENUM('subreddit', 'user') NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        enabled BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        last_scraped_at TIMESTAMP NULL,
+                        UNIQUE KEY unique_type_name (type, name),
+                        INDEX idx_type (type),
+                        INDEX idx_enabled (enabled),
+                        INDEX idx_last_scraped (last_scraped_at)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+                """)
+                conn.commit()
+                cursor.execute("""
+                    SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
+                    FROM scrape_lists
+                    ORDER BY type, name
+                """)
+            else:
+                raise
+        
+        items = cursor.fetchall()
+        conn.close()
+        
+        # Convert datetime objects to strings for template
+        for item in items:
+            for key in ['created_at', 'updated_at', 'last_scraped_at']:
+                if item.get(key):
+                    item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
+        
+        stats = ui_handler.get_stats()
+        subreddits = ui_handler.get_subreddits()
+        users = ui_handler.get_users()
+        return render_template('scrape_lists.html', 
+                             items=items, 
+                             stats=stats, 
+                             subreddits=subreddits, 
+                             users=users)
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route('/api/scrape-lists', methods=['GET'])
+def api_get_scrape_lists():
+    """API endpoint to get all scrape lists."""
+    try:
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Check if table exists, create if not
+        try:
+            cursor.execute("""
+                SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
+                FROM scrape_lists
+                ORDER BY type, name
+            """)
+        except mysql.connector.Error as e:
+            if e.errno == 1146:  # Table doesn't exist
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scrape_lists (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        type ENUM('subreddit', 'user') NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        enabled BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        last_scraped_at TIMESTAMP NULL,
+                        UNIQUE KEY unique_type_name (type, name),
+                        INDEX idx_type (type),
+                        INDEX idx_enabled (enabled),
+                        INDEX idx_last_scraped (last_scraped_at)
+                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+                """)
+                conn.commit()
+                cursor.execute("""
+                    SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
+                    FROM scrape_lists
+                    ORDER BY type, name
+                """)
+            else:
+                raise
+        
+        items = cursor.fetchall()
+        conn.close()
+        
+        # Convert datetime objects to strings
+        for item in items:
+            for key in ['created_at', 'updated_at', 'last_scraped_at']:
+                if item.get(key):
+                    item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
+        
+        return jsonify({'success': True, 'items': items})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/scrape-lists', methods=['POST'])
+def api_add_scrape_list():
+    """API endpoint to add a new scrape list item."""
+    try:
+        data = request.get_json()
+        list_type = data.get('type')
+        name = data.get('name', '').strip()
+        
+        if not list_type or list_type not in ['subreddit', 'user']:
+            return jsonify({'success': False, 'error': 'Invalid type. Must be "subreddit" or "user"'}), 400
+        
+        if not name:
+            return jsonify({'success': False, 'error': 'Name is required'}), 400
+        
+        # Clean name (remove r/ or u/ prefix if present)
+        name = name.replace('r/', '').replace('u/', '').strip()
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO scrape_lists (type, name, enabled)
+                VALUES (%s, %s, TRUE)
+            """, (list_type, name))
+            conn.commit()
+            item_id = cursor.lastrowid
+            conn.close()
+            return jsonify({'success': True, 'id': item_id, 'message': 'Item added successfully'})
+        except mysql.connector.IntegrityError:
+            conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item already exists'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/scrape-lists/<int:item_id>', methods=['PUT'])
+def api_update_scrape_list(item_id):
+    """API endpoint to update a scrape list item."""
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        enabled = data.get('enabled')
+        
+        if not name:
+            return jsonify({'success': False, 'error': 'Name is required'}), 400
+        
+        # Clean name (remove r/ or u/ prefix if present)
+        name = name.replace('r/', '').replace('u/', '').strip()
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # Build update query dynamically
+        updates = ['name = %s']
+        params = [name]
+        
+        if enabled is not None:
+            updates.append('enabled = %s')
+            params.append(bool(enabled))
+        
+        params.append(item_id)
+        
+        cursor.execute(f"""
+            UPDATE scrape_lists
+            SET {', '.join(updates)}
+            WHERE id = %s
+        """, params)
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Item updated successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/scrape-lists/<int:item_id>', methods=['DELETE'])
+def api_delete_scrape_list(item_id):
+    """API endpoint to delete a scrape list item."""
+    try:
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM scrape_lists WHERE id = %s", (item_id,))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Item deleted successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/scrape-lists/<int:item_id>/toggle', methods=['POST'])
+def api_toggle_scrape_list(item_id):
+    """API endpoint to toggle enabled status of a scrape list item."""
+    try:
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT enabled FROM scrape_lists WHERE id = %s", (item_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Item not found'}), 404
+        
+        new_enabled = not result['enabled']
+        cursor.execute("UPDATE scrape_lists SET enabled = %s WHERE id = %s", (new_enabled, item_id))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'enabled': new_enabled, 'message': 'Status updated successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def main():
     """Main entry point for the web UI."""
     app.run(debug=True, host='0.0.0.0', port=4000)
