@@ -205,21 +205,80 @@
     <div class="col-md-3 col-6 mb-4">
         <div class="card h-100">
             <div class="card-body p-0">
-                {% set ext = image.filename.split('.')[-1].lower() %}
-                {# Use remote Reddit URL only for thumbnails; do NOT use local files or fallbacks #}
-                {% if image.url %}
-                    {% set thumb = image.url.split(',')[0].strip() %}
-                    {% if ext == 'mp4' %}
-                        <video controls class="image-thumbnail lazy-load" style="width:100%;height:200px;object-fit:cover;" data-src="{{ thumb }}">
-                            Your browser does not support the video tag.
-                        </video>
-                    {% else %}
-                        <img data-src="{{ thumb }}" class="image-thumbnail lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy" style="width:100%;height:200px;object-fit:cover;">
-                    {% endif %}
-                {% else %}
-                    <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:200px;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
-                        <small class="text-muted"><i class="fas fa-image"></i> Not available</small>
+                {% set post_images = image.post_images if image.post_images else [image] %}
+                {% set image_count = image.image_count if image.image_count else 1 %}
+                
+                {% if image_count > 1 %}
+                    {# Carousel for multiple images #}
+                    <div id="carousel-{{ image.post_id }}" class="carousel slide" data-bs-ride="false" style="height:200px;">
+                        <div class="carousel-inner" style="height:100%;">
+                            {% for post_img in post_images %}
+                            <div class="carousel-item {% if loop.first %}active{% endif %}" style="height:100%;">
+                                {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
+                                {% if post_img.url %}
+                                    {% set thumb = post_img.url.split(',')[0].strip() %}
+                                    {% if ext == 'mp4' %}
+                                        <video controls class="image-thumbnail lazy-load" style="width:100%;height:100%;object-fit:cover;" data-src="{{ thumb }}">
+                                            Your browser does not support the video tag.
+                                        </video>
+                                    {% else %}
+                                        <img data-src="{{ thumb }}" class="image-thumbnail lazy-load d-block w-100" alt="{{ image.title or 'Image' }}" loading="lazy" style="height:100%;object-fit:cover;">
+                                    {% endif %}
+                                {% elif post_img.web_path %}
+                                    {% if ext == 'mp4' %}
+                                        <video controls class="image-thumbnail" style="width:100%;height:100%;object-fit:cover;">
+                                            <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
+                                        </video>
+                                    {% else %}
+                                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="image-thumbnail d-block w-100" alt="{{ image.title or 'Image' }}" style="height:100%;object-fit:cover;">
+                                    {% endif %}
+                                {% else %}
+                                    <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:100%;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
+                                        <small class="text-muted"><i class="fas fa-image"></i> Not available</small>
+                                    </div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% if image_count > 1 %}
+                        <button class="carousel-control-prev" type="button" data-bs-target="#carousel-{{ image.post_id }}" data-bs-slide="prev" style="width:30px;height:30px;top:50%;transform:translateY(-50%);left:5px;">
+                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Previous</span>
+                        </button>
+                        <button class="carousel-control-next" type="button" data-bs-target="#carousel-{{ image.post_id }}" data-bs-slide="next" style="width:30px;height:30px;top:50%;transform:translateY(-50%);right:5px;">
+                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                            <span class="visually-hidden">Next</span>
+                        </button>
+                        <div class="position-absolute top-0 end-0 m-1">
+                            <span class="badge bg-dark opacity-75">{{ image_count }} <i class="fas fa-images"></i></span>
+                        </div>
+                        {% endif %}
                     </div>
+                {% else %}
+                    {# Single image #}
+                    {% set ext = image.filename.split('.')[-1].lower() %}
+                    {% if image.url %}
+                        {% set thumb = image.url.split(',')[0].strip() %}
+                        {% if ext == 'mp4' %}
+                            <video controls class="image-thumbnail lazy-load" style="width:100%;height:200px;object-fit:cover;" data-src="{{ thumb }}">
+                                Your browser does not support the video tag.
+                            </video>
+                        {% else %}
+                            <img data-src="{{ thumb }}" class="image-thumbnail lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy" style="width:100%;height:200px;object-fit:cover;">
+                        {% endif %}
+                    {% elif image.web_path %}
+                        {% if ext == 'mp4' %}
+                            <video controls class="image-thumbnail" style="width:100%;height:200px;object-fit:cover;">
+                                <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
+                            </video>
+                        {% else %}
+                            <img src="{{ url_for('static', filename=image.web_path) }}" class="image-thumbnail" alt="{{ image.title or 'Image' }}" style="width:100%;height:200px;object-fit:cover;">
+                        {% endif %}
+                    {% else %}
+                        <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:200px;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
+                            <small class="text-muted"><i class="fas fa-image"></i> Not available</small>
+                        </div>
+                    {% endif %}
                 {% endif %}
             </div>
             <div class="card-footer">

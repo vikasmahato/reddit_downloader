@@ -105,7 +105,8 @@ class RedditImageUI:
         return None
 
     def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None, sort=None, hidden_users=None):
-        """Get images from MySQL database with filtering, including deleted filter, sorting, and hidden users."""
+        """Get images from MySQL database with filtering, including deleted filter, sorting, and hidden users.
+        Returns images grouped by post_id, with each image having a 'post_images' list containing all images from the same post."""
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor(dictionary=True)
@@ -146,12 +147,19 @@ class RedditImageUI:
             else:
                 order_by = ' ORDER BY i.download_date DESC, i.download_time DESC'
             query += order_by
-            query += f" LIMIT {limit} OFFSET {offset}"
+            query += f" LIMIT {limit * 5} OFFSET {offset}"  # Fetch more to account for grouping
             cursor.execute(query, params)
             results = cursor.fetchall()
+            
+            # Group images by post_id
+            post_images_map = {}
             images = []
+            seen_post_ids = set()
+            
             for row in results:
                 img_dict = dict(row)
+                post_id = img_dict.get('post_id')
+                
                 if img_dict.get('file_path'):
                     web = self.make_web_path(img_dict['file_path'])
                     if web:
@@ -162,7 +170,33 @@ class RedditImageUI:
                     img_dict['comment_count'] = len(comments)
                 except Exception:
                     img_dict['comment_count'] = 0
-                images.append(img_dict)
+                
+                # Group by post_id
+                if post_id:
+                    if post_id not in post_images_map:
+                        post_images_map[post_id] = []
+                    post_images_map[post_id].append(img_dict)
+                    
+                    # Only add the first image of each post to the main list
+                    if post_id not in seen_post_ids:
+                        seen_post_ids.add(post_id)
+                        images.append(img_dict)
+                else:
+                    # Images without post_id are added individually
+                    images.append(img_dict)
+            
+            # Add post_images list to each image
+            for img in images:
+                post_id = img.get('post_id')
+                if post_id and post_id in post_images_map:
+                    # Get all images for this post, sorted by id
+                    all_post_images = sorted(post_images_map[post_id], key=lambda x: x.get('id', 0))
+                    img['post_images'] = all_post_images
+                    img['image_count'] = len(all_post_images)
+                else:
+                    img['post_images'] = [img]
+                    img['image_count'] = 1
+            
             conn.close()
             # Filter out hidden users
             if hidden_users:
@@ -170,7 +204,9 @@ class RedditImageUI:
             # Sort by comment count if requested
             if sort == 'comments':
                 images.sort(key=lambda x: x.get('comment_count', 0), reverse=True)
-            return images
+            
+            # Limit to requested number after grouping
+            return images[:limit]
         except Exception as e:
             print(f"Database error: {e}")
             return []
@@ -398,6 +434,38 @@ def image_details(image_id):
                 web = ui_handler.make_web_path(image_dict['file_path'])
                 if web:
                     image_dict['web_path'] = web
+            
+            # Get all images from the same post
+            post_id = image_dict.get('post_id')
+            if post_id:
+                cursor.execute("""SELECT 
+                    i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
+                    i.download_date, i.download_time, i.is_deleted,
+                    pi.url
+                FROM images i
+                LEFT JOIN post_images pi ON i.id = pi.image_id
+                WHERE pi.post_id = %s
+                ORDER BY i.id ASC""", (post_id,))
+                all_post_images = cursor.fetchall()
+                post_images_list = []
+                current_image_index = 0
+                for idx, post_img in enumerate(all_post_images):
+                    post_img_dict = dict(post_img)
+                    if post_img_dict.get('file_path'):
+                        web = ui_handler.make_web_path(post_img_dict['file_path'])
+                        if web:
+                            post_img_dict['web_path'] = web
+                    post_images_list.append(post_img_dict)
+                    if post_img_dict['id'] == image_id:
+                        current_image_index = idx
+                image_dict['post_images'] = post_images_list
+                image_dict['current_image_index'] = current_image_index
+                image_dict['image_count'] = len(post_images_list)
+            else:
+                image_dict['post_images'] = [image_dict]
+                image_dict['current_image_index'] = 0
+                image_dict['image_count'] = 1
+            
             # Extract EXIF data
             exif = extract_exif_data(image_dict['file_path'])
             image_dict['exif'] = exif

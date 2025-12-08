@@ -461,11 +461,13 @@ class RedditImageDownloader:
         return deleted_images
 
 
-    def get_scrape_lists_from_db(self, list_type: str) -> List[str]:
+    def get_scrape_lists_from_db(self, list_type: str, backoff_threshold: int = 3) -> List[str]:
         """Get subreddits or users from the database, ordered by oldest scraped first.
+        Applies backoff for items with too many consecutive zero results.
         
         Args:
             list_type: 'subreddit' or 'user'
+            backoff_threshold: Number of consecutive zero results before skipping (default: 3)
         
         Returns:
             List of names (subreddit names or usernames), ordered by last_scraped_at ASC (NULL first)
@@ -473,15 +475,46 @@ class RedditImageDownloader:
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
-        # Order by last_scraped_at ASC (NULL values come first in MySQL), then by name for consistency
-        cursor.execute("""
-            SELECT name FROM scrape_lists
-            WHERE type = %s AND enabled = TRUE
-            ORDER BY last_scraped_at ASC, name ASC
-        """, (list_type,))
+        # Ensure zero_result_count column exists
+        self._ensure_zero_result_count_column()
+        
+        # Get items with zero_result_count
+        try:
+            cursor.execute("""
+                SELECT name, COALESCE(zero_result_count, 0) as zero_result_count 
+                FROM scrape_lists
+                WHERE type = %s AND enabled = TRUE
+                ORDER BY last_scraped_at ASC, name ASC
+            """, (list_type,))
+        except mysql.connector.Error:
+            # Fallback if column doesn't exist yet
+            cursor.execute("""
+                SELECT name FROM scrape_lists
+                WHERE type = %s AND enabled = TRUE
+                ORDER BY last_scraped_at ASC, name ASC
+            """, (list_type,))
+            results = cursor.fetchall()
+            items = [row[0] for row in results]
+            conn.close()
+            return items
         
         results = cursor.fetchall()
-        items = [row[0] for row in results]
+        items = []
+        skipped_count = 0
+        
+        for row in results:
+            if len(row) == 2:
+                name, zero_count = row
+                if zero_count >= backoff_threshold:
+                    skipped_count += 1
+                    logger.debug(f"⏭️  Skipping {list_type} '{name}' (backoff: {zero_count} consecutive zero results)")
+                    continue
+            else:
+                name = row[0]
+            items.append(name)
+        
+        if skipped_count > 0:
+            logger.info(f"⏭️  Skipped {skipped_count} {list_type}(s) due to backoff")
         
         conn.close()
         return items
@@ -504,6 +537,98 @@ class RedditImageDownloader:
         
         conn.commit()
         conn.close()
+
+    def _ensure_zero_result_count_column(self):
+        """Ensure the zero_result_count column exists in scrape_lists table."""
+        try:
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            # Check if column exists
+            cursor.execute("""
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'scrape_lists' 
+                AND COLUMN_NAME = 'zero_result_count'
+            """)
+            exists = cursor.fetchone()[0] > 0
+            
+            if not exists:
+                cursor.execute("""
+                    ALTER TABLE scrape_lists 
+                    ADD COLUMN zero_result_count INT DEFAULT 0
+                """)
+                conn.commit()
+            conn.close()
+        except mysql.connector.Error as e:
+            # Column might already exist or other error
+            logger.debug(f"Column check: {e}")
+
+    def get_zero_result_count(self, list_type: str, name: str) -> int:
+        """Get the current zero result count for a subreddit or user.
+        
+        Args:
+            list_type: 'subreddit' or 'user'
+            name: The subreddit or user name
+        
+        Returns:
+            Current zero result count (0 if not found or column doesn't exist)
+        """
+        try:
+            self._ensure_zero_result_count_column()
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COALESCE(zero_result_count, 0) 
+                FROM scrape_lists
+                WHERE type = %s AND name = %s
+            """, (list_type, name))
+            result = cursor.fetchone()
+            conn.close()
+            return result[0] if result else 0
+        except mysql.connector.Error:
+            return 0
+
+    def increment_zero_result_count(self, list_type: str, name: str):
+        """Increment the zero result count for a subreddit or user.
+        
+        Args:
+            list_type: 'subreddit' or 'user'
+            name: The subreddit or user name
+        """
+        try:
+            self._ensure_zero_result_count_column()
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE scrape_lists
+                SET zero_result_count = COALESCE(zero_result_count, 0) + 1
+                WHERE type = %s AND name = %s
+            """, (list_type, name))
+            conn.commit()
+            conn.close()
+        except mysql.connector.Error as e:
+            logger.debug(f"Error incrementing zero result count: {e}")
+
+    def reset_zero_result_count(self, list_type: str, name: str):
+        """Reset the zero result count for a subreddit or user (when results are found).
+        
+        Args:
+            list_type: 'subreddit' or 'user'
+            name: The subreddit or user name
+        """
+        try:
+            self._ensure_zero_result_count_column()
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE scrape_lists
+                SET zero_result_count = 0
+                WHERE type = %s AND name = %s
+            """, (list_type, name))
+            conn.commit()
+            conn.close()
+        except mysql.connector.Error as e:
+            logger.debug(f"Error resetting zero result count: {e}")
 
     def parse_scrape_list(self, section: str) -> List[str]:
         """Parse a config section for scraping lists.
@@ -553,15 +678,19 @@ class RedditImageDownloader:
             logger.error("❌ Reddit connection required for batch scraping")
             return
         
+        # Get backoff threshold from config (default: 3)
+        backoff_threshold = self.config.getint('general', 'backoff_threshold', fallback=3)
+        
         total_downloads = 0
         subreddit_counts: Dict[str, int] = {}
         forbidden_subreddits: List[str] = []
+        backoff_skipped: List[str] = []
         
         # Scrape subreddits
         if scrape_type in ["all", "subreddits"]:
-            subreddits = self.get_scrape_lists_from_db('subreddit')
+            subreddits = self.get_scrape_lists_from_db('subreddit', backoff_threshold)
             if subreddits:
-                logger.info(f"\n📂 Found {len(subreddits)} subreddits in database")
+                logger.info(f"\n📂 Found {len(subreddits)} subreddits in database (backoff threshold: {backoff_threshold})")
                 for subreddit in subreddits:
                     # Name is already cleaned from database
                     clean_name = subreddit.strip()
@@ -572,27 +701,51 @@ class RedditImageDownloader:
                         downloaded = self.download_from_subreddit(clean_name, limit)
                         subreddit_counts[clean_name] = downloaded
                         total_downloads += 1
+                        
                         # Update last_scraped_at timestamp
                         self.update_last_scraped_at('subreddit', clean_name)
+                        
+                        # Track zero results for backoff
+                        if downloaded == 0:
+                            self.increment_zero_result_count('subreddit', clean_name)
+                            zero_count = self.get_zero_result_count('subreddit', clean_name)
+                            logger.warning(f"⚠️  r/{clean_name}: No images found (consecutive zero results: {zero_count})")
+                        else:
+                            # Reset zero result count when images are found
+                            self.reset_zero_result_count('subreddit', clean_name)
+                            
                     except SubredditAccessError as err:
                         forbidden_subreddits.append(clean_name)
                         logger.warning(f"🚫 Skipping r/{clean_name}: {err}")
         
         # Scrape user posts
         if scrape_type in ["all", "users"]:
-            users = self.get_scrape_lists_from_db('user')
+            users = self.get_scrape_lists_from_db('user', backoff_threshold)
             if users:
-                logger.info(f"\n👤 Found {len(users)} users in database")
+                logger.info(f"\n👤 Found {len(users)} users in database (backoff threshold: {backoff_threshold})")
                 for username in users:
                     # Name is already cleaned from database
                     clean_name = username.strip()
                     logger.info(f"\n🔍 Scraping u/{clean_name}...")
                     
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
-                    self.download_from_user(clean_name, limit)
-                    total_downloads += 1
-                    # Update last_scraped_at timestamp
-                    self.update_last_scraped_at('user', clean_name)
+                    try:
+                        downloaded = self.download_from_user(clean_name, limit)
+                        total_downloads += 1
+                        
+                        # Update last_scraped_at timestamp
+                        self.update_last_scraped_at('user', clean_name)
+                        
+                        # Track zero results for backoff
+                        if downloaded == 0:
+                            self.increment_zero_result_count('user', clean_name)
+                            zero_count = self.get_zero_result_count('user', clean_name)
+                            logger.warning(f"⚠️  u/{clean_name}: No images found (consecutive zero results: {zero_count})")
+                        else:
+                            # Reset zero result count when images are found
+                            self.reset_zero_result_count('user', clean_name)
+                    except Exception as e:
+                        logger.error(f"❌ Error scraping u/{clean_name}: {e}")
         
         logger.success(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
         
@@ -607,10 +760,14 @@ class RedditImageDownloader:
                 logger.warning(f"   r/{name}")
 
     def download_from_user(self, username: str, limit: int = 25):
-        """Download images from a specific user's posts."""
+        """Download images from a specific user's posts.
+        
+        Returns:
+            Number of images downloaded
+        """
         if not self.reddit:
             logger.error("❌ Reddit connection required to access user posts")
-            return
+            return 0
         
         try:
             # Remove u/ prefix if present
@@ -662,15 +819,16 @@ class RedditImageDownloader:
             
             if not post_data_list:
                 logger.warning(f"❌ No image posts found for u/{username}")
-                return
+                return 0
             
             logger.info(f"📸 Found {len(post_data_list)} image posts from u/{username}")
             
             urls = [post['url'] for post in post_data_list]
-            self.download_from_urls(urls, username, post_data_list)
+            return self.download_from_urls(urls, username, post_data_list)
             
         except Exception as e:
             logger.error(f"❌ Error fetching posts from u/{username}: {e}")
+            return 0
 
     def _extract_gallery_urls(self, post) -> List[str]:
         """Extract all direct image URLs from a Reddit gallery post."""
@@ -791,8 +949,19 @@ class RedditImageDownloader:
         for i, url in enumerate(urls, 1):
             logger.info(f"[{i}/{total}] {url}")
             post_data = url_data[i-1] if url_data and i <= len(url_data) else None
-            if self.download_image(url, subreddit=subreddit, post_data=post_data):
-                successful += 1
+            
+            # Check if this is a gallery post with multiple URLs
+            if post_data and post_data.get('all_urls'):
+                # Download all images from the gallery
+                gallery_urls = [u.strip() for u in post_data['all_urls'].split(',') if u.strip()]
+                logger.info(f"📸 Gallery post detected with {len(gallery_urls)} images")
+                for gallery_url in gallery_urls:
+                    if self.download_image(gallery_url, subreddit=subreddit, post_data=post_data):
+                        successful += 1
+            else:
+                # Single image post
+                if self.download_image(url, subreddit=subreddit, post_data=post_data):
+                    successful += 1
         logger.success(f"\n✅ Download complete: {successful}/{total} images downloaded")
         return successful
 
@@ -807,6 +976,8 @@ class RedditImageDownloader:
         
         logger.info(f"📸 Found {len(image_posts)} image posts")
         
+        # For gallery posts, we'll pass the full image_posts list to download_from_urls
+        # which will handle downloading all images from each gallery
         urls = [post['url'] for post in image_posts]
         return self.download_from_urls(urls, subreddit, image_posts)
 

@@ -93,6 +93,31 @@ pre code {
     background-color: #232526 !important;
     color: #e0e0e0 !important;
 }
+.carousel-control-prev, .carousel-control-next {
+    width: 50px;
+    height: 50px;
+    background-color: rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+.carousel-control-prev {
+    left: 10px;
+}
+.carousel-control-next {
+    right: 10px;
+}
+.carousel-indicators {
+    margin-bottom: 1rem;
+}
+.carousel-indicators button {
+    background-color: rgba(255, 255, 255, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.8);
+}
+.carousel-indicators button.active {
+    background-color: #ff4500;
+    border-color: #ff4500;
+}
 </style>
 <div class="row">
     <div class="col-md-8">
@@ -100,12 +125,16 @@ pre code {
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4><i class="fas fa-info-circle"></i> Image Details</h4>
                 <div>
+                    {% if image.post_images and image.post_images|length > 1 %}
+                        {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
+                        <span class="badge bg-secondary me-2">{{ current_index + 1 }} / {{ image.post_images|length }}</span>
+                    {% endif %}
                     {% if image.id > 1 %}
-                    <a href="/details/{{ image.id - 1 }}" class="btn btn-outline-secondary btn-sm me-1" title="Previous">
+                    <a href="/details/{{ image.id - 1 }}" class="btn btn-outline-secondary btn-sm me-1" title="Previous Image">
                         <i class="fas fa-arrow-left"></i>
                     </a>
                     {% endif %}
-                    <a href="/details/{{ image.id + 1 }}" class="btn btn-outline-secondary btn-sm" title="Next">
+                    <a href="/details/{{ image.id + 1 }}" class="btn btn-outline-secondary btn-sm" title="Next Image">
                         <i class="fas fa-arrow-right"></i>
                     </a>
                 </div>
@@ -118,18 +147,64 @@ pre code {
                 </div>
                 {# Use only the local served file on the details page; do NOT use remote URLs or fallbacks #}
                 <div class="text-center mb-4">
-                    {% if image.web_path %}
-                        {% set ext = image.filename.split('.')[-1].lower() %}
-                        {% if ext == 'mp4' %}
-                            <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
-                                <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
-                                Your browser does not support the video tag.
-                            </video>
-                        {% else %}
-                            <img src="{{ url_for('static', filename=image.web_path) }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
-                        {% endif %}
+                    {% set post_images = image.post_images if image.post_images else [image] %}
+                    {% set image_count = image.image_count if image.image_count else 1 %}
+                    {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
+                    
+                    {% if image_count > 1 %}
+                        {# Carousel for multiple images #}
+                        <div id="carousel-details" class="carousel slide" data-bs-ride="carousel" data-bs-interval="false">
+                            <div class="carousel-inner">
+                                {% for post_img in post_images %}
+                                <div class="carousel-item {% if loop.index0 == current_index %}active{% endif %}">
+                                    {% if post_img.web_path %}
+                                        {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
+                                        {% if ext == 'mp4' %}
+                                            <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
+                                                <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
+                                                Your browser does not support the video tag.
+                                            </video>
+                                        {% else %}
+                                            <img src="{{ url_for('static', filename=post_img.web_path) }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
+                                        {% endif %}
+                                    {% else %}
+                                        <div class="alert alert-warning">Image not found.</div>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <button class="carousel-control-prev" type="button" data-bs-target="#carousel-details" data-bs-slide="prev">
+                                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                                <span class="visually-hidden">Previous</span>
+                            </button>
+                            <button class="carousel-control-next" type="button" data-bs-target="#carousel-details" data-bs-slide="next">
+                                <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                                <span class="visually-hidden">Next</span>
+                            </button>
+                            <div class="carousel-indicators">
+                                {% for post_img in post_images %}
+                                <button type="button" data-bs-target="#carousel-details" data-bs-slide-to="{{ loop.index0 }}" {% if loop.index0 == current_index %}class="active" aria-current="true"{% endif %} aria-label="Slide {{ loop.index }}"></button>
+                                {% endfor %}
+                            </div>
+                            <div class="position-absolute top-0 end-0 m-2">
+                                <span class="badge bg-dark opacity-75">{{ current_index + 1 }} / {{ image_count }}</span>
+                            </div>
+                        </div>
                     {% else %}
-                        <div class="alert alert-warning">Image not found.</div>
+                        {# Single image #}
+                        {% if image.web_path %}
+                            {% set ext = image.filename.split('.')[-1].lower() %}
+                            {% if ext == 'mp4' %}
+                                <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
+                                    <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                            {% else %}
+                                <img src="{{ url_for('static', filename=image.web_path) }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
+                            {% endif %}
+                        {% else %}
+                            <div class="alert alert-warning">Image not found.</div>
+                        {% endif %}
                     {% endif %}
                 </div>
 
@@ -216,11 +291,15 @@ pre code {
             <div class="card-footer">
                 <div class="d-flex justify-content-between">
                     <div>
-                        {% if image.web_path %}
-                        <a href="{{ url_for('static', filename=image.web_path) }}" target="_blank" class="btn btn-primary">
+                        {% set post_images = image.post_images if image.post_images else [image] %}
+                        {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
+                        {% set current_img = post_images[current_index] if post_images else image %}
+                        
+                        {% if current_img.web_path %}
+                        <a href="{{ url_for('static', filename=current_img.web_path) }}" target="_blank" class="btn btn-primary">
                             <i class="fas fa-external-link-alt"></i> View Full Size
                         </a>
-                        <a href="{{ url_for('static', filename=image.web_path) }}" download="{{ image.filename }}" class="btn btn-outline-primary">
+                        <a href="{{ url_for('static', filename=current_img.web_path) }}" download="{{ current_img.filename or image.filename }}" class="btn btn-outline-primary">
                             <i class="fas fa-download"></i> Download
                         </a>
                         {% endif %}
@@ -231,6 +310,21 @@ pre code {
                         {% endif %}
                     </div>
                     <div>
+                        {% if image.post_images and image.post_images|length > 1 %}
+                            {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
+                            {% if current_index > 0 %}
+                                {% set prev_img = image.post_images[current_index - 1] %}
+                                <a href="/details/{{ prev_img.id }}" class="btn btn-outline-secondary me-1">
+                                    <i class="fas fa-arrow-left"></i> Previous
+                                </a>
+                            {% endif %}
+                            {% if current_index < image.post_images|length - 1 %}
+                                {% set next_img = image.post_images[current_index + 1] %}
+                                <a href="/details/{{ next_img.id }}" class="btn btn-outline-secondary me-1">
+                                    Next <i class="fas fa-arrow-right"></i>
+                                </a>
+                            {% endif %}
+                        {% endif %}
                         <a href="/" class="btn btn-outline-secondary">
                             <i class="fas fa-arrow-left"></i> Back to Gallery
                         </a>
@@ -421,6 +515,22 @@ document.getElementById('commentForm').addEventListener('submit', function(e) {
         statusDiv.className = 'alert alert-danger';
         statusDiv.textContent = 'Network error.';
     });
+});
+
+// Update URL when carousel changes on details page
+document.addEventListener('DOMContentLoaded', function() {
+    const carousel = document.getElementById('carousel-details');
+    if (carousel) {
+        const postImages = {{ image.post_images | tojson if image.post_images else '[]' }};
+        carousel.addEventListener('slid.bs.carousel', function(event) {
+            const activeIndex = event.to;
+            if (postImages && postImages[activeIndex]) {
+                const newImageId = postImages[activeIndex].id;
+                // Update URL without page reload
+                window.history.replaceState({}, '', '/details/' + newImageId);
+            }
+        });
+    }
 });
 
 // Auto-fetch and update comments on page load
