@@ -302,131 +302,114 @@ class RedditImageDownloader:
 
     def _get_image_record(self, url: str) -> Optional[Dict]:
         """Get image record from metadata database."""
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor(dictionary=True)
-            # Join post_images and images to get full record
-            query = '''
-                SELECT i.*, pi.url 
-                FROM post_images pi 
-                JOIN images i ON pi.image_id = i.id 
-                WHERE pi.url = %s
-            '''
-            cursor.execute(query, (url,))
-            result = cursor.fetchone()
-            conn.close()
-            return result
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Could not query metadata database: {e}")
-        return None
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        # Join post_images and images to get full record
+        query = '''
+            SELECT i.*, pi.url 
+            FROM post_images pi 
+            JOIN images i ON pi.image_id = i.id 
+            WHERE pi.url = %s
+        '''
+        cursor.execute(query, (url,))
+        result = cursor.fetchone()
+        conn.close()
+        return result
 
     def _get_image_by_hash(self, file_hash: str) -> Optional[Dict]:
         """Get image record by file hash."""
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute('SELECT * FROM images WHERE file_hash = %s', (file_hash,))
-            result = cursor.fetchone()
-            conn.close()
-            return result
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Could not query metadata database by hash: {e}")
-        return None
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute('SELECT * FROM images WHERE file_hash = %s', (file_hash,))
+        result = cursor.fetchone()
+        conn.close()
+        return result
 
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
                             post_data: Dict, filepath: Path, file_hash: str, file_size: int):
         """Save image metadata to MySQL database using normalized schema."""
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            
-            # 1. Insert/Update Post
-            post_id = None
-            if post_data:
-                author = post_data.get('author', '')
-                title = post_data.get('title', '')
-                permalink = post_data.get('permalink', '')
-                post_username = post_data.get('post_username', '')
-                comments = post_data.get('comments', '')
-                reddit_id = None
-                if permalink:
-                    # Try to extract reddit_id from permalink
-                    match = re.search(r'/comments/([a-z0-9]+)/', permalink)
-                    if match:
-                        reddit_id = match.group(1)
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        # 1. Insert/Update Post
+        post_id = None
+        if post_data:
+            author = post_data.get('author', '')
+            title = post_data.get('title', '')
+            permalink = post_data.get('permalink', '')
+            post_username = post_data.get('post_username', '')
+            comments = post_data.get('comments', '')
+            reddit_id = None
+            if permalink:
+                # Try to extract reddit_id from permalink
+                match = re.search(r'/comments/([a-z0-9]+)/', permalink)
+                if match:
+                    reddit_id = match.group(1)
 
-                cursor.execute('''
-                    INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE 
-                        title=VALUES(title), 
-                        score=VALUES(score), 
-                        comments=VALUES(comments),
-                        id=LAST_INSERT_ID(id)
-                ''', (reddit_id, title, author, subreddit, permalink, 
-                      post_data.get('created_utc', 0), post_data.get('score', 0), 
-                      post_username, comments))
-                post_id = cursor.lastrowid
-            
-            # 2. Insert/Update Image
-            # Check if image exists by hash (handled in download_image, but we ensure here)
             cursor.execute('''
-                INSERT INTO images (file_hash, filename, file_path, file_size, download_date, download_time)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE 
-                    file_path=VALUES(file_path),
+                    title=VALUES(title), 
+                    score=VALUES(score), 
+                    comments=VALUES(comments),
                     id=LAST_INSERT_ID(id)
-            ''', (file_hash, filename, str(filepath), file_size, 
-                  datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")))
-            image_id = cursor.lastrowid
-            
-            # 3. Link Post and Image
-            if post_id and image_id:
-                cursor.execute('''
-                    INSERT IGNORE INTO post_images (post_id, image_id, url)
-                    VALUES (%s, %s, %s)
-                ''', (post_id, image_id, url))
-            
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Could not save metadata: {e}")
+            ''', (reddit_id, title, author, subreddit, permalink, 
+                  post_data.get('created_utc', 0), post_data.get('score', 0), 
+                  post_username, comments))
+            post_id = cursor.lastrowid
+        
+        # 2. Insert/Update Image
+        # Check if image exists by hash (handled in download_image, but we ensure here)
+        cursor.execute('''
+            INSERT INTO images (file_hash, filename, file_path, file_size, download_date, download_time)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE 
+                file_path=VALUES(file_path),
+                id=LAST_INSERT_ID(id)
+        ''', (file_hash, filename, str(filepath), file_size, 
+              datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")))
+        image_id = cursor.lastrowid
+        
+        # 3. Link Post and Image
+        if post_id and image_id:
+            cursor.execute('''
+                INSERT IGNORE INTO post_images (post_id, image_id, url)
+                VALUES (%s, %s, %s)
+            ''', (post_id, image_id, url))
+        
+        conn.commit()
+        conn.close()
 
     def _update_file_path_in_db(self, url: str, new_filepath: str):
         """Update file path in MySQL database."""
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            # Update in images table based on join with post_images? 
-            # Or just update images table directly if we know the file path?
-            # But we only have URL here.
-            cursor.execute('''
-                UPDATE images i 
-                JOIN post_images pi ON i.id = pi.image_id 
-                SET i.file_path = %s 
-                WHERE pi.url = %s
-            ''', (new_filepath, url))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Could not update file path: {e}")
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        # Update in images table based on join with post_images? 
+        # Or just update images table directly if we know the file path?
+        # But we only have URL here.
+        cursor.execute('''
+            UPDATE images i 
+            JOIN post_images pi ON i.id = pi.image_id 
+            SET i.file_path = %s 
+            WHERE pi.url = %s
+        ''', (new_filepath, url))
+        conn.commit()
+        conn.close()
 
     def _mark_image_as_deleted(self, url: str):
         """Mark an image as deleted in MySQL database by setting is_deleted to True."""
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE images i
-                JOIN post_images pi ON i.id = pi.image_id
-                SET i.is_deleted = 1 
-                WHERE pi.url = %s
-            ''', (url,))
-            conn.commit()
-            conn.close()
-            logger.info(f"Marked as deleted: {url}")
-        except Exception as e:
-            logger.error(f"Error marking image as deleted: {e}")
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE images i
+            JOIN post_images pi ON i.id = pi.image_id
+            SET i.is_deleted = 1 
+            WHERE pi.url = %s
+        ''', (url,))
+        conn.commit()
+        conn.close()
+        logger.info(f"Marked as deleted: {url}")
 
     def check_deleted_images(self, subreddit: str = None) -> List[Dict]:
         """Check which previously downloaded images are now deleted."""
@@ -434,49 +417,47 @@ class RedditImageDownloader:
         if not self.reddit:
             logger.error("❌ Reddit connection required to check for deleted images")
             return deleted_images
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            if subreddit:
-                cursor.execute('''
-                    SELECT pi.url, i.filename, i.file_path 
-                    FROM post_images pi
-                    JOIN posts p ON pi.post_id = p.id
-                    JOIN images i ON pi.image_id = i.id
-                    WHERE p.subreddit = %s AND i.is_deleted = 0
-                ''', (subreddit,))
-            else:
-                cursor.execute('''
-                    SELECT pi.url, i.filename, i.file_path 
-                    FROM post_images pi
-                    JOIN images i ON pi.image_id = i.id
-                    WHERE i.is_deleted = 0
-                ''')
-            images = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
-            conn.close()
-            for img_data in images:
-                img_dict = dict(zip(columns, img_data))
-                url = img_dict['url']
-                try:
-                    response = self.session.head(url, timeout=10)
-                    if response.status_code == 404:
-                        deleted_images.append({
-                            'url': url,
-                            'filename': img_dict['filename'],
-                            'file_path': img_dict.get('file_path')
-                        })
-                except Exception:
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        if subreddit:
+            cursor.execute('''
+                SELECT pi.url, i.filename, i.file_path 
+                FROM post_images pi
+                JOIN posts p ON pi.post_id = p.id
+                JOIN images i ON pi.image_id = i.id
+                WHERE p.subreddit = %s AND i.is_deleted = 0
+            ''', (subreddit,))
+        else:
+            cursor.execute('''
+                SELECT pi.url, i.filename, i.file_path 
+                FROM post_images pi
+                JOIN images i ON pi.image_id = i.id
+                WHERE i.is_deleted = 0
+            ''')
+        images = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        conn.close()
+        for img_data in images:
+            img_dict = dict(zip(columns, img_data))
+            url = img_dict['url']
+            try:
+                response = self.session.head(url, timeout=10)
+                if response.status_code == 404:
                     deleted_images.append({
                         'url': url,
                         'filename': img_dict['filename'],
                         'file_path': img_dict.get('file_path')
                     })
-            for img in deleted_images:
-                self._mark_image_as_deleted(img['url'])
-                logger.info(f"📝 Marked as deleted in DB: {img['filename']}")
-        except Exception as e:
-            logger.error(f"❌ Error checking deleted images: {e}")
+            except Exception:
+                deleted_images.append({
+                    'url': url,
+                    'filename': img_dict['filename'],
+                    'file_path': img_dict.get('file_path')
+                })
+        for img in deleted_images:
+            self._mark_image_as_deleted(img['url'])
+            logger.info(f"📝 Marked as deleted in DB: {img['filename']}")
         return deleted_images
 
 
@@ -489,32 +470,20 @@ class RedditImageDownloader:
         Returns:
             List of names (subreddit names or usernames), ordered by last_scraped_at ASC (NULL first)
         """
-        items = []
-        try:
-            if not mysql_config:
-                logger.warning("⚠️  MySQL config not available, cannot read from database")
-                return items
-            
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            
-            # Order by last_scraped_at ASC (NULL values come first in MySQL), then by name for consistency
-            cursor.execute("""
-                SELECT name FROM scrape_lists
-                WHERE type = %s AND enabled = TRUE
-                ORDER BY last_scraped_at ASC, name ASC
-            """, (list_type,))
-            
-            results = cursor.fetchall()
-            items = [row[0] for row in results]
-            
-            conn.close()
-            
-        except mysql.connector.Error as e:
-            logger.warning(f"⚠️  Warning: Could not read {list_type} list from database: {e}")
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Error reading {list_type} list: {e}")
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
         
+        # Order by last_scraped_at ASC (NULL values come first in MySQL), then by name for consistency
+        cursor.execute("""
+            SELECT name FROM scrape_lists
+            WHERE type = %s AND enabled = TRUE
+            ORDER BY last_scraped_at ASC, name ASC
+        """, (list_type,))
+        
+        results = cursor.fetchall()
+        items = [row[0] for row in results]
+        
+        conn.close()
         return items
 
     def update_last_scraped_at(self, list_type: str, name: str):
@@ -524,26 +493,17 @@ class RedditImageDownloader:
             list_type: 'subreddit' or 'user'
             name: The subreddit or user name
         """
-        try:
-            if not mysql_config:
-                return
-            
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE scrape_lists
-                SET last_scraped_at = CURRENT_TIMESTAMP
-                WHERE type = %s AND name = %s
-            """, (list_type, name))
-            
-            conn.commit()
-            conn.close()
-            
-        except mysql.connector.Error as e:
-            logger.warning(f"⚠️  Warning: Could not update last_scraped_at for {list_type} {name}: {e}")
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Error updating last_scraped_at: {e}")
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE scrape_lists
+            SET last_scraped_at = CURRENT_TIMESTAMP
+            WHERE type = %s AND name = %s
+        """, (list_type, name))
+        
+        conn.commit()
+        conn.close()
 
     def parse_scrape_list(self, section: str) -> List[str]:
         """Parse a config section for scraping lists.

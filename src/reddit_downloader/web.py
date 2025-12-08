@@ -113,7 +113,7 @@ class RedditImageUI:
             query = """SELECT 
                 i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
                 i.download_date, i.download_time, i.is_deleted,
-                p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
+                p.id as post_id, p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
                 p.score, p.post_username, p.comments,
                 pi.url
             FROM images i
@@ -379,7 +379,7 @@ def image_details(image_id):
         cursor.execute("""SELECT 
             i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
             i.download_date, i.download_time, i.is_deleted,
-            p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
+            p.id as post_id, p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
             p.score, p.post_username, p.comments, p.reddit_id,
             pi.url
         FROM images i
@@ -507,6 +507,119 @@ def get_comments(image_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/delete-post/<int:post_id>', methods=['DELETE'])
+def delete_post(post_id):
+    """Delete a post from the database. If image is not linked to other posts, delete image and move file to /deleted folder."""
+    conn = None
+    try:
+        data = request.get_json()
+        image_id = data.get('image_id') if data else None
+        
+        conn = mysql.connector.connect(**mysql_config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get image_id if not provided
+        if not image_id:
+            cursor.execute("SELECT image_id FROM post_images WHERE post_id = %s LIMIT 1", (post_id,))
+            result = cursor.fetchone()
+            if result:
+                image_id = result['image_id']
+        
+        # Get file path before deletion
+        file_path = None
+        if image_id:
+            cursor.execute("SELECT file_path FROM images WHERE id = %s", (image_id,))
+            img_result = cursor.fetchone()
+            if img_result:
+                file_path = img_result['file_path']
+        
+        # 1. Delete from post_images (the link between post and image)
+        cursor.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
+        deleted_links = cursor.rowcount
+        
+        # 2. Check if image is linked to any other posts
+        image_deleted = False
+        file_moved = False
+        if image_id:
+            cursor.execute("SELECT COUNT(*) as count FROM post_images WHERE image_id = %s", (image_id,))
+            remaining_links = cursor.fetchone()['count']
+            
+            # 3. If image is not linked to any other posts, delete image and move file
+            if remaining_links == 0 and file_path:
+                # Move file to /deleted folder
+                try:
+                    from pathlib import Path
+                    import shutil
+                    
+                    source_path = Path(file_path)
+                    if source_path.exists():
+                        # Create deleted folder inside the download folder
+                        download_folder = ui_handler.download_folder
+                        deleted_folder = download_folder / 'deleted'
+                        deleted_folder.mkdir(parents=True, exist_ok=True)
+                        
+                        # Move file to deleted folder
+                        dest_path = deleted_folder / source_path.name
+                        # Handle filename conflicts
+                        counter = 1
+                        while dest_path.exists():
+                            stem = source_path.stem
+                            suffix = source_path.suffix
+                            dest_path = deleted_folder / f"{stem}_{counter}{suffix}"
+                            counter += 1
+                        
+                        shutil.move(str(source_path), str(dest_path))
+                        file_moved = True
+                        
+                        # Also move MP4 if it's a GIF that was converted
+                        if source_path.suffix.lower() == '.mp4':
+                            # Check if there was an original file
+                            pass
+                        elif source_path.suffix.lower() == '.gif':
+                            # Check if there's a corresponding MP4
+                            mp4_path = source_path.with_suffix('.mp4')
+                            if mp4_path.exists():
+                                mp4_dest = deleted_folder / mp4_path.name
+                                counter = 1
+                                while mp4_dest.exists():
+                                    stem = mp4_path.stem
+                                    suffix = mp4_path.suffix
+                                    mp4_dest = deleted_folder / f"{stem}_{counter}{suffix}"
+                                    counter += 1
+                                shutil.move(str(mp4_path), str(mp4_dest))
+                except Exception as move_error:
+                    # Log error but continue with deletion
+                    print(f"Error moving file: {move_error}")
+                
+                # Delete from images table
+                cursor.execute("DELETE FROM images WHERE id = %s", (image_id,))
+                image_deleted = cursor.rowcount > 0
+        
+        # 4. Delete from posts table
+        cursor.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+        post_deleted = cursor.rowcount > 0
+        
+        if not post_deleted:
+            conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Post not found'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Post deleted successfully',
+            'image_deleted': image_deleted,
+            'file_moved': file_moved
+        })
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/scrape-lists')
 def scrape_lists():
     """Page for managing scrape lists."""
@@ -514,39 +627,11 @@ def scrape_lists():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
         
-        # Check if table exists, create if not
-        try:
-            cursor.execute("""
-                SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
-                FROM scrape_lists
-                ORDER BY type, name
-            """)
-        except mysql.connector.Error as e:
-            if e.errno == 1146:  # Table doesn't exist
-                # Create the table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS scrape_lists (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        type ENUM('subreddit', 'user') NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        enabled BOOLEAN DEFAULT TRUE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        last_scraped_at TIMESTAMP NULL,
-                        UNIQUE KEY unique_type_name (type, name),
-                        INDEX idx_type (type),
-                        INDEX idx_enabled (enabled),
-                        INDEX idx_last_scraped (last_scraped_at)
-                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-                """)
-                conn.commit()
-                cursor.execute("""
-                    SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
-                    FROM scrape_lists
-                    ORDER BY type, name
-                """)
-            else:
-                raise
+        cursor.execute("""
+            SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
+            FROM scrape_lists
+            ORDER BY type, name
+        """)
         
         items = cursor.fetchall()
         conn.close()
@@ -575,38 +660,11 @@ def api_get_scrape_lists():
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
         
-        # Check if table exists, create if not
-        try:
-            cursor.execute("""
-                SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
-                FROM scrape_lists
-                ORDER BY type, name
-            """)
-        except mysql.connector.Error as e:
-            if e.errno == 1146:  # Table doesn't exist
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS scrape_lists (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        type ENUM('subreddit', 'user') NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        enabled BOOLEAN DEFAULT TRUE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        last_scraped_at TIMESTAMP NULL,
-                        UNIQUE KEY unique_type_name (type, name),
-                        INDEX idx_type (type),
-                        INDEX idx_enabled (enabled),
-                        INDEX idx_last_scraped (last_scraped_at)
-                    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-                """)
-                conn.commit()
-                cursor.execute("""
-                    SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
-                    FROM scrape_lists
-                    ORDER BY type, name
-                """)
-            else:
-                raise
+        cursor.execute("""
+            SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
+            FROM scrape_lists
+            ORDER BY type, name
+        """)
         
         items = cursor.fetchall()
         conn.close()

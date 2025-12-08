@@ -225,7 +225,14 @@
             <div class="card-footer">
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="card-title">{{ image.title or image.filename }}</span>
-                    <a href="/details/{{ image.id }}" class="btn btn-outline-primary btn-sm">Details</a>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <a href="/details/{{ image.id }}" class="btn btn-outline-primary">Details</a>
+                        {% if image.post_id %}
+                        <button type="button" class="btn btn-outline-danger" onclick="deletePost({{ image.post_id }}, {{ image.id }}, '{{ image.title or image.filename }}')" title="Delete Post">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         </div>
@@ -351,6 +358,48 @@ document.addEventListener('DOMContentLoaded', function() {
         card.classList.add('fade-in');
     });
 });
+
+// Delete post function
+function deletePost(postId, imageId, title) {
+    if (!confirm(`Are you sure you want to delete "${title}"?\n\nThis will:\n- Delete the post from the database\n- If the image is not linked to other posts, it will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
+        return;
+    }
+    
+    fetch(`/api/delete-post/${postId}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image_id: imageId })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Find and remove the card from the page
+            const buttons = document.querySelectorAll(`button[onclick*="deletePost(${postId}"]`);
+            if (buttons.length > 0) {
+                const card = buttons[0].closest('.col-md-3, .col-6');
+                if (card) {
+                    card.style.transition = 'opacity 0.3s';
+                    card.style.opacity = '0';
+                    setTimeout(() => card.remove(), 300);
+                }
+            }
+            // Show success message
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+            alert.style.zIndex = '9999';
+            alert.innerHTML = '<strong>Success!</strong> Post deleted successfully.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+            document.body.appendChild(alert);
+            setTimeout(() => alert.remove(), 3000);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to delete post'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
+}
 </script>
 
 {% endblock %}

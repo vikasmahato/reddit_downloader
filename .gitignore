@@ -11,6 +11,10 @@ config.ini
 # Metadata database
 reddit_downloads/metadata1.db
 
+export_image_names.py
+image_names_no_extensions.txt
+move_orphaned_files.py
+
 # Python cache and bytecode
 __pycache__/
 *.py[cod]
