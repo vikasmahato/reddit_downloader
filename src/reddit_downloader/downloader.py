@@ -84,7 +84,7 @@ class RedditImageDownloader:
     def _parse_config_file(self, config_file: str):
         """Parse config file handling list sections properly."""
         try:
-            # Create temporary file without list sections
+            # Create temporary file without list sections and strip inline comments
             temp_config = []
             skip_sections = ['scrape_list', 'user_scrape_list']
             skipping = False
@@ -103,6 +103,29 @@ class RedditImageDownloader:
                         skipping = False
                     elif skipping:
                         continue
+                    
+                    # Strip inline comments (everything after # that's not in quotes)
+                    if '#' in line and not line.strip().startswith('#'):
+                        # Split on # and take the first part, but preserve the line structure
+                        parts = line.split('#', 1)
+                        if len(parts) > 1:
+                            # Check if # is inside quotes (simple check)
+                            before_hash = parts[0]
+                            quote_count = before_hash.count('"') + before_hash.count("'")
+                            if quote_count % 2 == 0:  # Even number means # is not in quotes
+                                line = parts[0].rstrip() + '\n'
+                    
+                    # Strip inline comments (everything after # that's not in quotes)
+                    if '#' in line and not line.strip().startswith('#'):
+                        # Split on # and take the first part
+                        parts = line.split('#', 1)
+                        if len(parts) > 1:
+                            # Simple check: if # is not inside quotes, strip the comment
+                            before_hash = parts[0]
+                            # Count quotes - if even, # is outside quotes
+                            quote_count = before_hash.count('"') + before_hash.count("'")
+                            if quote_count % 2 == 0:  # Even means # is not in quotes
+                                line = parts[0].rstrip() + '\n'
                     
                     temp_config.append(line)
             
@@ -133,6 +156,27 @@ class RedditImageDownloader:
                 download_folder = downloads
                 max_images_per_subreddit = 25
                 """)
+
+    def _get_config_int(self, section: str, key: str, fallback: int = 0) -> int:
+        """Get integer value from config, handling inline comments.
+        
+        Args:
+            section: Config section name
+            key: Config key name
+            fallback: Default value if not found or invalid
+        
+        Returns:
+            Integer value from config or fallback
+        """
+        try:
+            value = self.config.get(section, key, fallback=str(fallback))
+            # Strip any inline comments and whitespace
+            if '#' in value:
+                value = value.split('#')[0]
+            value = value.strip()
+            return int(value)
+        except (ValueError, TypeError):
+            return fallback
 
     def _setup_reddit_auth(self):
         """Setup Reddit authentication using PRAW."""
@@ -679,7 +723,7 @@ class RedditImageDownloader:
             return
         
         # Get backoff threshold from config (default: 3)
-        backoff_threshold = self.config.getint('general', 'backoff_threshold', fallback=3)
+        backoff_threshold = self._get_config_int('general', 'backoff_threshold', fallback=3)
         
         total_downloads = 0
         subreddit_counts: Dict[str, int] = {}
