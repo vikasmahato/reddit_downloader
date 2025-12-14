@@ -402,6 +402,21 @@ class RedditImageDownloader:
         conn.close()
         return result
 
+    def _is_post_downloaded(self, permalink: str) -> bool:
+        """Check if a post is already downloaded by checking its permalink in the database."""
+        if not permalink:
+            return False
+        try:
+            conn = mysql.connector.connect(**mysql_config)
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM posts WHERE permalink = %s', (permalink,))
+            result = cursor.fetchone()
+            conn.close()
+            return result is not None
+        except Exception as e:
+            logger.debug(f"Error checking if post is downloaded: {e}")
+            return False
+
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
                             post_data: Dict, filepath: Path, file_hash: str, file_size: int):
         """Save image metadata to MySQL database using normalized schema."""
@@ -763,6 +778,11 @@ class RedditImageDownloader:
                 if submission.is_self:
                     continue
 
+                # Check if post is already downloaded by checking the permalink of the post in the database
+                if self._is_post_downloaded(submission.permalink):
+                    logger.debug(f"⏭️  Post already downloaded (permalink: {submission.permalink}), skipping...")
+                    continue
+
                 gallery_urls = self._extract_gallery_urls(submission)
                 has_gallery = bool(gallery_urls)
                 if not has_gallery and not self._is_image_url(submission.url):
@@ -838,6 +858,11 @@ class RedditImageDownloader:
             image_posts = []
             for post in posts:
                 if not post.is_self:
+                    # Check if post is already downloaded by checking the permalink of the post in the database
+                    if self._is_post_downloaded(post.permalink):
+                        logger.debug(f"⏭️  Post already downloaded (permalink: {post.permalink}), skipping...")
+                        continue
+                    
                     # Handle gallery posts
                     all_urls = self._extract_gallery_urls(post)
                     if all_urls:
