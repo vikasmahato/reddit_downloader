@@ -28,6 +28,16 @@ app = Flask(__name__,
             static_url_path='/reddit_downloads', 
             static_folder=str(_static_folder))
 
+# Setup thumbs folder
+_thumbs_folder = Path.cwd() / 'reddit_downloads_thumbs'
+try:
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    thumbs_folder = config.get('general', 'thumbs_folder', fallback='reddit_downloads_thumbs')
+    _thumbs_folder = Path(thumbs_folder).resolve()
+except Exception:
+    pass
+
 # Load MySQL config
 config = configparser.ConfigParser()
 config.read('config.ini')
@@ -74,6 +84,14 @@ class RedditImageUI:
     def __init__(self, download_folder="reddit_downloads"):
         # store an absolute resolved download folder for reliable relative-path computation
         self.download_folder = Path(download_folder).resolve()
+        # Get thumbs folder from config
+        try:
+            config = configparser.ConfigParser()
+            config.read('config.ini')
+            thumbs_folder = config.get('general', 'thumbs_folder', fallback='reddit_downloads_thumbs')
+            self.thumbs_folder = Path(thumbs_folder).resolve()
+        except Exception:
+            self.thumbs_folder = Path('reddit_downloads_thumbs').resolve()
 
     def make_web_path(self, file_path):
         """Return a path relative to the download_folder suitable for use in /image/<web_path>.
@@ -104,8 +122,38 @@ class RedditImageUI:
                 return None
         return None
 
-    def get_all_images(self, limit=100, offset=0, search=None, subreddit=None, user=None, deleted=None, sort=None, hidden_users=None):
-        """Get images from MySQL database with filtering, including deleted filter, sorting, and hidden users.
+    def make_thumb_path(self, file_path):
+        """Return a path to thumbnail relative to thumbs_folder.
+        If it cannot be computed, return None.
+        """
+        if not file_path:
+            return None
+        try:
+            fp = Path(file_path).resolve()
+        except Exception:
+            try:
+                fp = Path(file_path)
+            except Exception:
+                return None
+        
+        # Calculate relative path from download folder
+        try:
+            rel = fp.relative_to(self.download_folder)
+        except Exception:
+            # Fallback: use filename
+            rel = Path(fp.name)
+        
+        # Convert to thumbnail path (always .jpg)
+        thumb_rel = rel.with_suffix('.jpg')
+        
+        # Check if thumbnail exists
+        thumb_path = self.thumbs_folder / thumb_rel
+        if thumb_path.exists():
+            return str(thumb_rel).replace('\\', '/')
+        return None
+
+    def get_all_images(self, limit=100, offset=0, subreddit=None):
+        """Get images from MySQL database with subreddit filtering.
         Returns images grouped by post_id, with each image having a 'post_images' list containing all images from the same post."""
         try:
             conn = mysql.connector.connect(**mysql_config)
@@ -124,28 +172,11 @@ class RedditImageUI:
             params = []
             # Filter out hidden user
             query += " AND (p.author IS NULL OR p.author != 'BusPsychological3243')"
-            if search:
-                query += " AND (p.title LIKE %s OR p.author LIKE %s OR i.filename LIKE %s)"
-                search_term = f"%{search}%"
-                params.extend([search_term, search_term, search_term])
             if subreddit:
-                query += " AND p.subreddit LIKE %s"
-                params.append(f"%{subreddit}%")
-            if user:
-                query += " AND p.author LIKE %s"
-                params.append(f"%{user}%")
-            if deleted is not None:
-                if deleted:
-                    query += " AND i.is_deleted = 1"
-                else:
-                    query += " AND (i.is_deleted = 0 OR i.is_deleted IS NULL)"
-            # Sorting logic
-            if sort == 'comments':
-                order_by = ''  # Will sort in Python after fetch
-            elif sort == 'filesize':
-                order_by = ' ORDER BY i.file_size DESC'
-            else:
-                order_by = ' ORDER BY i.download_date DESC, i.download_time DESC'
+                query += " AND p.subreddit = %s"
+                params.append(subreddit)
+            # Sorting
+            order_by = ' ORDER BY i.download_date DESC, i.download_time DESC'
             query += order_by
             query += f" LIMIT {limit * 5} OFFSET {offset}"  # Fetch more to account for grouping
             cursor.execute(query, params)
@@ -164,6 +195,10 @@ class RedditImageUI:
                     web = self.make_web_path(img_dict['file_path'])
                     if web:
                         img_dict['web_path'] = web
+                    # Get thumbnail path
+                    thumb = self.make_thumb_path(img_dict['file_path'])
+                    if thumb:
+                        img_dict['thumb_path'] = thumb
                 # Count comments
                 try:
                     comments = json.loads(img_dict.get('comments', '[]')) if img_dict.get('comments') else []
@@ -198,12 +233,6 @@ class RedditImageUI:
                     img['image_count'] = 1
             
             conn.close()
-            # Filter out hidden users
-            if hidden_users:
-                images = [img for img in images if img.get('author') not in hidden_users]
-            # Sort by comment count if requested
-            if sort == 'comments':
-                images.sort(key=lambda x: x.get('comment_count', 0), reverse=True)
             
             # Limit to requested number after grouping
             return images[:limit]
@@ -261,11 +290,11 @@ class RedditImageUI:
             return {}
 
     def get_subreddits(self):
-        """Get list of unique subreddits from MySQL."""
+        """Get list of subreddits from scrape_lists table for fast loading."""
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT subreddit FROM posts WHERE subreddit IS NOT NULL AND subreddit != '' ORDER BY subreddit")
+            cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND enabled = TRUE ORDER BY name")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
             return results
@@ -336,12 +365,7 @@ def index():
     images = ui_handler.get_all_images(
         limit=per_page, 
         offset=offset, 
-        search=search if search else None,
-        subreddit=subreddit if subreddit else None,
-        user=user if user else None,
-        deleted=deleted_filter,
-        sort=sort if sort else None,
-        hidden_users=hidden_users if hidden_users else None
+        subreddit=subreddit if subreddit else None
     )
     for img in images:
         if img.get('file_path'):
@@ -405,6 +429,14 @@ def serve_image(filename):
         download_dir = os.path.join(os.getcwd(), 'reddit_downloads')
         return send_from_directory(download_dir, filename)
 
+@app.route('/thumbs/<path:filename>')
+def serve_thumbnail(filename):
+    """Serve thumbnail images."""
+    try:
+        return send_from_directory(str(_thumbs_folder), filename)
+    except Exception:
+        return "Thumbnail not found", 404
+
 @app.route('/details/<int:image_id>')
 def image_details(image_id):
     """Show detailed information for a specific image."""
@@ -425,15 +457,19 @@ def image_details(image_id):
         image = cursor.fetchone()
         if image:
             image_dict = dict(image)
-            # Convert timedelta fields to string for JSON serialization
-            from datetime import timedelta
+            # Convert datetime/timedelta fields to string for JSON serialization
+            from datetime import timedelta, datetime, date, time
             for k, v in image_dict.items():
-                if isinstance(v, timedelta):
+                if isinstance(v, (timedelta, datetime, date, time)):
                     image_dict[k] = str(v)
             if image_dict.get('file_path'):
                 web = ui_handler.make_web_path(image_dict['file_path'])
                 if web:
                     image_dict['web_path'] = web
+                # Get thumbnail path
+                thumb = ui_handler.make_thumb_path(image_dict['file_path'])
+                if thumb:
+                    image_dict['thumb_path'] = thumb
             
             # Get all images from the same post
             post_id = image_dict.get('post_id')
@@ -451,10 +487,18 @@ def image_details(image_id):
                 current_image_index = 0
                 for idx, post_img in enumerate(all_post_images):
                     post_img_dict = dict(post_img)
+                    # Convert datetime/timedelta fields to string
+                    for k, v in post_img_dict.items():
+                        if isinstance(v, (timedelta, datetime, date, time)):
+                            post_img_dict[k] = str(v)
                     if post_img_dict.get('file_path'):
                         web = ui_handler.make_web_path(post_img_dict['file_path'])
                         if web:
                             post_img_dict['web_path'] = web
+                        # Get thumbnail path
+                        thumb = ui_handler.make_thumb_path(post_img_dict['file_path'])
+                        if thumb:
+                            post_img_dict['thumb_path'] = thumb
                     post_images_list.append(post_img_dict)
                     if post_img_dict['id'] == image_id:
                         current_image_index = idx

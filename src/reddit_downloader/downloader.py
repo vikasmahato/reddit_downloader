@@ -69,9 +69,11 @@ class RedditImageDownloader:
         self.session = requests.Session()
         self.reddit = None
         self.download_folder = Path(self.config.get('general', 'download_folder', fallback='downloads'))
+        self.thumbs_folder = Path(self.config.get('general', 'thumbs_folder', fallback='reddit_downloads_thumbs'))
         
         # Create download folder if it doesn't exist
         self.download_folder.mkdir(exist_ok=True)
+        self.thumbs_folder.mkdir(exist_ok=True)
         
         # Setup headers for requests
         self.session.headers.update({
@@ -261,7 +263,6 @@ class RedditImageDownloader:
             # GIF to MP4 conversion and size reporting using ffmpeg
             if filepath.suffix.lower() == '.gif':
                 import subprocess
-                import os
                 gif_size = os.path.getsize(filepath)
                 mp4_path = filepath.with_suffix('.mp4')
                 logger.info(f"Converting {filepath} to {mp4_path} using ffmpeg...")
@@ -303,18 +304,50 @@ class RedditImageDownloader:
                 # Deduplication Check
                 existing_image = self._get_image_by_hash(file_hash.hexdigest())
                 if existing_image:
-                    logger.info(f"♻️  Duplicate file found (Hash: {file_hash.hexdigest()}). Using existing file.")
-                    # Delete the newly downloaded file
-                    try:
-                        os.remove(filepath)
-                    except OSError:
-                        pass
                     # Use existing file details
-                    filepath = Path(existing_image['file_path'])
-                    filename = existing_image['filename']
-                    downloaded = existing_image['file_size']
+                    existing_filepath = Path(existing_image['file_path'])
+                    # Resolve the path - handle both absolute and relative paths
+                    if not existing_filepath.is_absolute():
+                        # Try relative to download folder
+                        existing_filepath = self.download_folder / existing_filepath
+                    
+                    # Check if existing file actually exists
+                    if existing_filepath.exists():
+                        logger.info(f"♻️  Duplicate file found (Hash: {file_hash.hexdigest()}). Using existing file.")
+                        # Delete the newly downloaded file
+                        try:
+                            os.remove(filepath)
+                        except OSError:
+                            pass
+                        # Use existing file details
+                        filepath = existing_filepath
+                        filename = existing_image['filename']
+                        downloaded = existing_image['file_size']
+                    else:
+                        # Existing file doesn't exist, but hash matches - file was moved/deleted
+                        # Keep the new file and update the database with the new path
+                        logger.warning(f"⚠️  Duplicate hash found but existing file missing at {existing_image['file_path']}")
+                        logger.info(f"📥 Re-saving file to database with new path: {filepath}")
+                        # filepath, filename, downloaded already set above - keep the newly downloaded file
+                        # Verify the new file exists before proceeding
+                        if not filepath.exists():
+                            logger.error(f"✗ Newly downloaded file also missing at {filepath}")
+                            return False
                     
                 self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
+            
+            # Generate thumbnail only if file exists (filepath should point to the actual file location)
+            if filepath.exists():
+                try:
+                    thumb_path = self._generate_thumbnail(filepath, subreddit)
+                    if thumb_path:
+                        logger.debug(f"✓ Thumbnail generated: {thumb_path.name}")
+                except Exception as e:
+                    logger.warning(f"⚠️  Thumbnail generation failed for {filepath}: {e}")
+            else:
+                logger.error(f"✗ Cannot generate thumbnail: file does not exist at {filepath}")
+                # This shouldn't happen if logic is correct, but log as error for debugging
+            
             if prev_record and prev_record.get('is_deleted'):
                 if '_deleted' in filename:
                     new_filename = filename.replace('_deleted', '')
@@ -519,9 +552,6 @@ class RedditImageDownloader:
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
-        # Ensure zero_result_count column exists
-        self._ensure_zero_result_count_column()
-        
         # Get items with zero_result_count
         try:
             cursor.execute("""
@@ -564,12 +594,6 @@ class RedditImageDownloader:
         return items
 
     def update_last_scraped_at(self, list_type: str, name: str):
-        """Update the last_scraped_at timestamp for a subreddit or user.
-        
-        Args:
-            list_type: 'subreddit' or 'user'
-            name: The subreddit or user name
-        """
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor()
         
@@ -582,41 +606,8 @@ class RedditImageDownloader:
         conn.commit()
         conn.close()
 
-    def _ensure_zero_result_count_column(self):
-        """Ensure the zero_result_count column exists in scrape_lists table."""
-        try:
-            conn = mysql.connector.connect(**mysql_config)
-            cursor = conn.cursor()
-            # Check if column exists
-            cursor.execute("""
-                SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_SCHEMA = DATABASE() 
-                AND TABLE_NAME = 'scrape_lists' 
-                AND COLUMN_NAME = 'zero_result_count'
-            """)
-            exists = cursor.fetchone()[0] > 0
-            
-            if not exists:
-                cursor.execute("""
-                    ALTER TABLE scrape_lists 
-                    ADD COLUMN zero_result_count INT DEFAULT 0
-                """)
-                conn.commit()
-            conn.close()
-        except mysql.connector.Error as e:
-            # Column might already exist or other error
-            logger.debug(f"Column check: {e}")
 
     def get_zero_result_count(self, list_type: str, name: str) -> int:
-        """Get the current zero result count for a subreddit or user.
-        
-        Args:
-            list_type: 'subreddit' or 'user'
-            name: The subreddit or user name
-        
-        Returns:
-            Current zero result count (0 if not found or column doesn't exist)
-        """
         try:
             self._ensure_zero_result_count_column()
             conn = mysql.connector.connect(**mysql_config)
@@ -633,14 +624,7 @@ class RedditImageDownloader:
             return 0
 
     def increment_zero_result_count(self, list_type: str, name: str):
-        """Increment the zero result count for a subreddit or user.
-        
-        Args:
-            list_type: 'subreddit' or 'user'
-            name: The subreddit or user name
-        """
         try:
-            self._ensure_zero_result_count_column()
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             cursor.execute("""
@@ -654,14 +638,7 @@ class RedditImageDownloader:
             logger.debug(f"Error incrementing zero result count: {e}")
 
     def reset_zero_result_count(self, list_type: str, name: str):
-        """Reset the zero result count for a subreddit or user (when results are found).
-        
-        Args:
-            list_type: 'subreddit' or 'user'
-            name: The subreddit or user name
-        """
         try:
-            self._ensure_zero_result_count_column()
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             cursor.execute("""
@@ -673,48 +650,6 @@ class RedditImageDownloader:
             conn.close()
         except mysql.connector.Error as e:
             logger.debug(f"Error resetting zero result count: {e}")
-
-    def parse_scrape_list(self, section: str) -> List[str]:
-        """Parse a config section for scraping lists.
-        
-        DEPRECATED: This method is kept for backward compatibility.
-        Use get_scrape_lists_from_db() instead.
-        """
-        items = []
-        try:
-            config_file_path = Path(self.config_file)
-            
-            if not config_file_path.exists():
-                logger.warning(f"⚠️  Config file not found: {config_file_path}")
-                return items
-            
-            # Read the raw config file to handle multiple values in a section
-            reading_section = False
-            with open(config_file_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    
-                    # Start reading when we hit the target section
-                    if line == f'[{section}]':
-                        reading_section = True
-                        continue
-                    
-                    # Stop reading when we hit another section
-                    if reading_section:
-                        if line.startswith('[') and line.endswith(']'):
-                            break
-                        
-                        # Skip empty lines and comments
-                        if line and not line.startswith('#'):
-                            # Remove quotes and clean up the name
-                            clean_name = line.strip('"\'')
-                            if clean_name:  # Only add if not empty after cleaning
-                                items.append(clean_name)
-        
-        except Exception as e:
-            logger.warning(f"⚠️  Warning: Could not parse {section} list: {e}")
-        
-        return items
 
     def scrape_from_config_list(self, scrape_type: str = "all"):
         """Scrape images from configured lists."""
@@ -1025,48 +960,6 @@ class RedditImageDownloader:
         urls = [post['url'] for post in image_posts]
         return self.download_from_urls(urls, subreddit, image_posts)
 
-    def get_user_saved_posts(self, limit: int = 25) -> List[Dict]:
-        """Get saved posts from authenticated user."""
-        if not self.reddit:
-            logger.error("❌ Reddit connection required to access saved posts")
-            return []
-        
-        try:
-            # Check if we have user authentication
-            if not hasattr(self.reddit.user, 'me') or self.reddit.user.me() is None:
-                logger.error("❌ User authentication required to access saved posts")
-                logger.info("   Add username and password to config.ini for this feature")
-                return []
-                
-            saved_posts = []
-            for post in self.reddit.user.me().saved(limit=limit):
-                if post.is_self:
-                    continue
-
-                gallery_urls = self._extract_gallery_urls(post)
-                has_gallery = bool(gallery_urls)
-                if not has_gallery and not self._is_image_url(post.url):
-                    continue
-
-                post_entry = {
-                    'title': post.title,
-                    'url': gallery_urls[0] if has_gallery else post.url,
-                    'author': str(post.author),
-                    'subreddit': str(post.subreddit),
-                    'permalink': post.permalink,
-                    'created_utc': post.created_utc,
-                    'score': post.score
-                }
-                if has_gallery:
-                    post_entry['all_urls'] = ','.join(gallery_urls)
-                saved_posts.append(post_entry)
-            
-            return saved_posts
-            
-        except Exception as e:
-            logger.error(f"❌ Error fetching saved posts: {e}")
-            return []
-
     def resolve_imgur_url(self, url: str) -> str:
         """Resolve imgur URLs to direct image links."""
         if 'imgur.com' in url and not url.endswith(('.jpg', '.png', '.gif', '.webp')):
@@ -1075,6 +968,106 @@ class RedditImageDownloader:
                 url += '/'
             return url + '.jpg'
         return url
+
+    def _generate_thumbnail(self, source_path: Path, subreddit: str = "") -> Optional[Path]:
+        """Generate a thumbnail for an image or video file.
+        
+        Args:
+            source_path: Path to source file
+            subreddit: Subreddit name for folder structure
+        
+        Returns:
+            Path to thumbnail if successful, None otherwise
+        """
+        try:
+            from PIL import Image
+            
+            # Calculate relative path from download folder
+            try:
+                rel_path = source_path.relative_to(self.download_folder)
+            except ValueError:
+                # File is not under download folder, use filename only
+                rel_path = Path(source_path.name)
+            
+            # Create corresponding thumbnail path
+            thumb_folder = self.thumbs_folder
+            if subreddit:
+                thumb_folder = thumb_folder / self._sanitize_folder_name(subreddit)
+                thumb_folder.mkdir(parents=True, exist_ok=True)
+            
+            thumb_path = thumb_folder / rel_path
+            thumb_path = thumb_path.with_suffix('.jpg')  # Always save as JPEG
+            
+            # Skip if thumbnail already exists and is newer
+            if thumb_path.exists():
+                if thumb_path.stat().st_mtime >= source_path.stat().st_mtime:
+                    return thumb_path
+            
+            # Create parent directory
+            thumb_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Check if it's a video file
+            video_extensions = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+            if source_path.suffix.lower() in video_extensions:
+                return self._generate_video_thumbnail(source_path, thumb_path)
+            
+            # Process image
+            with Image.open(source_path) as img:
+                # Convert RGBA to RGB if necessary
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                    img = background
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Create thumbnail maintaining aspect ratio
+                img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+                
+                # Save thumbnail
+                img.save(thumb_path, 'JPEG', quality=85, optimize=True)
+            
+            return thumb_path
+        except Exception as e:
+            logger.debug(f"Error generating thumbnail for {source_path}: {e}")
+            return None
+
+    def _generate_video_thumbnail(self, video_path: Path, thumb_path: Path) -> Optional[Path]:
+        """Generate a thumbnail from a video file using ffmpeg.
+        
+        Args:
+            video_path: Path to source video
+            thumb_path: Path to save thumbnail
+        
+        Returns:
+            Path to thumbnail if successful, None otherwise
+        """
+        try:
+            import subprocess
+            
+            # Use ffmpeg to extract a frame
+            cmd = [
+                'ffmpeg', '-y', '-i', str(video_path),
+                '-vf', 'scale=300:300:force_original_aspect_ratio=decrease,pad=300:300:(ow-iw)/2:(oh-ih)/2',
+                '-frames:v', '1',
+                '-q:v', '2',
+                str(thumb_path)
+            ]
+            
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            
+            if result.returncode == 0 and thumb_path.exists():
+                return thumb_path
+            else:
+                return None
+        except FileNotFoundError:
+            logger.debug(f"ffmpeg not found, skipping video thumbnail: {video_path}")
+            return None
+        except Exception as e:
+            logger.debug(f"Error generating video thumbnail: {e}")
+            return None
 
 
 def create_default_config():
@@ -1107,7 +1100,6 @@ def main():
     parser.add_argument('--subreddit', help='Subreddit to download images from')
     parser.add_argument('--user', help='Download images from a specific user (with or without u/ prefix)')
     parser.add_argument('--limit', type=int, default=25, help='Number of images to download')
-    parser.add_argument('--saved', action='store_true', help='Download from saved posts')
     parser.add_argument('--scrape-all', action='store_true', help='Scrape all subreddits and users from config')
     parser.add_argument('--scrape-subreddits', action='store_true', help='Scrape only subreddits from config')
     parser.add_argument('--scrape-users', action='store_true', help='Scrape only users from config')
@@ -1146,16 +1138,7 @@ def main():
     try:
         downloader = RedditImageDownloader(args.config)
         
-        if args.saved:
-            logger.info("📖 Fetching saved posts...")
-            saved_posts = downloader.get_user_saved_posts(args.limit)
-            if saved_posts:
-                urls = [post['url'] for post in saved_posts]
-                downloader.download_from_urls(urls, "saved_posts", saved_posts)
-            else:
-                logger.warning("❌ No saved image posts found")
-        
-        elif args.scrape_all:
+        if args.scrape_all:
             logger.info("📋 Scraping all sources from config...")
             downloader.scrape_from_config_list("all")
         

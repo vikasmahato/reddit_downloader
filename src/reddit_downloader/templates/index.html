@@ -4,8 +4,6 @@
 
 {% block content %}
 {% set stats = stats if stats is defined else {} %}
-<!-- Select2 CSS -->
-<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <style>
 .deleted-image {
     background-color: #ffe5e5 !important;
@@ -117,67 +115,31 @@
     </div>
 </div>
 
-<!-- Compact Filters with Clear Button -->
+<!-- Subreddit Filter -->
 <div class="row mb-1">
     <div class="col-12">
         <div class="card filter-card" style="padding:0.25rem 0.25rem;">
             <div class="card-body py-1 px-1">
                 <form method="GET" id="filterForm">
                     <div class="row g-1 align-items-center">
-                        <div class="col-md-3">
-                            <label for="search" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Search</label>
-                            <input type="text" class="form-control form-control-sm" id="search" name="search"
-                                   placeholder="Title, author, filename..." value="{{ search }}" style="font-size:0.90em;">
-                        </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <label for="subreddit" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Subreddit</label>
-                            <select class="form-select form-select-sm searchable-select" id="subreddit" name="subreddit" style="font-size:0.90em;">
+                            <select class="form-select form-select-sm" id="subreddit" name="subreddit" style="font-size:0.90em;">
                                 <option value="">All Subreddits</option>
                                 {% for sr in subreddits %}
                                     <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
                                 {% endfor %}
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <label for="user" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Author</label>
-                            <select class="form-select form-select-sm searchable-select" id="user" name="user" style="font-size:0.90em;">
-                                <option value="">All Authors</option>
-                                {% for u in users %}
-                                    <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="hidden_users" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Hide Authors</label>
-                            <select class="form-select form-select-sm searchable-select" id="hidden_users" name="hidden_users" multiple style="font-size:0.90em;">
-                                {% for u in users %}
-                                    <option value="{{ u }}" {% if hidden_users and u in hidden_users %}selected{% endif %}>{{ u }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label for="deleted" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Status</label>
-                            <select class="form-select form-select-sm" id="deleted" name="deleted" style="font-size:0.90em;">
-                                <option value="">All</option>
-                                <option value="0" {% if filter_deleted == '0' %}selected{% endif %}>Active</option>
-                                <option value="1" {% if filter_deleted == '1' %}selected{% endif %}>Deleted</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label for="sort" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Sort By</label>
-                            <select class="form-select form-select-sm" id="sort" name="sort" style="font-size:0.90em;">
-                                <option value="">Newest</option>
-                                <option value="comments" {% if sort == 'comments' %}selected{% endif %}>Most Comments</option>
-                                <option value="filesize" {% if sort == 'filesize' %}selected{% endif %}>File Size</option>
-                            </select>
-                        </div>
                         <div class="col-md-1 d-flex align-items-end gap-1">
-                            <button type="submit" class="btn btn-primary btn-sm w-50" title="Filter">
+                            <button type="submit" class="btn btn-primary btn-sm" title="Filter">
                                 <i class="fas fa-filter"></i>
                             </button>
-                            <button type="button" id="clearFilters" class="btn btn-outline-secondary btn-sm w-50" title="Clear">
+                            {% if filter_subreddit %}
+                            <a href="/" class="btn btn-outline-secondary btn-sm" title="Clear">
                                 <i class="fas fa-times"></i>
-                            </button>
+                            </a>
+                            {% endif %}
                         </div>
                     </div>
                 </form>
@@ -215,7 +177,20 @@
                             {% for post_img in post_images %}
                             <div class="carousel-item {% if loop.first %}active{% endif %}" style="height:100%;">
                                 {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
-                                {% if post_img.url %}
+                                {% if post_img.thumb_path %}
+                                    {# Use local thumbnail #}
+                                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" class="image-thumbnail d-block w-100" alt="{{ image.title or 'Image' }}" style="height:100%;object-fit:cover;" loading="lazy">
+                                {% elif post_img.web_path %}
+                                    {# Fallback to full image if no thumbnail #}
+                                    {% if ext == 'mp4' %}
+                                        <video controls class="image-thumbnail" style="width:100%;height:100%;object-fit:cover;">
+                                            <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
+                                        </video>
+                                    {% else %}
+                                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="image-thumbnail d-block w-100" alt="{{ image.title or 'Image' }}" style="height:100%;object-fit:cover;" loading="lazy">
+                                    {% endif %}
+                                {% elif post_img.url %}
+                                    {# Fallback to remote URL #}
                                     {% set thumb = post_img.url.split(',')[0].strip() %}
                                     {% if ext == 'mp4' %}
                                         <video controls class="image-thumbnail lazy-load" style="width:100%;height:100%;object-fit:cover;" data-src="{{ thumb }}">
@@ -223,14 +198,6 @@
                                         </video>
                                     {% else %}
                                         <img data-src="{{ thumb }}" class="image-thumbnail lazy-load d-block w-100" alt="{{ image.title or 'Image' }}" loading="lazy" style="height:100%;object-fit:cover;">
-                                    {% endif %}
-                                {% elif post_img.web_path %}
-                                    {% if ext == 'mp4' %}
-                                        <video controls class="image-thumbnail" style="width:100%;height:100%;object-fit:cover;">
-                                            <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
-                                        </video>
-                                    {% else %}
-                                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="image-thumbnail d-block w-100" alt="{{ image.title or 'Image' }}" style="height:100%;object-fit:cover;">
                                     {% endif %}
                                 {% else %}
                                     <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:100%;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
@@ -257,7 +224,20 @@
                 {% else %}
                     {# Single image #}
                     {% set ext = image.filename.split('.')[-1].lower() %}
-                    {% if image.url %}
+                    {% if image.thumb_path %}
+                        {# Use local thumbnail #}
+                        <img src="{{ url_for('serve_thumbnail', filename=image.thumb_path) }}" class="image-thumbnail" alt="{{ image.title or 'Image' }}" style="width:100%;height:200px;object-fit:cover;" loading="lazy">
+                    {% elif image.web_path %}
+                        {# Fallback to full image if no thumbnail #}
+                        {% if ext == 'mp4' %}
+                            <video controls class="image-thumbnail" style="width:100%;height:200px;object-fit:cover;">
+                                <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
+                            </video>
+                        {% else %}
+                            <img src="{{ url_for('static', filename=image.web_path) }}" class="image-thumbnail" alt="{{ image.title or 'Image' }}" style="width:100%;height:200px;object-fit:cover;" loading="lazy">
+                        {% endif %}
+                    {% elif image.url %}
+                        {# Fallback to remote URL #}
                         {% set thumb = image.url.split(',')[0].strip() %}
                         {% if ext == 'mp4' %}
                             <video controls class="image-thumbnail lazy-load" style="width:100%;height:200px;object-fit:cover;" data-src="{{ thumb }}">
@@ -265,14 +245,6 @@
                             </video>
                         {% else %}
                             <img data-src="{{ thumb }}" class="image-thumbnail lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy" style="width:100%;height:200px;object-fit:cover;">
-                        {% endif %}
-                    {% elif image.web_path %}
-                        {% if ext == 'mp4' %}
-                            <video controls class="image-thumbnail" style="width:100%;height:200px;object-fit:cover;">
-                                <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
-                            </video>
-                        {% else %}
-                            <img src="{{ url_for('static', filename=image.web_path) }}" class="image-thumbnail" alt="{{ image.title or 'Image' }}" style="width:100%;height:200px;object-fit:cover;">
                         {% endif %}
                     {% else %}
                         <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:200px;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
@@ -306,19 +278,19 @@
             <ul class="pagination">
                 {% if current_page > 1 %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page - 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Previous</a>
+                    <a class="page-link" href="?page={{ current_page - 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}#gallerySection">Previous</a>
                 </li>
                 {% endif %}
                 
                 {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
                 <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                    <a class="page-link" href="?page={{ page_num }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">{{ page_num }}</a>
+                    <a class="page-link" href="?page={{ page_num }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}#gallerySection">{{ page_num }}</a>
                 </li>
                 {% endfor %}
                 
                 {% if images|length == 20 %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page + 1 }}{% if search %}&search={{ search }}{% endif %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Next</a>
+                    <a class="page-link" href="?page={{ current_page + 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}#gallerySection">Next</a>
                 </li>
                 {% endif %}
             </ul>
@@ -338,33 +310,10 @@
 </div>
 {% endif %}
 
-<!-- Select2 JS -->
-<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
-// Initialize Select2 on all searchable selects
+// Auto-submit form on subreddit change
 $(document).ready(function() {
-    $('.searchable-select').select2({
-        width: '100%',
-        theme: 'bootstrap-5',
-        placeholder: 'Select an option',
-        allowClear: true
-    });
-    // Auto-submit form on dropdown change
-    $('#subreddit, #user, #deleted, #sort').on('change', function() {
-        $('#filterForm').submit();
-    });
-    // Auto-submit form on hidden_users change
-    $('#hidden_users').on('change', function() {
-        $('#filterForm').submit();
-    });
-    // Clear button functionality
-    $('#clearFilters').on('click', function() {
-        $('#search').val('');
-        $('#subreddit').val('').trigger('change');
-        $('#user').val('').trigger('change');
-        $('#hidden_users').val('').trigger('change');
-        $('#deleted').val('').trigger('change');
-        $('#sort').val('').trigger('change');
+    $('#subreddit').on('change', function() {
         $('#filterForm').submit();
     });
     // Scroll to gallery section on page load if hash is present

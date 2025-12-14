@@ -23,6 +23,8 @@ reddit-downloader = "reddit_downloader.downloader:main"
 reddit-web = "reddit_downloader.web:main"
 reddit-bot = "reddit_downloader.bot:main"
 reddit-migrate = "reddit_downloader.migration:main"
+reddit-update-comments = "reddit_downloader.utils.update_comments_batch:main"
+reddit-generate-thumbs = "reddit_downloader.utils.generate_thumbs:main"
 
 [build-system]
 requires = ["hatchling"]
