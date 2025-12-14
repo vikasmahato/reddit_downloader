@@ -1,13 +1,16 @@
 # Downloaded images and cache
 downloads/
 reddit_downloads/
+reddit_downloads_thumbs/
+logs/
 cache/
 temp/
 
 # Configuration files with sensitive data
 config.ini
 *.ini
-
+pyproject.toml
+.reddit_service.pid
 # Metadata database
 reddit_downloads/metadata1.db
 
