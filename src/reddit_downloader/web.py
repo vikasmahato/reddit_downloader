@@ -437,91 +437,106 @@ def serve_thumbnail(filename):
     except Exception:
         return "Thumbnail not found", 404
 
-@app.route('/details/<int:image_id>')
-def image_details(image_id):
-    """Show detailed information for a specific image."""
+@app.route('/details/<int:post_id>')
+def image_details(post_id):
+    """Show detailed information for a specific post."""
     try:
+        # Validate post_id
+        if not post_id or post_id <= 0:
+            return f"Invalid post_id: {post_id}", 400
+        
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
-        # Join posts, images, and post_images tables
+        # Get post information
         cursor.execute("""SELECT 
-            i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
-            i.download_date, i.download_time, i.is_deleted,
             p.id as post_id, p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
-            p.score, p.post_username, p.comments, p.reddit_id,
-            pi.url
-        FROM images i
-        LEFT JOIN post_images pi ON i.id = pi.image_id
-        LEFT JOIN posts p ON pi.post_id = p.id
-        WHERE i.id = %s""", (image_id,))
-        image = cursor.fetchone()
-        if image:
-            image_dict = dict(image)
+            p.score, p.post_username, p.comments, p.reddit_id
+        FROM posts p
+        WHERE p.id = %s""", (post_id,))
+        post = cursor.fetchone()
+        if not post:
+            # Check if there are any images linked to this post_id (orphaned links)
+            cursor.execute("""SELECT COUNT(*) as cnt FROM post_images WHERE post_id = %s""", (post_id,))
+            orphan_check = cursor.fetchone()
+            conn.close()
+            if orphan_check and orphan_check['cnt'] > 0:
+                return f"Post not found (post_id: {post_id}), but {orphan_check['cnt']} image(s) are still linked to it. This indicates orphaned data.", 404
+            return f"Post not found (post_id: {post_id})", 404
+        
+        if post:
+            post_dict = dict(post)
             # Convert datetime/timedelta fields to string for JSON serialization
             from datetime import timedelta, datetime, date, time
-            for k, v in image_dict.items():
+            for k, v in post_dict.items():
                 if isinstance(v, (timedelta, datetime, date, time)):
-                    image_dict[k] = str(v)
-            if image_dict.get('file_path'):
-                web = ui_handler.make_web_path(image_dict['file_path'])
-                if web:
-                    image_dict['web_path'] = web
-                # Get thumbnail path
-                thumb = ui_handler.make_thumb_path(image_dict['file_path'])
-                if thumb:
-                    image_dict['thumb_path'] = thumb
+                    post_dict[k] = str(v)
             
-            # Get all images from the same post
-            post_id = image_dict.get('post_id')
-            if post_id:
-                cursor.execute("""SELECT 
-                    i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
-                    i.download_date, i.download_time, i.is_deleted,
-                    pi.url
-                FROM images i
-                LEFT JOIN post_images pi ON i.id = pi.image_id
-                WHERE pi.post_id = %s
-                ORDER BY i.id ASC""", (post_id,))
-                all_post_images = cursor.fetchall()
-                post_images_list = []
-                current_image_index = 0
-                for idx, post_img in enumerate(all_post_images):
-                    post_img_dict = dict(post_img)
-                    # Convert datetime/timedelta fields to string
-                    for k, v in post_img_dict.items():
-                        if isinstance(v, (timedelta, datetime, date, time)):
-                            post_img_dict[k] = str(v)
-                    if post_img_dict.get('file_path'):
-                        web = ui_handler.make_web_path(post_img_dict['file_path'])
-                        if web:
-                            post_img_dict['web_path'] = web
-                        # Get thumbnail path
-                        thumb = ui_handler.make_thumb_path(post_img_dict['file_path'])
-                        if thumb:
-                            post_img_dict['thumb_path'] = thumb
-                    post_images_list.append(post_img_dict)
-                    if post_img_dict['id'] == image_id:
-                        current_image_index = idx
-                image_dict['post_images'] = post_images_list
-                image_dict['current_image_index'] = current_image_index
-                image_dict['image_count'] = len(post_images_list)
-            else:
-                image_dict['post_images'] = [image_dict]
-                image_dict['current_image_index'] = 0
-                image_dict['image_count'] = 1
+            # Get all images from this post
+            cursor.execute("""SELECT 
+                i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
+                i.download_date, i.download_time, i.is_deleted,
+                pi.url
+            FROM images i
+            LEFT JOIN post_images pi ON i.id = pi.image_id
+            WHERE pi.post_id = %s
+            ORDER BY i.id ASC""", (post_id,))
+            all_post_images = cursor.fetchall()
+            post_images_list = []
+            for post_img in all_post_images:
+                post_img_dict = dict(post_img)
+                # Convert datetime/timedelta fields to string
+                for k, v in post_img_dict.items():
+                    if isinstance(v, (timedelta, datetime, date, time)):
+                        post_img_dict[k] = str(v)
+                if post_img_dict.get('file_path'):
+                    web = ui_handler.make_web_path(post_img_dict['file_path'])
+                    if web:
+                        post_img_dict['web_path'] = web
+                    # Get thumbnail path
+                    thumb = ui_handler.make_thumb_path(post_img_dict['file_path'])
+                    if thumb:
+                        post_img_dict['thumb_path'] = thumb
+                post_images_list.append(post_img_dict)
             
-            # Extract EXIF data
-            exif = extract_exif_data(image_dict['file_path'])
-            image_dict['exif'] = exif
+            # Use first image for EXIF and other image-specific data
+            first_image = post_images_list[0] if post_images_list else None
+            if first_image:
+                # Extract EXIF data from first image
+                exif = extract_exif_data(first_image['file_path'])
+                post_dict['exif'] = exif
+                # Add first image file_path and web_path for compatibility
+                post_dict['file_path'] = first_image['file_path']
+                post_dict['web_path'] = first_image.get('web_path')
+                post_dict['thumb_path'] = first_image.get('thumb_path')
+                post_dict['filename'] = first_image.get('filename')
+            
+            # Check if post has any images
+            if not post_images_list:
+                conn.close()
+                return f"Post found but has no images linked to it (post_id: {post_id})", 404
+            
+            post_dict['post_images'] = post_images_list
+            post_dict['current_image_index'] = 0
+            post_dict['image_count'] = len(post_images_list)
+            
+            # Get previous and next post IDs for navigation
+            cursor.execute("SELECT id FROM posts WHERE id < %s ORDER BY id DESC LIMIT 1", (post_id,))
+            prev_result = cursor.fetchone()
+            post_dict['prev_post_id'] = prev_result['id'] if prev_result else None
+            
+            cursor.execute("SELECT id FROM posts WHERE id > %s ORDER BY id ASC LIMIT 1", (post_id,))
+            next_result = cursor.fetchone()
+            post_dict['next_post_id'] = next_result['id'] if next_result else None
+            
             conn.close()
             # Pass stats, subreddits, users for template compatibility
             stats = ui_handler.get_stats()
             subreddits = ui_handler.get_subreddits()
             users = ui_handler.get_users()
-            return render_template('details.html', image=image_dict, stats=stats, subreddits=subreddits, users=users)
+            return render_template('details.html', image=post_dict, stats=stats, subreddits=subreddits, users=users)
         else:
             conn.close()
-            return "Image not found", 404
+            return f"Post not found (post_id: {post_id})", 404
     except Exception as e:
         return f"Error: {e}", 500
 
@@ -530,28 +545,24 @@ def post_comment():
     """Post a comment to Reddit and save it locally in MySQL."""
     import json
     data = request.get_json()
-    image_id = data.get('image_id')
+    post_id = data.get('post_id')
     comment_text = data.get('comment', '').strip()
-    if not image_id or not comment_text:
-        return jsonify({'success': False, 'error': 'Missing image ID or comment.'}), 400
-    # Get image and post info from MySQL
+    if not post_id or not comment_text:
+        return jsonify({'success': False, 'error': 'Missing post ID or comment.'}), 400
+    # Get post info from MySQL
     conn = mysql.connector.connect(**mysql_config)
     cursor = conn.cursor(dictionary=True)
-    # Join to get post information
     cursor.execute("""SELECT 
-        i.id, p.id as post_id, p.reddit_id, p.permalink, p.comments
-    FROM images i
-    LEFT JOIN post_images pi ON i.id = pi.image_id
-    LEFT JOIN posts p ON pi.post_id = p.id
-    WHERE i.id = %s""", (image_id,))
-    image = cursor.fetchone()
-    if not image:
+        id as post_id, reddit_id, permalink, comments
+    FROM posts
+    WHERE id = %s""", (post_id,))
+    post = cursor.fetchone()
+    if not post:
         conn.close()
-        return jsonify({'success': False, 'error': 'Image not found.'}), 404
+        return jsonify({'success': False, 'error': 'Post not found.'}), 404
     # Get Reddit post ID or permalink
-    reddit_post_id = image.get('reddit_id')
-    permalink = image.get('permalink')
-    post_id = image.get('post_id')
+    reddit_post_id = post.get('reddit_id')
+    permalink = post.get('permalink')
     if not reddit_post_id and not permalink:
         conn.close()
         return jsonify({'success': False, 'error': 'No Reddit post info.'}), 400
@@ -577,7 +588,7 @@ def post_comment():
         return jsonify({'success': False, 'error': f'Reddit error: {e}'}), 500
     # Save comment locally in MySQL (in posts table)
     try:
-        comments_json = image.get('comments', '[]')
+        comments_json = post.get('comments', '[]')
         comments = json.loads(comments_json) if comments_json else []
         new_comment = {
             'author': reddit_comment.author.name if reddit_comment.author else 'You',
@@ -586,8 +597,7 @@ def post_comment():
             'created_utc': reddit_comment.created_utc
         }
         comments.insert(0, new_comment)
-        if post_id:
-            cursor.execute("UPDATE posts SET comments = %s WHERE id = %s", (json.dumps(comments), post_id))
+        cursor.execute("UPDATE posts SET comments = %s WHERE id = %s", (json.dumps(comments), post_id))
         conn.commit()
     except Exception as e:
         conn.close()
@@ -596,18 +606,14 @@ def post_comment():
         conn.close()
     return jsonify({'success': True, 'comment': new_comment})
 
-@app.route('/api/comments/<int:image_id>')
-def get_comments(image_id):
-    """Return latest comments for an image from MySQL."""
+@app.route('/api/comments/<int:post_id>')
+def get_comments(post_id):
+    """Return latest comments for a post from MySQL."""
     try:
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
-        # Join to get comments from posts table
-        cursor.execute("""SELECT p.comments
-        FROM images i
-        LEFT JOIN post_images pi ON i.id = pi.image_id
-        LEFT JOIN posts p ON pi.post_id = p.id
-        WHERE i.id = %s""", (image_id,))
+        # Get comments from posts table
+        cursor.execute("""SELECT comments FROM posts WHERE id = %s""", (post_id,))
         row = cursor.fetchone()
         conn.close()
         if row and row.get('comments'):
@@ -624,22 +630,17 @@ def delete_post(post_id):
     """Delete a post from the database. If image is not linked to other posts, delete image and move file to /deleted folder."""
     conn = None
     try:
-        data = request.get_json()
-        image_id = data.get('image_id') if data else None
         
         conn = mysql.connector.connect(**mysql_config)
         cursor = conn.cursor(dictionary=True)
         
-        # Get image_id if not provided
-        if not image_id:
-            cursor.execute("SELECT image_id FROM post_images WHERE post_id = %s LIMIT 1", (post_id,))
-            result = cursor.fetchone()
-            if result:
-                image_id = result['image_id']
-        
-        # Get file path before deletion
+        # Get image_id and file path from the first image linked to this post
+        image_id = None
         file_path = None
-        if image_id:
+        cursor.execute("SELECT image_id FROM post_images WHERE post_id = %s LIMIT 1", (post_id,))
+        result = cursor.fetchone()
+        if result:
+            image_id = result['image_id']
             cursor.execute("SELECT file_path FROM images WHERE id = %s", (image_id,))
             img_result = cursor.fetchone()
             if img_result:

@@ -186,7 +186,49 @@ check_status() {
 # Handle signals
 cleanup() {
     log_info "Received shutdown signal, cleaning up..."
-    stop_service
+    
+    # Kill all child processes (downloader and comment update processes)
+    # Get all child PIDs of the current process (direct children)
+    local children=$(pgrep -P $$ 2>/dev/null || true)
+    if [[ -n "$children" ]]; then
+        log_info "Stopping child processes..."
+        for child in $children; do
+            # Kill all descendants of this child first (graceful)
+            pkill -P "$child" 2>/dev/null || true
+            # Then kill the child itself (graceful)
+            kill "$child" 2>/dev/null || true
+        done
+        
+        # Wait briefly for graceful shutdown (max 2 seconds)
+        local wait_count=0
+        while [[ $wait_count -lt 2 ]]; do
+            local still_running=false
+            for child in $children; do
+                if ps -p "$child" > /dev/null 2>&1; then
+                    still_running=true
+                    break
+                fi
+            done
+            if [[ "$still_running" == false ]]; then
+                break
+            fi
+            sleep 0.5
+            wait_count=$((wait_count + 1))
+        done
+        
+        # Force kill if still running
+        for child in $children; do
+            if ps -p "$child" > /dev/null 2>&1; then
+                log_warning "Force killing process $child..."
+                pkill -9 -P "$child" 2>/dev/null || true
+                kill -9 "$child" 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # Clean up PID file
+    rm -f "$PID_FILE"
+    log_success "Service stopped"
     exit 0
 }
 
@@ -203,6 +245,13 @@ run_service() {
     
     # Create log directory
     mkdir -p "$LOG_DIR"
+    
+    # Check if uv is available
+    if ! command -v uv &> /dev/null; then
+        log_error "uv is not installed or not in PATH"
+        log_info "Install uv with: pip install uv"
+        exit 1
+    fi
     
     # Check if config file exists
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -226,7 +275,8 @@ run_service() {
     
     # Start downloader in loop mode (runs --scrape-all every 5 minutes)
     log_info "Starting downloader in loop mode..."
-    reddit-downloader --scrape-all --loop --config "$CONFIG_FILE" >> "$DOWNLOAD_LOG" 2>&1 &
+    # Use uv run to execute the command in the project's virtual environment
+    uv run reddit-downloader --scrape-all --loop --config "$CONFIG_FILE" >> "$DOWNLOAD_LOG" 2>&1 &
     local download_pid=$!
     log_success "Downloader started (PID: $download_pid)"
     
@@ -242,7 +292,7 @@ run_service() {
         # Check if downloader is still running
         if ! ps -p "$download_pid" > /dev/null 2>&1; then
             log_error "Downloader process died, restarting..."
-            reddit-downloader --scrape-all --loop --config "$CONFIG_FILE" >> "$DOWNLOAD_LOG" 2>&1 &
+            uv run reddit-downloader --scrape-all --loop --config "$CONFIG_FILE" >> "$DOWNLOAD_LOG" 2>&1 &
             download_pid=$!
             log_success "Downloader restarted (PID: $download_pid)"
         fi
@@ -251,11 +301,12 @@ run_service() {
         local time_since_comment=$((current_time - last_comment))
         if [[ $time_since_comment -ge $comment_interval_sec ]]; then
             log_info "Starting comment update cycle..."
-            reddit-update-comments --limit "$COMMENT_LIMIT" --config "$CONFIG_FILE" >> "$COMMENT_LOG" 2>&1 &
+            uv run reddit-update-comments --limit "$COMMENT_LIMIT" --config "$CONFIG_FILE" >> "$COMMENT_LOG" 2>&1 &
             local comment_pid=$!
             last_comment=$(date +%s)
             
             # Wait for comment update to finish (but don't block forever)
+            # Use shorter sleep intervals to be more responsive to signals
             local wait_count=0
             while ps -p "$comment_pid" > /dev/null 2>&1 && [[ $wait_count -lt 3600 ]]; do
                 sleep 1
@@ -270,7 +321,8 @@ run_service() {
         fi
         
         # Sleep for a short interval before checking again
-        sleep 30
+        # Use shorter sleep to be more responsive to shutdown signals
+        sleep 5
     done
 }
 

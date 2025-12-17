@@ -257,9 +257,9 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="card-title">{{ image.title or image.filename }}</span>
                     <div class="btn-group btn-group-sm" role="group">
-                        <a href="/details/{{ image.id }}" class="btn btn-outline-primary">Details</a>
                         {% if image.post_id %}
-                        <button type="button" class="btn btn-outline-danger" onclick="deletePost({{ image.post_id }}, {{ image.id }}, '{{ image.title or image.filename }}')" title="Delete Post">
+                        <a href="/details/{{ image.post_id }}" class="btn btn-outline-primary">Details</a>
+                        <button type="button" class="btn btn-outline-danger" onclick="deletePost({{ image.post_id }}, '{{ image.title or image.filename }}')" title="Delete Post">
                             <i class="fas fa-trash"></i>
                         </button>
                         {% endif %}
@@ -368,7 +368,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Delete post function
-function deletePost(postId, imageId, title) {
+function deletePost(postId, title) {
     if (!confirm(`Are you sure you want to delete "${title}"?\n\nThis will:\n- Delete the post from the database\n- If the image is not linked to other posts, it will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
         return;
     }
@@ -377,8 +377,7 @@ function deletePost(postId, imageId, title) {
         method: 'DELETE',
         headers: {
             'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ image_id: imageId })
+        }
     })
     .then(response => response.json())
     .then(data => {

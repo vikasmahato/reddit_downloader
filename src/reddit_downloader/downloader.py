@@ -238,11 +238,66 @@ class RedditImageDownloader:
                 if prev_record and prev_record['filename']:
                     filename = prev_record['filename']
                 else:
-                    temp_path = self.download_folder / filename
+                    # If filename doesn't have an extension, try to get it from Content-Type
+                    if not os.path.splitext(filename)[1]:
+                        content_type = response.headers.get('Content-Type', '')
+                        if content_type:
+                            ext = mimetypes.guess_extension(content_type.split(';')[0].strip())
+                            if ext:
+                                filename = filename + ext
+                        # If still no extension and it's a video URL, default to .mp4
+                        if not os.path.splitext(filename)[1] and self._is_video_url(url):
+                            filename = filename + '.mp4'
+                    
+                    # Check if filename is generic (like DASH_1080.mp4, DASH_720.mp4, etc.)
+                    # or if it's too short/doesn't contain unique identifiers
+                    name, ext = os.path.splitext(filename)
+                    is_generic = False
+                    
+                    # Check for common generic Reddit video filenames
+                    generic_patterns = ['DASH_', 'DASHPlaylist', 'audio', 'video']
+                    if any(pattern in name for pattern in generic_patterns):
+                        is_generic = True
+                    
+                    # If filename is generic, create a unique one using post data or URL
+                    if is_generic or len(name) < 5:
+                        unique_id = None
+                        
+                        # Try to get post ID from post_data
+                        if post_data:
+                            permalink = post_data.get('permalink', '')
+                            if permalink:
+                                # Extract post ID from permalink (e.g., /r/subreddit/comments/abc123/title/)
+                                match = re.search(r'/comments/([a-z0-9]+)/', permalink)
+                                if match:
+                                    unique_id = match.group(1)
+                        
+                        # If no post ID, try to extract from URL (for v.redd.it videos)
+                        if not unique_id:
+                            # Extract video ID from v.redd.it URLs (e.g., v.redd.it/ni0u4jnovm8c1/DASH_1080.mp4)
+                            path_parts = parsed_url.path.strip('/').split('/')
+                            if len(path_parts) >= 2 and 'v.redd.it' in parsed_url.netloc:
+                                unique_id = path_parts[0]  # The video ID part
+                        
+                        # If still no unique ID, use a hash of the URL
+                        if not unique_id:
+                            unique_id = hashlib.md5(url.encode()).hexdigest()[:12]
+                        
+                        # Create unique filename: original_name_uniqueid.ext
+                        filename = f"{name}_{unique_id}{ext}"
+                    
+                    # Check if file already exists in the target folder
+                    temp_folder = self.download_folder
+                    if subreddit:
+                        temp_folder = temp_folder / self._sanitize_folder_name(subreddit)
+                    temp_path = temp_folder / filename
                     if temp_path.exists():
+                        # File exists, add timestamp to make it unique
                         name, ext = os.path.splitext(filename)
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         filename = f"{name}_{timestamp}{ext}"
+            
+            # Determine final folder and filepath
             folder = self.download_folder
             if subreddit:
                 folder = folder / self._sanitize_folder_name(subreddit)
@@ -438,18 +493,43 @@ class RedditImageDownloader:
                 if match:
                     reddit_id = match.group(1)
 
+            # Convert created_utc from Unix timestamp to datetime if needed
+            created_utc = post_data.get('created_utc', 0)
+            if created_utc and isinstance(created_utc, (int, float)):
+                # Convert Unix timestamp to datetime
+                created_utc_dt = datetime.fromtimestamp(created_utc)
+            elif created_utc:
+                # Already a datetime or other format
+                created_utc_dt = created_utc
+            else:
+                # Default to current time if not provided
+                created_utc_dt = datetime.now()
+            
             cursor.execute('''
                 INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE 
                     title=VALUES(title), 
                     score=VALUES(score), 
-                    comments=VALUES(comments),
-                    id=LAST_INSERT_ID(id)
+                    comments=VALUES(comments)
             ''', (reddit_id, title, author, subreddit, permalink, 
-                  post_data.get('created_utc', 0), post_data.get('score', 0), 
+                  created_utc_dt, post_data.get('score', 0), 
                   post_username, comments))
+            
+            # Get the post_id - either from lastrowid (if inserted) or by querying (if updated)
             post_id = cursor.lastrowid
+            if not post_id or post_id == 0:
+                # Post already existed, fetch its ID
+                if permalink:
+                    cursor.execute('SELECT id FROM posts WHERE permalink = %s', (permalink,))
+                elif reddit_id:
+                    cursor.execute('SELECT id FROM posts WHERE reddit_id = %s', (reddit_id,))
+                else:
+                    cursor.execute('SELECT id FROM posts WHERE subreddit = %s AND title = %s AND author = %s LIMIT 1', 
+                                  (subreddit, title, author))
+                result = cursor.fetchone()
+                if result:
+                    post_id = result[0]
         
         # 2. Insert/Update Image
         # Check if image exists by hash (handled in download_image, but we ensure here)
@@ -457,11 +537,18 @@ class RedditImageDownloader:
             INSERT INTO images (file_hash, filename, file_path, file_size, download_date, download_time)
             VALUES (%s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE 
-                file_path=VALUES(file_path),
-                id=LAST_INSERT_ID(id)
+                file_path=VALUES(file_path)
         ''', (file_hash, filename, str(filepath), file_size, 
               datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")))
+        
+        # Get the image_id - either from lastrowid (if inserted) or by querying (if updated)
         image_id = cursor.lastrowid
+        if not image_id or image_id == 0:
+            # Image already existed, fetch its ID by hash
+            cursor.execute('SELECT id FROM images WHERE file_hash = %s', (file_hash,))
+            result = cursor.fetchone()
+            if result:
+                image_id = result[0]
         
         # 3. Link Post and Image
         if post_id and image_id:
@@ -624,7 +711,6 @@ class RedditImageDownloader:
 
     def get_zero_result_count(self, list_type: str, name: str) -> int:
         try:
-            self._ensure_zero_result_count_column()
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
             cursor.execute("""
@@ -785,7 +871,13 @@ class RedditImageDownloader:
 
                 gallery_urls = self._extract_gallery_urls(submission)
                 has_gallery = bool(gallery_urls)
-                if not has_gallery and not self._is_image_url(submission.url):
+                
+                # Check for video posts
+                video_url = self._extract_video_url(submission)
+                has_video = bool(video_url)
+                
+                # Skip if not gallery, not image, and not video
+                if not has_gallery and not self._is_image_url(submission.url) and not has_video:
                     continue
 
                 # Fetch comments for each post
@@ -802,9 +894,17 @@ class RedditImageDownloader:
                 except Exception:
                     comments_list = []
 
+                # Determine the URL to use
+                if has_gallery:
+                    post_url = gallery_urls[0]
+                elif has_video:
+                    post_url = video_url
+                else:
+                    post_url = submission.url
+
                 post_entry = {
                     'title': submission.title,
-                    'url': gallery_urls[0] if has_gallery else submission.url,
+                    'url': post_url,
                     'author': str(submission.author),
                     'subreddit': str(submission.subreddit),
                     'permalink': submission.permalink,
@@ -891,7 +991,39 @@ class RedditImageDownloader:
                                 'post_username': post_username,
                                 'comments': json.dumps(comments_list)
                             })
-                        continue  # Skip normal image handling for gallery posts
+                        continue  # Skip normal image/video handling for gallery posts
+                    
+                    # Handle video posts
+                    video_url = self._extract_video_url(post)
+                    if video_url:
+                        if self._get_image_record(video_url):
+                            logger.warning(f"🛑 Already downloaded: {video_url}. Stopping further scraping for r/{subreddit}.")
+                            break
+                        post_username = str(post.author) if post.author else ''
+                        comments_list = []
+                        try:
+                            post.comments.replace_more(limit=0)
+                            for c in post.comments[:10]:
+                                comments_list.append({
+                                    'author': str(c.author) if c.author else '',
+                                    'body': c.body,
+                                    'score': c.score,
+                                    'created_utc': c.created_utc
+                                })
+                        except Exception:
+                            comments_list = []
+                        image_posts.append({
+                            'title': post.title,
+                            'url': video_url,
+                            'author': str(post.author),
+                            'score': post.score,
+                            'permalink': post.permalink,
+                            'created_utc': post.created_utc,
+                            'post_username': post_username,
+                            'comments': json.dumps(comments_list)
+                        })
+                        continue  # Skip image handling for video posts
+                    
                     # Normal image handling
                     url = post.url
                     if self._is_image_url(url):
@@ -931,7 +1063,7 @@ class RedditImageDownloader:
 
     def _is_image_url(self, url: str) -> bool:
         """Check if URL points to an image."""
-        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.webm']
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
         parsed_url = urlparse(url)
         
         # Check file extension
@@ -942,6 +1074,86 @@ class RedditImageDownloader:
         # Check for imgur, reddit image, i.redd.it
         image_domains = ['imgur.com', 'i.imgur.com', 'i.redd.it', 'preview.redd.it']
         return any(domain in parsed_url.netloc for domain in image_domains)
+
+    def _is_video_url(self, url: str) -> bool:
+        """Check if URL points to a video."""
+        video_extensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.flv', '.wmv']
+        parsed_url = urlparse(url)
+        
+        # Check file extension
+        path = parsed_url.path.lower()
+        if any(path.endswith(ext) for ext in video_extensions):
+            return True
+        
+        # Check for Reddit video domains
+        video_domains = ['v.redd.it', 'reddit.com/video']
+        netloc = parsed_url.netloc.lower()
+        path_lower = parsed_url.path.lower()
+        if any(domain in netloc for domain in video_domains):
+            return True
+        if '/video/' in path_lower:
+            return True
+        
+        return False
+
+    def _extract_video_url(self, post) -> Optional[str]:
+        """Extract video URL from a Reddit post."""
+        # Check for Reddit video in media.reddit_video (most common case)
+        try:
+            if hasattr(post, 'media') and post.media:
+                # media can be a dict or an object
+                if isinstance(post.media, dict):
+                    reddit_video = post.media.get('reddit_video', {})
+                    if isinstance(reddit_video, dict):
+                        fallback_url = reddit_video.get('fallback_url')
+                        if fallback_url:
+                            return fallback_url
+                else:
+                    # media is an object
+                    if hasattr(post.media, 'reddit_video'):
+                        reddit_video = post.media.reddit_video
+                        if isinstance(reddit_video, dict):
+                            fallback_url = reddit_video.get('fallback_url')
+                            if fallback_url:
+                                return fallback_url
+                        elif hasattr(reddit_video, 'fallback_url') and reddit_video.fallback_url:
+                            return reddit_video.fallback_url
+        except Exception as e:
+            logger.debug(f"Error extracting video from media: {e}")
+        
+        # Check if post has a direct video URL
+        if hasattr(post, 'url') and post.url:
+            if self._is_video_url(post.url):
+                return post.url
+        
+        # Check media_metadata for video
+        try:
+            if hasattr(post, 'media_metadata') and post.media_metadata:
+                for media_id, meta in post.media_metadata.items():
+                    if isinstance(meta, dict) and meta.get('status') == 'valid':
+                        # Check for RedditVideo type
+                        if meta.get('e') == 'RedditVideo':
+                            # Check for direct video URL in the metadata
+                            if 's' in meta:
+                                source = meta['s']
+                                if isinstance(source, dict):
+                                    # Try different possible video URL fields
+                                    video_url = source.get('mp4') or source.get('gif') or source.get('u')
+                                    if video_url and self._is_video_url(video_url):
+                                        return video_url.replace('&amp;', '&')
+        except Exception as e:
+            logger.debug(f"Error extracting video from media_metadata: {e}")
+        
+        # Check if URL is a Reddit video post link (v.redd.it)
+        if hasattr(post, 'url') and post.url:
+            if 'v.redd.it' in post.url or 'reddit.com/video' in post.url:
+                # For v.redd.it links, try to get the actual video URL
+                # The URL format is usually: https://v.redd.it/{id}
+                # We might need to fetch the post details to get the actual video URL
+                # For now, return the URL and let the download handle it
+                return post.url
+        
+        return None
 
     def download_from_urls(self, urls: List[str], subreddit: str = "", url_data: List[Dict] = None):
         """Download images from a list of URLs."""
