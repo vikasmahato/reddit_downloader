@@ -27,6 +27,10 @@ LOG_DIR="./logs"
 PID_FILE="./.reddit_service.pid"
 DOWNLOAD_LOG="$LOG_DIR/downloader.log"
 COMMENT_LOG="$LOG_DIR/comments.log"
+WEB_LOG="$LOG_DIR/web.log"
+
+# Preferred Python interpreter for running the web UI (use .venv if available)
+VENV_PY=".venv/bin/python"
 
 # Colors for output
 RED='\033[0;31m'
@@ -280,6 +284,26 @@ run_service() {
     local download_pid=$!
     log_success "Downloader started (PID: $download_pid)"
     
+    # Start web UI (run with .venv/bin/python if available, otherwise try python3)
+    log_info "Starting web UI..."
+    # Ensure log dir exists
+    touch "$WEB_LOG" 2>/dev/null || true
+    # Choose interpreter: prefer .venv/bin/python if executable, else fallback to python3/python
+    if [[ -x "$VENV_PY" ]]; then
+        WEB_PY="$VENV_PY"
+    else
+        WEB_PY="$(command -v python3 || command -v python || true)"
+    fi
+
+    local web_pid=0
+    if [[ -z "$WEB_PY" ]]; then
+        log_warning "Python interpreter not found to run web UI (.venv/bin/python missing). Skipping web UI."
+    else
+        "$WEB_PY" src/reddit_downloader/web.py >> "$WEB_LOG" 2>&1 &
+        web_pid=$!
+        log_success "Web UI started (PID: $web_pid)"
+    fi
+
     # Track last comment update time
     local last_comment=$(date +%s)
     local current_time
@@ -297,6 +321,18 @@ run_service() {
             log_success "Downloader restarted (PID: $download_pid)"
         fi
         
+        # Check if web UI is still running; restart if it died
+        if [[ -n "${web_pid:-}" ]] && ! ps -p "$web_pid" > /dev/null 2>&1; then
+            log_error "Web UI process died, restarting..."
+            if [[ -n "$WEB_PY" ]]; then
+                "$WEB_PY" src/reddit_downloader/web.py >> "$WEB_LOG" 2>&1 &
+                web_pid=$!
+                log_success "Web UI restarted (PID: $web_pid)"
+            else
+                log_warning "Cannot restart Web UI: no Python interpreter available"
+            fi
+        fi
+
         # Check if it's time to update comments
         local time_since_comment=$((current_time - last_comment))
         if [[ $time_since_comment -ge $comment_interval_sec ]]; then
