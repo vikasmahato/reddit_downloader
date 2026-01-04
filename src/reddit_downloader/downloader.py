@@ -19,6 +19,7 @@ from configparser import ConfigParser
 import mimetypes
 import re
 import mysql.connector
+from mysql.connector import pooling
 import configparser
 import hashlib
 from typing import List, Dict, Optional
@@ -82,6 +83,33 @@ class RedditImageDownloader:
         })
         
         self._setup_reddit_auth()
+
+        # Initialize MySQL connection pool (if mysql_config is available). Use a small default pool size.
+        self.db_pool = None
+        try:
+            if mysql_config:
+                pool_size = self.config.getint('mysql', 'pool_size', fallback=5)
+                # Note: mysql.connector.pooling.MySQLConnectionPool expects connection arguments like host/user/password/database
+                self.db_pool = pooling.MySQLConnectionPool(pool_name="reddit_pool", pool_size=pool_size, **mysql_config)
+                logger.info(f"✓ MySQL connection pool created (size={pool_size})")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to create MySQL connection pool: {e}")
+            self.db_pool = None
+
+    def _get_db_connection(self):
+        """Return a MySQL connection from the pool if available, otherwise create a new connection.
+
+        Caller is responsible for closing the returned connection (which returns it to the pool).
+        """
+        try:
+            if self.db_pool:
+                return self.db_pool.get_connection()
+            # Fallback to direct connect if pool isn't available
+            return mysql.connector.connect(**mysql_config)
+        except Exception as e:
+            logger.debug(f"Error acquiring DB connection: {e}")
+            # Final fallback - attempt direct connect (may raise)
+            return mysql.connector.connect(**mysql_config)
 
     def _parse_config_file(self, config_file: str):
         """Parse config file handling list sections properly."""
@@ -434,7 +462,7 @@ class RedditImageDownloader:
 
     def _get_image_record(self, url: str) -> Optional[Dict]:
         """Get image record from metadata database."""
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor(dictionary=True)
         # Join post_images and images to get full record
         query = '''
@@ -450,7 +478,7 @@ class RedditImageDownloader:
 
     def _get_image_by_hash(self, file_hash: str) -> Optional[Dict]:
         """Get image record by file hash."""
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute('SELECT * FROM images WHERE file_hash = %s', (file_hash,))
         result = cursor.fetchone()
@@ -462,7 +490,7 @@ class RedditImageDownloader:
         if not permalink:
             return False
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = self._get_db_connection()
             cursor = conn.cursor()
             cursor.execute('SELECT permalink FROM permalinks WHERE permalink = %s', (permalink,))
             result = cursor.fetchone()
@@ -475,7 +503,7 @@ class RedditImageDownloader:
     def _save_image_metadata(self, url: str, filename: str, subreddit: str, 
                             post_data: Dict, filepath: Path, file_hash: str, file_size: int):
         """Save image metadata to MySQL database using normalized schema."""
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         
         # 1. Insert/Update Post
@@ -569,7 +597,7 @@ class RedditImageDownloader:
 
     def _update_file_path_in_db(self, url: str, new_filepath: str):
         """Update file path in MySQL database."""
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         # Update in images table based on join with post_images? 
         # Or just update images table directly if we know the file path?
@@ -585,7 +613,7 @@ class RedditImageDownloader:
 
     def _mark_image_as_deleted(self, url: str):
         """Mark an image as deleted in MySQL database by setting is_deleted to True."""
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE images i
@@ -604,7 +632,7 @@ class RedditImageDownloader:
             logger.error("❌ Reddit connection required to check for deleted images")
             return deleted_images
         
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         if subreddit:
             cursor.execute('''
@@ -658,7 +686,7 @@ class RedditImageDownloader:
         Returns:
             List of names (subreddit names or usernames), ordered by last_scraped_at ASC (NULL first)
         """
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         
         # Get items with zero_result_count
@@ -703,7 +731,7 @@ class RedditImageDownloader:
         return items
 
     def update_last_scraped_at(self, list_type: str, name: str):
-        conn = mysql.connector.connect(**mysql_config)
+        conn = self._get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -718,7 +746,7 @@ class RedditImageDownloader:
 
     def get_zero_result_count(self, list_type: str, name: str) -> int:
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = self._get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COALESCE(zero_result_count, 0) 
@@ -733,7 +761,7 @@ class RedditImageDownloader:
 
     def increment_zero_result_count(self, list_type: str, name: str):
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = self._get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE scrape_lists
@@ -747,7 +775,7 @@ class RedditImageDownloader:
 
     def reset_zero_result_count(self, list_type: str, name: str):
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = self._get_db_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE scrape_lists

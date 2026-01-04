@@ -16,6 +16,7 @@ import mimetypes
 import hashlib
 from PIL import Image, ExifTags
 import mysql.connector
+from mysql.connector import pooling
 import configparser
 
 # Get the directory where this file is located
@@ -48,6 +49,29 @@ mysql_config = {
     'password': config.get('mysql', 'password', fallback=''),
     'database': config.get('mysql', 'database', fallback='reddit_images')
 }
+
+# Initialize MySQL connection pool (optional)
+mysql_pool = None
+try:
+    pool_size = config.getint('mysql', 'pool_size', fallback=5)
+    mysql_pool = pooling.MySQLConnectionPool(pool_name='web_pool', pool_size=pool_size, **mysql_config)
+    print(f"MySQL connection pool created (size={pool_size})")
+except Exception as e:
+    # If pool creation fails, we'll fall back to direct connections
+    print(f"Warning: Could not create MySQL connection pool: {e}")
+
+
+def _get_db_connection():
+    """Return a MySQL connection from the pool if available, otherwise open a new connection.
+    Caller must close the connection when done.
+    """
+    try:
+        if mysql_pool:
+            return mysql_pool.get_connection()
+        return mysql.connector.connect(**mysql_config)
+    except Exception:
+        # Final fallback
+        return mysql.connector.connect(**mysql_config)
 
 # Add Python built-ins to template context
 @app.context_processor
@@ -158,7 +182,7 @@ class RedditImageUI:
         Each returned item represents one post with a post_images list.
         """
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = _get_db_connection()
             cursor = conn.cursor(dictionary=True)
 
             query = """
@@ -260,7 +284,7 @@ class RedditImageUI:
     def get_stats(self):
         """Get download statistics from MySQL."""
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = _get_db_connection()
             cursor = conn.cursor()
             # Total images (count distinct images, not posts)
             cursor.execute("SELECT COUNT(*) FROM images")
@@ -305,7 +329,7 @@ class RedditImageUI:
             only_enabled: If True, only return enabled subreddits. If False, return all subreddits.
         """
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = _get_db_connection()
             cursor = conn.cursor()
             if only_enabled:
                 cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND enabled = TRUE ORDER BY name")
@@ -321,7 +345,7 @@ class RedditImageUI:
     def get_users(self):
         """Get list of unique users from MySQL."""
         try:
-            conn = mysql.connector.connect(**mysql_config)
+            conn = _get_db_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT author FROM posts WHERE author IS NOT NULL AND author != '' ORDER BY author")
             results = [row[0] for row in cursor.fetchall()]
@@ -464,7 +488,7 @@ def image_details(post_id):
         if not post_id or post_id <= 0:
             return f"Invalid post_id: {post_id}", 400
         
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         # Get post information
         cursor.execute("""SELECT 
@@ -569,7 +593,7 @@ def post_comment():
     if not post_id or not comment_text:
         return jsonify({'success': False, 'error': 'Missing post ID or comment.'}), 400
     # Get post info from MySQL
-    conn = mysql.connector.connect(**mysql_config)
+    conn = _get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""SELECT 
         id as post_id, reddit_id, permalink, comments
@@ -629,7 +653,7 @@ def post_comment():
 def get_comments(post_id):
     """Return latest comments for a post from MySQL."""
     try:
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         # Get comments from posts table
         cursor.execute("""SELECT comments FROM posts WHERE id = %s""", (post_id,))
@@ -650,7 +674,7 @@ def delete_post(post_id):
     conn = None
     try:
         
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
         # Get image_id and file path from the first image linked to this post
@@ -699,10 +723,10 @@ def delete_post(post_id):
                             suffix = source_path.suffix
                             dest_path = deleted_folder / f"{stem}_{counter}{suffix}"
                             counter += 1
-                        
+
                         shutil.move(str(source_path), str(dest_path))
                         file_moved = True
-                        
+
                         # Also move MP4 if it's a GIF that was converted
                         if source_path.suffix.lower() == '.mp4':
                             # Check if there was an original file
@@ -756,7 +780,7 @@ def delete_post(post_id):
 def scrape_lists():
     """Page for managing scrape lists."""
     try:
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
@@ -794,7 +818,7 @@ def scrape_lists():
 def api_get_scrape_lists():
     """API endpoint to get all scrape lists."""
     try:
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
@@ -838,7 +862,7 @@ def api_add_scrape_list():
         # Clean name (remove r/ or u/ prefix if present)
         name = name.replace('r/', '').replace('u/', '').strip()
         
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor()
         
         try:
@@ -871,7 +895,7 @@ def api_update_scrape_list(item_id):
         # Clean name (remove r/ or u/ prefix if present)
         name = name.replace('r/', '').replace('u/', '').strip()
         
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor()
         
         # Build update query dynamically
@@ -904,7 +928,7 @@ def api_update_scrape_list(item_id):
 def api_delete_scrape_list(item_id):
     """API endpoint to delete a scrape list item."""
     try:
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM scrape_lists WHERE id = %s", (item_id,))
         
@@ -922,7 +946,7 @@ def api_delete_scrape_list(item_id):
 def api_toggle_scrape_list(item_id):
     """API endpoint to toggle enabled status of a scrape list item."""
     try:
-        conn = mysql.connector.connect(**mysql_config)
+        conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT enabled FROM scrape_lists WHERE id = %s", (item_id,))
         result = cursor.fetchone()
@@ -945,3 +969,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
