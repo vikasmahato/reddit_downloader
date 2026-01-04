@@ -176,7 +176,7 @@ class RedditImageUI:
             return str(thumb_rel).replace('\\', '/')
         return None
 
-    def get_all_images(self, limit=100, offset=0, subreddit=None, username=None):
+    def get_all_images(self, limit=100, offset=0, subreddit=None, username=None, search=None, user=None, deleted=None):
         """
         Paginate on posts, then fetch all images for those posts.
         Each returned item represents one post with a post_images list.
@@ -184,6 +184,12 @@ class RedditImageUI:
         try:
             conn = _get_db_connection()
             cursor = conn.cursor(dictionary=True)
+
+            # Map provided username/user param
+            effective_username = username or user
+            # Prepare search placeholders
+            search_param = search if search else None
+            search_like = f"%{search}%" if search else None
 
             query = """
             SELECT
@@ -197,22 +203,25 @@ class RedditImageUI:
             FROM (
                 SELECT id
                 FROM posts
-                WHERE (author IS NULL)
-                AND (%s IS NULL OR subreddit = %s)
+                WHERE (%s IS NULL OR subreddit = %s)
                 AND (%s IS NULL OR author = %s)
+                AND (%s IS NULL OR title LIKE %s OR author LIKE %s)
                 ORDER BY created_utc DESC
                 LIMIT %s OFFSET %s
             ) paged_posts
             JOIN posts p ON p.id = paged_posts.id
             LEFT JOIN post_images pi ON pi.post_id = p.id
             LEFT JOIN images i ON i.id = pi.image_id
+            WHERE (%s IS NULL OR i.is_deleted = %s)
             ORDER BY p.created_utc DESC, i.id ASC
             """
 
             params = [
                 subreddit, subreddit,
-                username, username,
-                limit, offset
+                effective_username, effective_username,
+                search_param, search_like, search_like,
+                limit, offset,
+                deleted, deleted
             ]
 
             cursor.execute(query, params)
@@ -404,10 +413,12 @@ def index():
     per_page = 20
     offset = (page - 1) * per_page
     images = ui_handler.get_all_images(
-        limit=per_page, 
-        offset=offset, 
+        limit=per_page,
+        offset=offset,
+        search=search if search else None,
         subreddit=subreddit if subreddit else None,
-        username=user if user else None
+        user=user if user else None,
+        deleted=deleted_filter
     )
     for img in images:
         if img.get('file_path'):
