@@ -282,6 +282,40 @@ class RedditImageUI:
             for post in posts.values():
                 post["image_count"] = len(post["post_images"])
 
+            # Ensure compatibility with templates: expose first image fields at top-level for each post
+            for post in posts.values():
+                # sane defaults to avoid Jinja2 UndefinedError
+                post.setdefault('filename', None)
+                post.setdefault('file_path', None)
+                post.setdefault('web_path', None)
+                post.setdefault('thumb_path', None)
+                post.setdefault('url', None)
+
+                if post.get('post_images'):
+                    first_img = post['post_images'][0]
+                    # top-level filename/file_path
+                    if first_img.get('filename'):
+                        post['filename'] = first_img.get('filename')
+                    if first_img.get('file_path'):
+                        post['file_path'] = first_img.get('file_path')
+                    # web_path / thumb_path: prefer the image's values, else compute from file_path
+                    if first_img.get('web_path'):
+                        post['web_path'] = first_img.get('web_path')
+                    elif post.get('file_path'):
+                        wp = self.make_web_path(post['file_path'])
+                        if wp:
+                            post['web_path'] = wp
+
+                    if first_img.get('thumb_path'):
+                        post['thumb_path'] = first_img.get('thumb_path')
+                    elif post.get('file_path'):
+                        tp = self.make_thumb_path(post['file_path'])
+                        if tp:
+                            post['thumb_path'] = tp
+
+                    if first_img.get('url'):
+                        post['url'] = first_img.get('url')
+
             conn.close()
             return list(posts.values())
 
