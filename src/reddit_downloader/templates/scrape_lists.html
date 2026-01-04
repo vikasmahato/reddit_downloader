@@ -28,6 +28,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>Status</th>
+                                <th>Posts</th>
                                 <th>Last Scraped</th>
                                 <th>Created</th>
                                 <th>Actions</th>
@@ -44,6 +45,9 @@
                                     <span class="badge {% if item.enabled %}bg-success{% else %}bg-secondary{% endif %}" id="status-{{ item.id }}">
                                         {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
                                     </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info">{{ item.post_count or 0 }}</span>
                                 </td>
                                 <td>
                                     <small class="text-muted">
@@ -71,7 +75,7 @@
                             {% endfor %}
                             {% if items|selectattr('type', 'equalto', 'subreddit')|list|length == 0 %}
                             <tr>
-                                <td colspan="5" class="text-center text-muted">No subreddits found</td>
+                                <td colspan="6" class="text-center text-muted">No subreddits found</td>
                             </tr>
                             {% endif %}
                         </tbody>

@@ -131,6 +131,14 @@
                                 {% endfor %}
                             </select>
                         </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="onlyEnabled" name="only_enabled" value="1" {% if only_enabled %}checked{% endif %}>
+                                <label class="form-check-label" for="onlyEnabled" style="font-size:0.85em;">
+                                    Only Enabled
+                                </label>
+                            </div>
+                        </div>
                         <div class="col-md-1 d-flex align-items-end gap-1">
                             <button type="submit" class="btn btn-primary btn-sm" title="Filter">
                                 <i class="fas fa-filter"></i>
@@ -314,6 +322,10 @@
 // Auto-submit form on subreddit change
 $(document).ready(function() {
     $('#subreddit').on('change', function() {
+        $('#filterForm').submit();
+    });
+    // Auto-submit form on only_enabled checkbox change
+    $('#onlyEnabled').on('change', function() {
         $('#filterForm').submit();
     });
     // Scroll to gallery section on page load if hash is present

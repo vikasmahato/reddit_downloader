@@ -152,93 +152,110 @@ class RedditImageUI:
             return str(thumb_rel).replace('\\', '/')
         return None
 
-    def get_all_images(self, limit=100, offset=0, subreddit=None):
-        """Get images from MySQL database with subreddit filtering.
-        Returns images grouped by post_id, with each image having a 'post_images' list containing all images from the same post."""
+    def get_all_images(self, limit=100, offset=0, subreddit=None, username=None):
+        """
+        Paginate on posts, then fetch all images for those posts.
+        Each returned item represents one post with a post_images list.
+        """
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor(dictionary=True)
-            # Join posts, images, and post_images tables
-            query = """SELECT 
-                i.id, i.file_hash, i.file_path, i.filename, i.file_size, 
-                i.download_date, i.download_time, i.is_deleted,
-                p.id as post_id, p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
+
+            query = """
+            SELECT
+                p.id AS post_id,
+                p.title, p.author, p.subreddit, p.permalink, p.created_utc,
                 p.score, p.post_username, p.comments,
+
+                i.id AS image_id, i.file_hash, i.file_path, i.filename,
+                i.file_size, i.download_date, i.download_time, i.is_deleted,
                 pi.url
-            FROM images i
-            LEFT JOIN post_images pi ON i.id = pi.image_id
-            LEFT JOIN posts p ON pi.post_id = p.id
-            WHERE 1=1"""
-            params = []
-            # Filter out hidden user
-            query += " AND (p.author IS NULL OR p.author != 'BusPsychological3243')"
-            if subreddit:
-                query += " AND p.subreddit = %s"
-                params.append(subreddit)
-            # Sorting
-            order_by = ' ORDER BY i.download_date DESC, i.download_time DESC'
-            query += order_by
-            query += f" LIMIT {limit * 5} OFFSET {offset}"  # Fetch more to account for grouping
+            FROM (
+                SELECT id
+                FROM posts
+                WHERE (author IS NULL)
+                AND (%s IS NULL OR subreddit = %s)
+                AND (%s IS NULL OR author = %s)
+                ORDER BY created_utc DESC
+                LIMIT %s OFFSET %s
+            ) paged_posts
+            JOIN posts p ON p.id = paged_posts.id
+            LEFT JOIN post_images pi ON pi.post_id = p.id
+            LEFT JOIN images i ON i.id = pi.image_id
+            ORDER BY p.created_utc DESC, i.id ASC
+            """
+
+            params = [
+                subreddit, subreddit,
+                username, username,
+                limit, offset
+            ]
+
             cursor.execute(query, params)
             results = cursor.fetchall()
-            
-            # Group images by post_id
-            post_images_map = {}
-            images = []
-            seen_post_ids = set()
-            
+
+            posts = {}
+
             for row in results:
-                img_dict = dict(row)
-                post_id = img_dict.get('post_id')
-                
-                if img_dict.get('file_path'):
-                    web = self.make_web_path(img_dict['file_path'])
-                    if web:
-                        img_dict['web_path'] = web
-                    # Get thumbnail path
-                    thumb = self.make_thumb_path(img_dict['file_path'])
-                    if thumb:
-                        img_dict['thumb_path'] = thumb
-                # Count comments
-                try:
-                    comments = json.loads(img_dict.get('comments', '[]')) if img_dict.get('comments') else []
-                    img_dict['comment_count'] = len(comments)
-                except Exception:
-                    img_dict['comment_count'] = 0
-                
-                # Group by post_id
-                if post_id:
-                    if post_id not in post_images_map:
-                        post_images_map[post_id] = []
-                    post_images_map[post_id].append(img_dict)
-                    
-                    # Only add the first image of each post to the main list
-                    if post_id not in seen_post_ids:
-                        seen_post_ids.add(post_id)
-                        images.append(img_dict)
-                else:
-                    # Images without post_id are added individually
-                    images.append(img_dict)
-            
-            # Add post_images list to each image
-            for img in images:
-                post_id = img.get('post_id')
-                if post_id and post_id in post_images_map:
-                    # Get all images for this post, sorted by id
-                    all_post_images = sorted(post_images_map[post_id], key=lambda x: x.get('id', 0))
-                    img['post_images'] = all_post_images
-                    img['image_count'] = len(all_post_images)
-                else:
-                    img['post_images'] = [img]
-                    img['image_count'] = 1
-            
+                post_id = row["post_id"]
+
+                if post_id not in posts:
+                    # Count comments once per post
+                    try:
+                        comments = json.loads(row["comments"]) if row["comments"] else []
+                        comment_count = len(comments)
+                    except Exception:
+                        comment_count = 0
+
+                    posts[post_id] = {
+                        "post_id": post_id,
+                        "title": row["title"],
+                        "author": row["author"],
+                        "subreddit": row["subreddit"],
+                        "permalink": row["permalink"],
+                        "created_utc": row["created_utc"],
+                        "score": row["score"],
+                        "post_username": row["post_username"],
+                        "comments": row["comments"],
+                        "comment_count": comment_count,
+                        "post_images": []
+                    }
+
+                if row["image_id"]:
+                    img = {
+                        "id": row["image_id"],
+                        "file_hash": row["file_hash"],
+                        "file_path": row["file_path"],
+                        "filename": row["filename"],
+                        "file_size": row["file_size"],
+                        "download_date": row["download_date"],
+                        "download_time": row["download_time"],
+                        "is_deleted": row["is_deleted"],
+                        "url": row["url"]
+                    }
+
+                    if img["file_path"]:
+                        web = self.make_web_path(img["file_path"])
+                        if web:
+                            img["web_path"] = web
+
+                        thumb = self.make_thumb_path(img["file_path"])
+                        if thumb:
+                            img["thumb_path"] = thumb
+
+                    posts[post_id]["post_images"].append(img)
+
+            # Add image_count per post
+            for post in posts.values():
+                post["image_count"] = len(post["post_images"])
+
             conn.close()
-            
-            # Limit to requested number after grouping
-            return images[:limit]
+            return list(posts.values())
+
         except Exception as e:
             print(f"Database error: {e}")
             return []
+
 
     def get_stats(self):
         """Get download statistics from MySQL."""
@@ -249,24 +266,16 @@ class RedditImageUI:
             cursor.execute("SELECT COUNT(*) FROM images")
             total_images = cursor.fetchone()[0]
             # Images by subreddit (optimized query with LIMIT)
-            cursor.execute("""SELECT p.subreddit, COUNT(DISTINCT i.id) as cnt
-                FROM images i
-                LEFT JOIN post_images pi ON i.id = pi.image_id
-                LEFT JOIN posts p ON pi.post_id = p.id
-                WHERE p.subreddit IS NOT NULL AND p.subreddit != ''
-                GROUP BY p.subreddit 
+            cursor.execute("""SELECT subreddit, COUNT(1) as cnt
+                FROM posts GROUP BY subreddit 
                 ORDER BY cnt DESC
                 LIMIT 20""")
             subreddit_counts = dict(cursor.fetchall())
             # Top authors (for display) - optimized
-            cursor.execute("""SELECT p.author, COUNT(DISTINCT i.id) as cnt
-                FROM images i
-                LEFT JOIN post_images pi ON i.id = pi.image_id
-                LEFT JOIN posts p ON pi.post_id = p.id
-                WHERE p.author IS NOT NULL AND p.author != ''
-                GROUP BY p.author 
-                ORDER BY cnt DESC 
-                LIMIT 10""")
+            cursor.execute("""SELECT author, COUNT(1) as cnt
+                FROM posts GROUP BY subreddit 
+                ORDER BY cnt DESC
+                LIMIT 20""")
             user_counts = dict(cursor.fetchall())
             # All unique authors (for stats) - optimized
             cursor.execute("""SELECT COUNT(DISTINCT p.author) 
@@ -289,12 +298,19 @@ class RedditImageUI:
             print(f"Stats error: {e}")
             return {}
 
-    def get_subreddits(self):
-        """Get list of subreddits from scrape_lists table for fast loading."""
+    def get_subreddits(self, only_enabled=True):
+        """Get list of subreddits from scrape_lists table for fast loading.
+        
+        Args:
+            only_enabled: If True, only return enabled subreddits. If False, return all subreddits.
+        """
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND enabled = TRUE ORDER BY name")
+            if only_enabled:
+                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND enabled = TRUE ORDER BY name")
+            else:
+                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' ORDER BY enabled DESC, name")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
             return results
@@ -355,6 +371,7 @@ def index():
     deleted = request.args.get('deleted', '')
     sort = request.args.get('sort', '')
     hidden_users = request.args.getlist('hidden_users')
+    only_enabled = request.args.get('only_enabled', '1') == '1'  # Default to showing only enabled
     deleted_filter = None
     if deleted == '1':
         deleted_filter = True
@@ -365,18 +382,20 @@ def index():
     images = ui_handler.get_all_images(
         limit=per_page, 
         offset=offset, 
-        subreddit=subreddit if subreddit else None
+        subreddit=subreddit if subreddit else None,
+        username=user if user else None
     )
     for img in images:
         if img.get('file_path'):
             img['exif'] = extract_exif_data(img['file_path'])
     stats = ui_handler.get_stats()
-    subreddits = ui_handler.get_subreddits()
+    subreddits = ui_handler.get_subreddits(only_enabled=only_enabled)
     users = ui_handler.get_users()
     return render_template('index.html',
                          images=images,
                          stats=stats,
                          subreddits=subreddits,
+                         only_enabled=only_enabled,
                          users=users,
                          current_page=page,
                          search=search,
@@ -741,9 +760,12 @@ def scrape_lists():
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
-            SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
-            FROM scrape_lists
-            ORDER BY type, name
+            SELECT sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at,
+                   COUNT(DISTINCT p.id) as post_count
+            FROM scrape_lists sl
+            LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
+            GROUP BY sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at
+            ORDER BY sl.type, sl.enabled DESC, sl.name
         """)
         
         items = cursor.fetchall()
@@ -754,6 +776,8 @@ def scrape_lists():
             for key in ['created_at', 'updated_at', 'last_scraped_at']:
                 if item.get(key):
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
+            # Ensure post_count is an integer
+            item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
         
         stats = ui_handler.get_stats()
         subreddits = ui_handler.get_subreddits()
@@ -774,9 +798,12 @@ def api_get_scrape_lists():
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
-            SELECT id, type, name, enabled, created_at, updated_at, last_scraped_at
-            FROM scrape_lists
-            ORDER BY type, name
+            SELECT sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at,
+                   COUNT(DISTINCT p.id) as post_count
+            FROM scrape_lists sl
+            LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
+            GROUP BY sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at
+            ORDER BY sl.type, sl.enabled DESC, sl.name
         """)
         
         items = cursor.fetchall()
@@ -787,6 +814,8 @@ def api_get_scrape_lists():
             for key in ['created_at', 'updated_at', 'last_scraped_at']:
                 if item.get(key):
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
+            # Ensure post_count is an integer
+            item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
         
         return jsonify({'success': True, 'items': items})
     except Exception as e:

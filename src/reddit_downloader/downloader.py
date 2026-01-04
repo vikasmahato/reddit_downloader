@@ -458,13 +458,13 @@ class RedditImageDownloader:
         return result
 
     def _is_post_downloaded(self, permalink: str) -> bool:
-        """Check if a post is already downloaded by checking its permalink in the database."""
+        """Check if a post is already downloaded by checking its permalink in the permalinks table."""
         if not permalink:
             return False
         try:
             conn = mysql.connector.connect(**mysql_config)
             cursor = conn.cursor()
-            cursor.execute('SELECT id FROM posts WHERE permalink = %s', (permalink,))
+            cursor.execute('SELECT permalink FROM permalinks WHERE permalink = %s', (permalink,))
             result = cursor.fetchone()
             conn.close()
             return result is not None
@@ -515,6 +515,13 @@ class RedditImageDownloader:
             ''', (reddit_id, title, author, subreddit, permalink, 
                   created_utc_dt, post_data.get('score', 0), 
                   post_username, comments))
+            
+            # Save permalink to permalinks table to prevent redownloads of deleted posts
+            if permalink:
+                cursor.execute('''
+                    INSERT IGNORE INTO permalinks (permalink)
+                    VALUES (%s)
+                ''', (permalink,))
             
             # Get the post_id - either from lastrowid (if inserted) or by querying (if updated)
             post_id = cursor.lastrowid
@@ -679,14 +686,14 @@ class RedditImageDownloader:
         skipped_count = 0
         
         for row in results:
-            if len(row) == 2:
-                name, zero_count = row
-                if zero_count >= backoff_threshold:
-                    skipped_count += 1
-                    logger.debug(f"⏭️  Skipping {list_type} '{name}' (backoff: {zero_count} consecutive zero results)")
-                    continue
-            else:
-                name = row[0]
+            #if len(row) == 2:
+            #    name, zero_count = row
+            #    if zero_count >= backoff_threshold:
+            #        skipped_count += 1
+            #        logger.debug(f"⏭️  Skipping {list_type} '{name}' (backoff: {zero_count} consecutive zero results)")
+            #        continue
+            #else:
+            name = row[0]
             items.append(name)
         
         if skipped_count > 0:
