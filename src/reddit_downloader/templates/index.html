@@ -658,23 +658,21 @@ function deleteSelectedPosts() {
 }
 
 // Auto-submit form on subreddit change
-$(document).ready(function() {
-    $('#subreddit').on('change', function() {
-        $('#filterForm').submit();
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('filterForm');
+    const autoSubmitIds = ['subreddit', 'user', 'onlyEnabled'];
+
+    autoSubmitIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('change', () => form.submit());
+        }
     });
-    // Auto-submit form on user change
-    $('#user').on('change', function() {
-        $('#filterForm').submit();
-    });
-    // Auto-submit form on only_enabled checkbox change
-    $('#onlyEnabled').on('change', function() {
-        $('#filterForm').submit();
-    });
-    // Scroll to gallery section on page load if hash is present
-    if(window.location.hash === '#gallerySection') {
-        var gallery = document.getElementById('gallerySection');
-        if(gallery) {
-            gallery.scrollIntoView({behavior: 'smooth'});
+
+    if (window.location.hash === '#gallerySection') {
+        const gallery = document.getElementById('gallerySection');
+        if (gallery) {
+            gallery.scrollIntoView({ behavior: 'smooth' });
         }
     }
 });
