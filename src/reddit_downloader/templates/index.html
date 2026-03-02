@@ -359,7 +359,7 @@
                         <button type="button" class="btn btn-outline-warning" onclick="deletePost({{ image.post_id }}, '{{ image.title or image.filename }}')" title="Delete Post">
                             <i class="fas fa-trash"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts({{ image.author }})" title="Delete Post by user">
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ image.author }}')" title="Delete Post by user">
                             <i class="fas fa-trash"></i>
                         </button>
                         {% endif %}
@@ -456,7 +456,7 @@
                 <button type="button" class="btn btn-sm btn-outline-warning" onclick="deletePost({{ image.post_id }}, '{{ (image.title or image.filename)|replace("'", "\\'") }}')" title="Delete Post">
                     <i class="fas fa-trash"></i>
                 </button>
-                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts({{ image.author }})" title="Delete Post by user">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ image.author }}')" title="Delete Post by user">
                     <i class="fas fa-trash"></i>
                 </button>
                 {% endif %}
