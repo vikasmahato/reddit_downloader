@@ -356,7 +356,10 @@
                     <div class="btn-group btn-group-sm" role="group">
                         {% if image.post_id %}
                         <a href="/details/{{ image.post_id }}" class="btn btn-outline-primary">Details</a>
-                        <button type="button" class="btn btn-outline-danger" onclick="deletePost({{ image.post_id }}, '{{ image.title or image.filename }}')" title="Delete Post">
+                        <button type="button" class="btn btn-outline-warning" onclick="deletePost({{ image.post_id }}, '{{ image.title or image.filename }}')" title="Delete Post">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts({{ image.author }})" title="Delete Post by user">
                             <i class="fas fa-trash"></i>
                         </button>
                         {% endif %}
@@ -450,7 +453,10 @@
                 <a href="/details/{{ image.post_id }}" class="btn btn-sm btn-outline-primary" title="View Details">
                     <i class="fas fa-info-circle"></i> Details
                 </a>
-                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deletePost({{ image.post_id }}, '{{ (image.title or image.filename)|replace("'", "\\'") }}')" title="Delete Post">
+                <button type="button" class="btn btn-sm btn-outline-warning" onclick="deletePost({{ image.post_id }}, '{{ (image.title or image.filename)|replace("'", "\\'") }}')" title="Delete Post">
+                    <i class="fas fa-trash"></i>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts({{ image.author }})" title="Delete Post by user">
                     <i class="fas fa-trash"></i>
                 </button>
                 {% endif %}
