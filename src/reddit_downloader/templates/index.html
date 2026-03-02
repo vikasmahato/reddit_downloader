@@ -713,10 +713,8 @@ function deleteAllUserPosts(username) {
             document.body.appendChild(alert);
             setTimeout(() => alert.remove(), 3000);
             
-            // Reload page after a short delay
-            setTimeout(() => {
-                window.location.href = '/';
-            }, 1500);
+            // TODO: remove the parent div containing the delete button if we are in the user filter view
+
         } else {
             alert('Error: ' + (data.error || 'Failed to delete posts'));
             deleteBtn.disabled = false;
