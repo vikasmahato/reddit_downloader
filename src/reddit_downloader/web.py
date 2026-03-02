@@ -195,7 +195,7 @@ class RedditImageUI:
             SELECT
                 p.id AS post_id,
                 p.title, p.author, p.subreddit, p.permalink, p.created_utc,
-                p.score, p.post_username, p.comments,
+                p.score, p.post_username, p.comments, p.flair,
 
                 i.id AS image_id, i.file_hash, i.file_path, i.filename,
                 i.file_size, i.download_date, i.download_time, i.is_deleted,
@@ -251,6 +251,7 @@ class RedditImageUI:
                         "post_username": row["post_username"],
                         "comments": row["comments"],
                         "comment_count": comment_count,
+                        "flair": row.get("flair"),
                         "post_images": []
                     }
 
@@ -444,7 +445,7 @@ def index():
         deleted_filter = True
     elif deleted == '0':
         deleted_filter = False
-    per_page = 20
+    per_page = 200
     offset = (page - 1) * per_page
     images = ui_handler.get_all_images(
         limit=per_page,
@@ -538,7 +539,7 @@ def image_details(post_id):
         # Get post information
         cursor.execute("""SELECT 
             p.id as post_id, p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
-            p.score, p.post_username, p.comments, p.reddit_id
+            p.score, p.post_username, p.comments, p.reddit_id, p.flair
         FROM posts p
         WHERE p.id = %s""", (post_id,))
         post = cursor.fetchone()
@@ -821,6 +822,126 @@ def delete_post(post_id):
             conn.close()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/delete-posts-batch', methods=['DELETE'])
+def delete_posts_batch():
+    """Delete multiple posts from the database. If images are not linked to other posts, delete images and move files to /deleted folder."""
+    conn = None
+    try:
+        data = request.get_json()
+        post_ids = data.get('post_ids', [])
+        
+        if not post_ids or not isinstance(post_ids, list):
+            return jsonify({'success': False, 'error': 'Invalid post_ids provided'}), 400
+        
+        if len(post_ids) == 0:
+            return jsonify({'success': False, 'error': 'No post IDs provided'}), 400
+        
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        deleted_count = 0
+        errors = []
+        
+        # Process each post
+        for post_id in post_ids:
+            try:
+                # Get all image_ids linked to this post
+                cursor.execute("SELECT image_id FROM post_images WHERE post_id = %s", (post_id,))
+                image_results = cursor.fetchall()
+                image_ids = [row['image_id'] for row in image_results if row['image_id']]
+                
+                # For each image linked to this post, check if it's linked to other posts BEFORE deleting links
+                images_to_delete = []
+                for image_id in image_ids:
+                    cursor.execute("SELECT COUNT(*) as count FROM post_images WHERE image_id = %s AND post_id != %s", (image_id, post_id))
+                    remaining_links = cursor.fetchone()['count']
+                    
+                    # If image is not linked to any other posts, mark for deletion
+                    if remaining_links == 0:
+                        images_to_delete.append(image_id)
+                
+                # Delete from post_images (the link between post and image)
+                cursor.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
+                
+                # Process images that should be deleted
+                for image_id in images_to_delete:
+                    cursor.execute("SELECT file_path FROM images WHERE id = %s", (image_id,))
+                    img_result = cursor.fetchone()
+                    
+                    if img_result and img_result['file_path']:
+                        file_path = img_result['file_path']
+                        try:
+                            from pathlib import Path
+                            import shutil
+                            
+                            source_path = Path(file_path)
+                            if source_path.exists():
+                                # Create deleted folder inside the download folder
+                                download_folder = ui_handler.download_folder
+                                deleted_folder = download_folder / 'deleted'
+                                deleted_folder.mkdir(parents=True, exist_ok=True)
+                                
+                                # Move file to deleted folder
+                                dest_path = deleted_folder / source_path.name
+                                # Handle filename conflicts
+                                counter = 1
+                                while dest_path.exists():
+                                    stem = source_path.stem
+                                    suffix = source_path.suffix
+                                    dest_path = deleted_folder / f"{stem}_{counter}{suffix}"
+                                    counter += 1
+                                
+                                shutil.move(str(source_path), str(dest_path))
+                                
+                                # Also move MP4 if it's a GIF that was converted
+                                if source_path.suffix.lower() == '.gif':
+                                    mp4_path = source_path.with_suffix('.mp4')
+                                    if mp4_path.exists():
+                                        mp4_dest = deleted_folder / mp4_path.name
+                                        counter = 1
+                                        while mp4_dest.exists():
+                                            stem = mp4_path.stem
+                                            suffix = mp4_path.suffix
+                                            mp4_dest = deleted_folder / f"{stem}_{counter}{suffix}"
+                                            counter += 1
+                                        shutil.move(str(mp4_path), str(mp4_dest))
+                        except Exception as move_error:
+                            # Log error but continue with deletion
+                            print(f"Error moving file for post {post_id}: {move_error}")
+                    
+                    # Delete from images table
+                    cursor.execute("DELETE FROM images WHERE id = %s", (image_id,))
+                
+                # Delete from posts table
+                cursor.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+                if cursor.rowcount > 0:
+                    deleted_count += 1
+                    
+            except Exception as post_error:
+                errors.append(f"Error deleting post {post_id}: {str(post_error)}")
+                print(f"Error deleting post {post_id}: {post_error}")
+        
+        if deleted_count == 0 and errors:
+            conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Failed to delete any posts', 'details': errors}), 400
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{deleted_count} post(s) deleted successfully',
+            'deleted_count': deleted_count,
+            'errors': errors if errors else None
+        })
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/scrape-lists')
 def scrape_lists():
     """Page for managing scrape lists."""
@@ -1006,6 +1127,129 @@ def api_toggle_scrape_list(item_id):
         conn.close()
         return jsonify({'success': True, 'enabled': new_enabled, 'message': 'Status updated successfully'})
     except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/delete-posts-by-user/<username>', methods=['DELETE'])
+def delete_posts_by_user(username):
+    """Delete all posts by a specific user. If images are not linked to other posts, delete images and move files to /deleted folder."""
+    conn = None
+    try:
+        if not username:
+            return jsonify({'success': False, 'error': 'Username is required'}), 400
+        
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # Get all post IDs for this user
+        cursor.execute("SELECT id FROM posts WHERE author = %s", (username,))
+        post_results = cursor.fetchall()
+        post_ids = [row['id'] for row in post_results]
+        
+        if not post_ids:
+            conn.close()
+            return jsonify({'success': True, 'message': f'No posts found for user {username}', 'deleted_count': 0})
+        
+        deleted_count = 0
+        errors = []
+        
+        # Process each post (reuse logic from delete_posts_batch)
+        for post_id in post_ids:
+            try:
+                # Get all image_ids linked to this post
+                cursor.execute("SELECT image_id FROM post_images WHERE post_id = %s", (post_id,))
+                image_results = cursor.fetchall()
+                image_ids = [row['image_id'] for row in image_results if row['image_id']]
+                
+                # For each image linked to this post, check if it's linked to other posts BEFORE deleting links
+                images_to_delete = []
+                for image_id in image_ids:
+                    cursor.execute("SELECT COUNT(*) as count FROM post_images WHERE image_id = %s AND post_id != %s", (image_id, post_id))
+                    remaining_links = cursor.fetchone()['count']
+                    
+                    # If image is not linked to any other posts, mark for deletion
+                    if remaining_links == 0:
+                        images_to_delete.append(image_id)
+                
+                # Delete from post_images (the link between post and image)
+                cursor.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
+                
+                # Process images that should be deleted
+                for image_id in images_to_delete:
+                    cursor.execute("SELECT file_path FROM images WHERE id = %s", (image_id,))
+                    img_result = cursor.fetchone()
+                    
+                    if img_result and img_result['file_path']:
+                        file_path = img_result['file_path']
+                        try:
+                            from pathlib import Path
+                            import shutil
+                            
+                            source_path = Path(file_path)
+                            if source_path.exists():
+                                # Create deleted folder inside the download folder
+                                download_folder = ui_handler.download_folder
+                                deleted_folder = download_folder / 'deleted'
+                                deleted_folder.mkdir(parents=True, exist_ok=True)
+                                
+                                # Move file to deleted folder
+                                dest_path = deleted_folder / source_path.name
+                                # Handle filename conflicts
+                                counter = 1
+                                while dest_path.exists():
+                                    stem = source_path.stem
+                                    suffix = source_path.suffix
+                                    dest_path = deleted_folder / f"{stem}_{counter}{suffix}"
+                                    counter += 1
+                                
+                                shutil.move(str(source_path), str(dest_path))
+                                
+                                # Also move MP4 if it's a GIF that was converted
+                                if source_path.suffix.lower() == '.gif':
+                                    mp4_path = source_path.with_suffix('.mp4')
+                                    if mp4_path.exists():
+                                        mp4_dest = deleted_folder / mp4_path.name
+                                        counter = 1
+                                        while mp4_dest.exists():
+                                            stem = mp4_path.stem
+                                            suffix = mp4_path.suffix
+                                            mp4_dest = deleted_folder / f"{stem}_{counter}{suffix}"
+                                            counter += 1
+                                        shutil.move(str(mp4_path), str(mp4_dest))
+                        except Exception as move_error:
+                            # Log error but continue with deletion
+                            print(f"Error moving file for post {post_id}: {move_error}")
+                    
+                    # Delete from images table
+                    cursor.execute("DELETE FROM images WHERE id = %s", (image_id,))
+                
+                # Delete from posts table
+                cursor.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+                if cursor.rowcount > 0:
+                    deleted_count += 1
+                    
+            except Exception as post_error:
+                errors.append(f"Error deleting post {post_id}: {str(post_error)}")
+                print(f"Error deleting post {post_id}: {post_error}")
+        
+        if deleted_count == 0 and errors:
+            conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Failed to delete any posts', 'details': errors}), 400
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'{deleted_count} post(s) deleted successfully for user {username}',
+            'deleted_count': deleted_count,
+            'errors': errors if errors else None
+        })
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def main():

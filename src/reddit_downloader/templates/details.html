@@ -142,7 +142,12 @@ pre code {
                 </div>
             </div>
             <div class="card-body">
-                <h5>{{ image.title or 'Untitled' }}</h5>
+                <h5>
+                    {% if image.flair %}
+                    <span class="badge bg-info me-2">{{ image.flair }}</span>
+                    {% endif %}
+                    {{ image.title or 'Untitled' }}
+                </h5>
                 <div class="mb-2">
                     <span class="badge bg-primary">r/{{ image.subreddit or 'Unknown' }}</span>
                     <span class="badge bg-info text-dark">u/{{ image.author or 'Unknown' }}</span>

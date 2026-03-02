@@ -533,16 +533,18 @@ class RedditImageDownloader:
                 # Default to current time if not provided
                 created_utc_dt = datetime.now()
             
+            flair = post_data.get('flair')
             cursor.execute('''
-                INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments, flair)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE 
                     title=VALUES(title), 
                     score=VALUES(score), 
-                    comments=VALUES(comments)
+                    comments=VALUES(comments),
+                    flair=VALUES(flair)
             ''', (reddit_id, title, author, subreddit, permalink, 
                   created_utc_dt, post_data.get('score', 0), 
-                  post_username, comments))
+                  post_username, comments, flair))
             
             # Save permalink to permalinks table to prevent redownloads of deleted posts
             if permalink:
@@ -787,6 +789,25 @@ class RedditImageDownloader:
         except mysql.connector.Error as e:
             logger.debug(f"Error resetting zero result count: {e}")
 
+    def _is_newly_added_subreddit(self, subreddit_name: str) -> bool:
+        """Check if a subreddit has never been scraped before (last_scraped_at is NULL)."""
+        try:
+            conn = self._get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT last_scraped_at
+                FROM scrape_lists
+                WHERE type = 'subreddit' AND name = %s
+            """, (subreddit_name,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            # If last_scraped_at is NULL, it's a newly added subreddit
+            return result is None or result[0] is None
+        except Exception as e:
+            logger.debug(f"Error checking if subreddit is newly added: {e}")
+            return False
+
     def scrape_from_config_list(self, scrape_type: str = "all"):
         """Scrape images from configured lists."""
         if not self.reddit:
@@ -811,7 +832,16 @@ class RedditImageDownloader:
                     clean_name = subreddit.strip()
                     logger.info(f"\n🔍 Scraping r/{clean_name}...")
                     
-                    limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
+                    # Check if this is a newly added subreddit (never scraped before)
+                    is_new_subreddit = self._is_newly_added_subreddit(clean_name)
+                    
+                    if is_new_subreddit:
+                        # For newly added subreddits, download all posts (use a very high limit)
+                        limit = 10000  # Effectively download all posts
+                        logger.info(f"🆕 Newly added subreddit detected - downloading all posts from r/{clean_name}...")
+                    else:
+                        limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
+                    
                     try:
                         downloaded = self.download_from_subreddit(clean_name, limit)
                         subreddit_counts[clean_name] = downloaded
@@ -937,6 +967,8 @@ class RedditImageDownloader:
                 else:
                     post_url = submission.url
 
+                # Extract flair
+                flair_text = submission.link_flair_text if hasattr(submission, 'link_flair_text') and submission.link_flair_text else None
                 post_entry = {
                     'title': submission.title,
                     'url': post_url,
@@ -945,7 +977,8 @@ class RedditImageDownloader:
                     'permalink': submission.permalink,
                     'created_utc': submission.created_utc,
                     'score': submission.score,
-                    'comments': json.dumps(comments_list)
+                    'comments': json.dumps(comments_list),
+                    'flair': flair_text
                 }
                 if has_gallery:
                     post_entry['all_urls'] = ','.join(gallery_urls)
@@ -1015,6 +1048,8 @@ class RedditImageDownloader:
                         except Exception:
                             comments_list = []
                         if all_urls:
+                            # Extract flair
+                            flair_text = post.link_flair_text if hasattr(post, 'link_flair_text') and post.link_flair_text else None
                             image_posts.append({
                                 'title': post.title,
                                 'url': all_urls[0],
@@ -1024,7 +1059,8 @@ class RedditImageDownloader:
                                 'permalink': post.permalink,
                                 'created_utc': post.created_utc,
                                 'post_username': post_username,
-                                'comments': json.dumps(comments_list)
+                                'comments': json.dumps(comments_list),
+                                'flair': flair_text
                             })
                         continue  # Skip normal image/video handling for gallery posts
                     
@@ -1047,6 +1083,8 @@ class RedditImageDownloader:
                                 })
                         except Exception:
                             comments_list = []
+                        # Extract flair
+                        flair_text = post.link_flair_text if hasattr(post, 'link_flair_text') and post.link_flair_text else None
                         image_posts.append({
                             'title': post.title,
                             'url': video_url,
@@ -1055,7 +1093,8 @@ class RedditImageDownloader:
                             'permalink': post.permalink,
                             'created_utc': post.created_utc,
                             'post_username': post_username,
-                            'comments': json.dumps(comments_list)
+                            'comments': json.dumps(comments_list),
+                            'flair': flair_text
                         })
                         continue  # Skip image handling for video posts
                     
@@ -1078,6 +1117,8 @@ class RedditImageDownloader:
                                 })
                         except Exception:
                             comments_list = []
+                        # Extract flair
+                        flair_text = post.link_flair_text if hasattr(post, 'link_flair_text') and post.link_flair_text else None
                         image_posts.append({
                             'title': post.title,
                             'url': url,
@@ -1086,7 +1127,8 @@ class RedditImageDownloader:
                             'permalink': post.permalink,
                             'created_utc': post.created_utc,
                             'post_username': post_username,
-                            'comments': json.dumps(comments_list)
+                            'comments': json.dumps(comments_list),
+                            'flair': flair_text
                         })
             return image_posts
         except Forbidden as e:

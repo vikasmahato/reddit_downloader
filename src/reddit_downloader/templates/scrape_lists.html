@@ -39,7 +39,11 @@
                             {% if item.type == 'subreddit' %}
                             <tr id="row-{{ item.id }}">
                                 <td>
-                                    <strong>r/{{ item.name }}</strong>
+                                    <strong>
+                                        <a href="https://www.reddit.com/r/{{ item.name }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+                                            r/{{ item.name }}
+                                        </a>
+                                    </strong>
                                 </td>
                                 <td>
                                     <span class="badge {% if item.enabled %}bg-success{% else %}bg-secondary{% endif %}" id="status-{{ item.id }}">
@@ -59,6 +63,9 @@
                                 </td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">
+                                        <a href="/?subreddit={{ item.name }}" class="btn btn-outline-success" title="View Gallery">
+                                            <i class="fas fa-images"></i>
+                                        </a>
                                         <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', {% if item.enabled %}true{% else %}false{% endif %})">
                                             <i class="fas fa-edit"></i>
                                         </button>
@@ -127,6 +134,9 @@
                                 </td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">
+                                        <a href="/?user={{ item.name }}" class="btn btn-outline-success" title="View posts by this user">
+                                            <i class="fas fa-images"></i>
+                                        </a>
                                         <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', {% if item.enabled %}true{% else %}false{% endif %})">
                                             <i class="fas fa-edit"></i>
                                         </button>
@@ -373,6 +383,13 @@ document.getElementById('addModal').addEventListener('hidden.bs.modal', function
 }
 .table-dark tbody tr:hover {
     background-color: rgba(255, 69, 0, 0.1) !important;
+}
+.table-dark a {
+    color: #ff4500 !important;
+}
+.table-dark a:hover {
+    color: #ff6b35 !important;
+    text-decoration: underline !important;
 }
 .modal-content {
     border-radius: 12px;

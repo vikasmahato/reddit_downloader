@@ -76,6 +76,58 @@
     color: #666 !important;
     border-color: rgba(255,255,255,0.1) !important;
 }
+.view-toggle-btn.active {
+    background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
+    color: #fff !important;
+    border-color: #ff4500 !important;
+}
+.list-view-container {
+    display: none;
+}
+.card-view-container {
+    display: block;
+}
+.list-view-item {
+    background: rgba(35, 37, 38, 0.8) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: all 0.2s ease;
+}
+.list-view-item:hover {
+    background: rgba(35, 37, 38, 0.95) !important;
+    transform: translateX(2px);
+}
+.list-view-item.selected {
+    border-color: #ff4500 !important;
+    background: rgba(255, 69, 0, 0.15) !important;
+}
+.list-view-thumbnail-container {
+    position: relative;
+    flex-shrink: 0;
+}
+.list-view-thumbnail {
+    width: 120px;
+    height: 80px;
+    object-fit: cover;
+    border-radius: 6px;
+    margin-right: 1rem;
+}
+.list-view-content {
+    flex: 1;
+}
+.list-view-checkbox {
+    margin-right: 0.75rem;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+.list-view-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
 </style>
 <!-- Compact Inline Stats -->
 <div class="row mb-2">
@@ -122,12 +174,21 @@
             <div class="card-body py-1 px-1">
                 <form method="GET" id="filterForm">
                     <div class="row g-1 align-items-center">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label for="subreddit" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Subreddit</label>
                             <select class="form-select form-select-sm" id="subreddit" name="subreddit" style="font-size:0.90em;">
                                 <option value="">All Subreddits</option>
                                 {% for sr in subreddits %}
                                     <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="user" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">User</label>
+                            <select class="form-select form-select-sm" id="user" name="user" style="font-size:0.90em;">
+                                <option value="">All Users</option>
+                                {% for u in users %}
+                                    <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -143,7 +204,7 @@
                             <button type="submit" class="btn btn-primary btn-sm" title="Filter">
                                 <i class="fas fa-filter"></i>
                             </button>
-                            {% if filter_subreddit %}
+                            {% if filter_subreddit or filter_user %}
                             <a href="/" class="btn btn-outline-secondary btn-sm" title="Clear">
                                 <i class="fas fa-times"></i>
                             </a>
@@ -161,19 +222,42 @@
 <div class="row mb-4 fade-in" id="gallerySection">
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 class="mb-0"><i class="fas fa-images"></i> Gallery</h4>
-            <span class="stat-compact">
-                <strong>{{ images|length }}</strong> shown
-            </span>
+            <h4 class="mb-0"><i class="fas fa-images"></i> Gallery{% if filter_user %} - u/{{ filter_user }}{% endif %}</h4>
+            <div class="d-flex align-items-center gap-2">
+                {% if filter_user %}
+                <button type="button" class="btn btn-sm btn-danger" onclick="deleteAllUserPosts('{{ filter_user }}')" title="Delete All Posts by {{ filter_user }}">
+                    <i class="fas fa-trash-alt"></i> Delete All Posts
+                </button>
+                {% endif %}
+                <span class="stat-compact">
+                    <strong id="selectedCount">0</strong> selected
+                </span>
+                <div class="btn-group" role="group" aria-label="View toggle">
+                    <button type="button" class="btn btn-sm btn-outline-primary view-toggle-btn active" data-view="card" title="Card View">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary view-toggle-btn" data-view="list" title="List View">
+                        <i class="fas fa-list"></i>
+                    </button>
+                </div>
+                <button type="button" class="btn btn-sm btn-danger" id="deleteSelectedBtn" style="display:none;" title="Delete Selected">
+                    <i class="fas fa-trash"></i> Delete Selected
+                </button>
+                <span class="stat-compact">
+                    <strong>{{ images|length }}</strong> shown
+                </span>
+            </div>
         </div>
     </div>
 </div>
 
 {% if images %}
+<!-- Card View -->
+<div class="card-view-container">
 <div class="row">
     {% for image in images %}
     <div class="col-md-3 col-6 mb-4">
-        <div class="card h-100">
+        <div class="card h-100" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
             <div class="card-body p-0">
                 {% set post_images = image.post_images if image.post_images else [image] %}
                 {% set image_count = image.image_count if image.image_count else 1 %}
@@ -263,7 +347,12 @@
             </div>
             <div class="card-footer">
                 <div class="d-flex justify-content-between align-items-center">
-                    <span class="card-title">{{ image.title or image.filename }}</span>
+                    <div class="flex-grow-1">
+                        {% if image.flair %}
+                        <span class="badge bg-info mb-1" style="font-size:0.7em;">{{ image.flair }}</span>
+                        {% endif %}
+                        <span class="card-title d-block">{{ image.title or image.filename }}</span>
+                    </div>
                     <div class="btn-group btn-group-sm" role="group">
                         {% if image.post_id %}
                         <a href="/details/{{ image.post_id }}" class="btn btn-outline-primary">Details</a>
@@ -278,6 +367,98 @@
     </div>
     {% endfor %}
 </div>
+</div>
+
+<!-- List View -->
+<div class="list-view-container">
+    {% for image in images %}
+    <div class="list-view-item" data-post-id="{{ image.post_id }}">
+        <div class="d-flex align-items-center">
+            {% if image.post_id %}
+            <input type="checkbox" class="list-view-checkbox post-checkbox" data-post-id="{{ image.post_id }}" aria-label="Select post">
+            {% endif %}
+            <div class="list-view-thumbnail-container">
+                {% set post_images = image.post_images if image.post_images else [image] %}
+                {% set image_count = image.image_count if image.image_count else 1 %}
+                {% set first_img = post_images[0] %}
+                {% set ext = first_img.filename.split('.')[-1].lower() if first_img.filename else 'jpg' %}
+                {% if first_img.thumb_path %}
+                    <img src="{{ url_for('serve_thumbnail', filename=first_img.thumb_path) }}" class="list-view-thumbnail" alt="{{ image.title or 'Image' }}" loading="lazy">
+                {% elif first_img.web_path %}
+                    {% if ext == 'mp4' %}
+                        <video controls class="list-view-thumbnail" style="object-fit:cover;">
+                            <source src="{{ url_for('static', filename=first_img.web_path) }}" type="video/mp4">
+                        </video>
+                    {% else %}
+                        <img src="{{ url_for('static', filename=first_img.web_path) }}" class="list-view-thumbnail" alt="{{ image.title or 'Image' }}" loading="lazy">
+                    {% endif %}
+                {% elif first_img.url %}
+                    {% set thumb = first_img.url.split(',')[0].strip() %}
+                    {% if ext == 'mp4' %}
+                        <video controls class="list-view-thumbnail lazy-load" data-src="{{ thumb }}" style="object-fit:cover;">
+                            Your browser does not support the video tag.
+                        </video>
+                    {% else %}
+                        <img data-src="{{ thumb }}" class="list-view-thumbnail lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy">
+                    {% endif %}
+                {% else %}
+                    <div class="list-view-thumbnail d-flex align-items-center justify-content-center" style="background:linear-gradient(135deg, #232526 0%, #414345 100%);">
+                        <small class="text-muted"><i class="fas fa-image"></i></small>
+                    </div>
+                {% endif %}
+                {% if image_count > 1 %}
+                <span class="badge bg-dark" style="position:absolute;top:2px;right:2px;">{{ image_count }}</span>
+                {% endif %}
+            </div>
+            <div class="list-view-content">
+                <h6 class="mb-1">
+                    {% if image.flair %}
+                    <span class="badge bg-info me-1" style="font-size:0.75em;">{{ image.flair }}</span>
+                    {% endif %}
+                    {{ image.title or image.filename or 'Untitled' }}
+                </h6>
+                <div class="metadata-text">
+                    <small>
+                        <i class="fas fa-user"></i> 
+                        {% if image.author %}
+                        <a href="?user={{ image.author }}" class="text-decoration-none" style="color: #ff4500;" title="View all posts by {{ image.author }}">
+                            {{ image.author }}
+                        </a>
+                        {% else %}
+                        Unknown
+                        {% endif %}
+                        <span class="ms-2"><i class="fab fa-reddit"></i> r/{{ image.subreddit or 'unknown' }}</span>
+                        {% if image.score is not none %}
+                        <span class="ms-2"><i class="fas fa-arrow-up"></i> {{ image.score }}</span>
+                        {% endif %}
+                        {% if image.comment_count %}
+                        <span class="ms-2"><i class="fas fa-comments"></i> {{ image.comment_count }}</span>
+                        {% endif %}
+                        {% if image.created_utc %}
+                        <span class="ms-2"><i class="fas fa-clock"></i> {{ image.created_utc|format_datetime }}</span>
+                        {% endif %}
+                    </small>
+                </div>
+            </div>
+            <div class="list-view-actions">
+                {% if image.post_id %}
+                {% if image.author %}
+                <a href="?user={{ image.author }}" class="btn btn-sm btn-outline-success" title="View all posts by {{ image.author }}">
+                    <i class="fas fa-user"></i> User
+                </a>
+                {% endif %}
+                <a href="/details/{{ image.post_id }}" class="btn btn-sm btn-outline-primary" title="View Details">
+                    <i class="fas fa-info-circle"></i> Details
+                </a>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deletePost({{ image.post_id }}, '{{ (image.title or image.filename)|replace("'", "\\'") }}')" title="Delete Post">
+                    <i class="fas fa-trash"></i>
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 
 <!-- Pagination -->
 <div class="row">
@@ -286,19 +467,19 @@
             <ul class="pagination">
                 {% if current_page > 1 %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page - 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}#gallerySection">Previous</a>
+                    <a class="page-link" href="?page={{ current_page - 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Previous</a>
                 </li>
                 {% endif %}
                 
                 {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
                 <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                    <a class="page-link" href="?page={{ page_num }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}#gallerySection">{{ page_num }}</a>
+                    <a class="page-link" href="?page={{ page_num }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">{{ page_num }}</a>
                 </li>
                 {% endfor %}
                 
                 {% if images|length == 20 %}
                 <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page + 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}#gallerySection">Next</a>
+                    <a class="page-link" href="?page={{ current_page + 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Next</a>
                 </li>
                 {% endif %}
             </ul>
@@ -319,9 +500,164 @@
 {% endif %}
 
 <script>
+// View toggle functionality
+let currentView = localStorage.getItem('viewPreference') || 'card';
+
+function switchView(view) {
+    const cardView = document.querySelector('.card-view-container');
+    const listView = document.querySelector('.list-view-container');
+    const toggleButtons = document.querySelectorAll('.view-toggle-btn');
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    
+    // Update active button
+    toggleButtons.forEach(btn => {
+        if (btn.dataset.view === view) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Toggle views
+    if (view === 'list') {
+        cardView.style.display = 'none';
+        listView.style.display = 'block';
+        deleteBtn.style.display = 'inline-block';
+    } else {
+        cardView.style.display = 'block';
+        listView.style.display = 'none';
+        deleteBtn.style.display = 'none';
+        // Clear selections when switching to card view
+        document.querySelectorAll('.post-checkbox').forEach(cb => {
+            cb.checked = false;
+            updateSelectedCount();
+        });
+    }
+    
+    // Save preference
+    localStorage.setItem('viewPreference', view);
+    currentView = view;
+}
+
+// Initialize view on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Set initial view
+    switchView(currentView);
+    
+    // View toggle button handlers
+    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            switchView(this.dataset.view);
+        });
+    });
+    
+    // Checkbox change handler
+    document.querySelectorAll('.post-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const listItem = this.closest('.list-view-item');
+            if (this.checked) {
+                listItem.classList.add('selected');
+            } else {
+                listItem.classList.remove('selected');
+            }
+            updateSelectedCount();
+        });
+    });
+    
+    // Delete selected button handler
+    document.getElementById('deleteSelectedBtn').addEventListener('click', function() {
+        deleteSelectedPosts();
+    });
+});
+
+function updateSelectedCount() {
+    const selected = document.querySelectorAll('.post-checkbox:checked').length;
+    document.getElementById('selectedCount').textContent = selected;
+}
+
+function deleteSelectedPosts() {
+    const selectedCheckboxes = document.querySelectorAll('.post-checkbox:checked');
+    if (selectedCheckboxes.length === 0) {
+        alert('No posts selected');
+        return;
+    }
+    
+    const postIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.postId));
+    const count = postIds.length;
+    
+    if (!confirm(`Are you sure you want to delete ${count} post(s)?\n\nThis will:\n- Delete the post(s) from the database\n- If images are not linked to other posts, they will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
+        return;
+    }
+    
+    // Disable button and show loading state
+    const deleteBtn = document.getElementById('deleteSelectedBtn');
+    const originalHTML = deleteBtn.innerHTML;
+    deleteBtn.disabled = true;
+    deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    
+    fetch('/api/delete-posts-batch', {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ post_ids: postIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Remove deleted items from view
+            postIds.forEach(postId => {
+                const listItem = document.querySelector(`.list-view-item[data-post-id="${postId}"]`);
+                const cardItem = document.querySelector(`.card[data-post-id="${postId}"]`)?.closest('.col-md-3, .col-6');
+                if (listItem) {
+                    listItem.style.transition = 'opacity 0.3s';
+                    listItem.style.opacity = '0';
+                    setTimeout(() => listItem.remove(), 300);
+                }
+                if (cardItem) {
+                    cardItem.style.transition = 'opacity 0.3s';
+                    cardItem.style.opacity = '0';
+                    setTimeout(() => cardItem.remove(), 300);
+                }
+            });
+            
+            // Reset UI
+            updateSelectedCount();
+            deleteBtn.disabled = false;
+            deleteBtn.innerHTML = originalHTML;
+            
+            // Show success message
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+            alert.style.zIndex = '9999';
+            alert.innerHTML = `<strong>Success!</strong> ${count} post(s) deleted successfully.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+            document.body.appendChild(alert);
+            setTimeout(() => alert.remove(), 3000);
+            
+            // Reload page after a short delay to refresh the count
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to delete posts'));
+            deleteBtn.disabled = false;
+            deleteBtn.innerHTML = originalHTML;
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = originalHTML;
+    });
+}
+
 // Auto-submit form on subreddit change
 $(document).ready(function() {
     $('#subreddit').on('change', function() {
+        $('#filterForm').submit();
+    });
+    // Auto-submit form on user change
+    $('#user').on('change', function() {
         $('#filterForm').submit();
     });
     // Auto-submit form on only_enabled checkbox change
@@ -336,6 +672,57 @@ $(document).ready(function() {
         }
     }
 });
+
+// Delete all posts by a user
+function deleteAllUserPosts(username) {
+    if (!username) {
+        alert('Username is required');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete ALL posts by user "${username}"?\n\nThis will:\n- Delete all posts from this user from the database\n- If images are not linked to other posts, they will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
+        return;
+    }
+    
+    // Show loading state
+    const deleteBtn = event.target.closest('button');
+    const originalHTML = deleteBtn.innerHTML;
+    deleteBtn.disabled = true;
+    deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+    
+    fetch(`/api/delete-posts-by-user/${encodeURIComponent(username)}`, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+            alert.style.zIndex = '9999';
+            alert.innerHTML = `<strong>Success!</strong> ${data.deleted_count} post(s) deleted successfully for user ${username}.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+            document.body.appendChild(alert);
+            setTimeout(() => alert.remove(), 3000);
+            
+            // Reload page after a short delay
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1500);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to delete posts'));
+            deleteBtn.disabled = false;
+            deleteBtn.innerHTML = originalHTML;
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = originalHTML;
+    });
+}
 
 // Enhanced lazy loading and error handling
 document.addEventListener('DOMContentLoaded', function() {
@@ -394,16 +781,25 @@ function deletePost(postId, title) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Find and remove the card from the page
-            const buttons = document.querySelectorAll(`button[onclick*="deletePost(${postId}"]`);
-            if (buttons.length > 0) {
-                const card = buttons[0].closest('.col-md-3, .col-6');
-                if (card) {
-                    card.style.transition = 'opacity 0.3s';
-                    card.style.opacity = '0';
-                    setTimeout(() => card.remove(), 300);
-                }
+            // Remove from card view
+            const card = document.querySelector(`.card[data-post-id="${postId}"]`)?.closest('.col-md-3, .col-6');
+            if (card) {
+                card.style.transition = 'opacity 0.3s';
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 300);
             }
+            
+            // Remove from list view
+            const listItem = document.querySelector(`.list-view-item[data-post-id="${postId}"]`);
+            if (listItem) {
+                listItem.style.transition = 'opacity 0.3s';
+                listItem.style.opacity = '0';
+                setTimeout(() => {
+                    listItem.remove();
+                    updateSelectedCount();
+                }, 300);
+            }
+            
             // Show success message
             const alert = document.createElement('div');
             alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
