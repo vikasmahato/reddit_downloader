@@ -1,25 +1,21 @@
 {% extends "base.html" %}
 
-{% block title %}Scrape Lists - Reddit Image Browser{% endblock %}
+{% block title %}Scrape Lists — Reddit Vault{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2><i class="fas fa-list"></i> Scrape Lists Management</h2>
-            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-                <i class="fas fa-plus"></i> Add New
-            </button>
-        </div>
-    </div>
+<div class="scrape-header">
+    <h2><i class="fas fa-list-ul me-2"></i>Scrape Lists</h2>
+    <button type="button" class="btn btn-sm btn-primary ms-auto" data-bs-toggle="modal" data-bs-target="#addModal">
+        <i class="fas fa-plus"></i> Add New
+    </button>
 </div>
 
 <!-- Subreddits Section -->
-<div class="row mb-4">
+<div class="row mb-3">
     <div class="col-12">
-        <div class="card">
+        <div class="card section-card">
             <div class="card-header">
-                <h5 class="mb-0"><i class="fab fa-reddit"></i> Subreddits ({{ items|selectattr('type', 'equalto', 'subreddit')|list|length }})</h5>
+                <h5 class="mb-0"><i class="fab fa-reddit me-2"></i>Subreddits <span class="ms-2" style="color:var(--text-muted);font-weight:400;">({{ items|selectattr('type', 'equalto', 'subreddit')|list|length }})</span></h5>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
@@ -46,7 +42,7 @@
                                     </strong>
                                 </td>
                                 <td>
-                                    <span class="badge {% if item.enabled %}bg-success{% else %}bg-secondary{% endif %}" id="status-{{ item.id }}">
+                                    <span class="status-dot {% if item.enabled %}status-enabled{% else %}status-disabled{% endif %}" id="status-{{ item.id }}">
                                         {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
                                     </span>
                                 </td>
@@ -94,11 +90,11 @@
 </div>
 
 <!-- Users Section -->
-<div class="row mb-4">
+<div class="row mb-3">
     <div class="col-12">
-        <div class="card">
+        <div class="card section-card">
             <div class="card-header">
-                <h5 class="mb-0"><i class="fas fa-user"></i> Users ({{ items|selectattr('type', 'equalto', 'user')|list|length }})</h5>
+                <h5 class="mb-0"><i class="fas fa-user me-2"></i>Users <span class="ms-2" style="color:var(--text-muted);font-weight:400;">({{ items|selectattr('type', 'equalto', 'user')|list|length }})</span></h5>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
@@ -120,7 +116,7 @@
                                     <strong>u/{{ item.name }}</strong>
                                 </td>
                                 <td>
-                                    <span class="badge {% if item.enabled %}bg-success{% else %}bg-secondary{% endif %}" id="status-{{ item.id }}">
+                                    <span class="status-dot {% if item.enabled %}status-enabled{% else %}status-disabled{% endif %}" id="status-{{ item.id }}">
                                         {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
                                     </span>
                                 </td>
@@ -323,7 +319,7 @@ function toggleItem(id) {
         if (data.success) {
             const statusBadge = document.getElementById(`status-${id}`);
             statusBadge.textContent = data.enabled ? 'Enabled' : 'Disabled';
-            statusBadge.className = `badge ${data.enabled ? 'bg-success' : 'bg-secondary'}`;
+            statusBadge.className = `status-dot ${data.enabled ? 'status-enabled' : 'status-disabled'}`;
             
             // Update toggle button icon
             const row = document.getElementById(`row-${id}`);
@@ -370,34 +366,68 @@ document.getElementById('addModal').addEventListener('hidden.bs.modal', function
 </script>
 
 <style>
-.table-dark {
-    background-color: rgba(35, 37, 38, 0.8) !important;
-    color: #e0e0e0 !important;
+.scrape-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
 }
+.scrape-header h2 {
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0;
+}
+.section-card { margin-bottom: 1rem; }
+.section-card .card-header h5 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin: 0;
+}
+.table-dark { background: transparent !important; }
 .table-dark th {
-    border-color: rgba(255,255,255,0.1) !important;
-    background-color: rgba(24, 26, 27, 0.8) !important;
+    background: var(--surface-2) !important;
+    border-color: var(--border) !important;
+    color: var(--text-muted) !important;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0.55rem 0.75rem;
 }
 .table-dark td {
-    border-color: rgba(255,255,255,0.1) !important;
+    border-color: var(--border) !important;
+    padding: 0.5rem 0.75rem;
+    vertical-align: middle;
+    font-size: 0.75rem;
 }
-.table-dark tbody tr:hover {
-    background-color: rgba(255, 69, 0, 0.1) !important;
+.table-dark tbody tr:hover > td { background: rgba(255,69,0,0.04) !important; }
+.table-dark a { color: var(--accent) !important; text-decoration: none; }
+.table-dark a:hover { color: var(--accent-hi) !important; }
+.btn-group-sm .btn { padding: 0.2rem 0.5rem; font-size: 0.65rem; }
+.status-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
-.table-dark a {
-    color: #ff4500 !important;
+.status-dot::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
 }
-.table-dark a:hover {
-    color: #ff6b35 !important;
-    text-decoration: underline !important;
-}
-.modal-content {
-    border-radius: 12px;
-}
-.btn-group-sm .btn {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.875rem;
-}
+.status-enabled { color: var(--success); }
+.status-enabled::before { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.status-disabled { color: var(--text-muted); }
+.status-disabled::before { background: var(--text-muted); }
 </style>
 
 {% endblock %}

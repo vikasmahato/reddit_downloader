@@ -1,822 +1,802 @@
 {% extends "base.html" %}
 
-{% block title %}Gallery - Reddit Image Browser{% endblock %}
+{% block title %}Gallery — Reddit Vault{% endblock %}
 
 {% block content %}
-{% set stats = stats if stats is defined else {} %}
 <style>
-.deleted-image {
-    background-color: #ffe5e5 !important;
+/* ── STATS ROW ──────────────────────────────── */
+.vault-stats {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    margin-bottom: 0.6rem;
+    overflow: hidden;
 }
-.image-thumbnail {
+
+.vault-stat {
+    display: flex;
+    flex-direction: column;
+    padding: 0.55rem 1.25rem;
+    border-right: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.vault-stat-num {
+    font-family: var(--font-head);
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #f0f0f0;
+    line-height: 1;
+}
+
+.vault-stat-label {
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+.vault-sub-pills {
+    display: flex;
+    gap: 6px;
+    padding: 0 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+    flex: 1;
+}
+
+.sub-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.65rem;
+    letter-spacing: 0.03em;
+    transition: border-color 0.15s, color 0.15s;
+}
+.sub-pill:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.sub-pill .pill-count { color: var(--text-muted); font-size: 0.6rem; }
+
+/* ── FILTER BAR ─────────────────────────────── */
+.filter-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.45rem 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.filter-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.filter-sep { width: 1px; height: 14px; background: var(--border-2); flex-shrink: 0; }
+
+.filter-check-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    padding: 0 4px;
+}
+.filter-check-wrap input { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
+
+.filter-count {
+    margin-left: auto;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* ── GALLERY HEADER ─────────────────────────── */
+.gallery-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.gallery-bar-title {
+    font-family: var(--font-head);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.gallery-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+}
+
+/* ── MASONRY GRID ───────────────────────────── */
+.masonry-grid {
+    columns: 6 160px;
+    column-gap: 6px;
+}
+
+@media (max-width: 1600px) { .masonry-grid { columns: 5; } }
+@media (max-width: 1200px) { .masonry-grid { columns: 4; } }
+@media (max-width: 900px)  { .masonry-grid { columns: 3; } }
+@media (max-width: 576px)  { .masonry-grid { columns: 2; } }
+
+.masonry-item {
+    break-inside: avoid;
+    margin-bottom: 6px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--surface-2);
+    border-radius: var(--r);
+    display: block;
+}
+
+.masonry-img {
     width: 100%;
-    height: 200px;
-    object-fit: cover;
-    border-radius: 12px 12px 0 0;
-    background: linear-gradient(135deg, #232526 0%, #414345 100%) !important;
-    border: none !important;
+    height: auto;
+    display: block;
+    transition: transform 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
-.card-body {
-    padding: 0.75rem;
+
+.masonry-item:hover .masonry-img { transform: scale(1.05); }
+
+.masonry-placeholder {
+    height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 1.5rem;
 }
-.card-title {
-    font-size: 0.9em;
-    margin-bottom: 0.3em;
-    font-weight: 600;
-    line-height: 1.3;
+
+/* Carousel inside masonry */
+.masonry-item .carousel,
+.masonry-item .carousel-inner,
+.masonry-item .carousel-item { height: auto; }
+.masonry-item .carousel-item img,
+.masonry-item .carousel-item video { height: auto; min-height: 120px; }
+
+.multi-badge {
+    position: absolute;
+    top: 6px; right: 6px;
+    background: rgba(0,0,0,0.75);
+    color: rgba(255,255,255,0.85);
+    font-size: 0.58rem;
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    letter-spacing: 0.05em;
+}
+
+/* ── HOVER OVERLAY ──────────────────────────── */
+.masonry-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.45) 45%, transparent 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 10px 9px 9px;
+    opacity: 0;
+    transition: opacity 0.22s;
+}
+.masonry-item:hover .masonry-overlay { opacity: 1; }
+
+.masonry-flair {
+    display: inline-block;
+    font-size: 0.55rem;
+    background: rgba(96,165,250,0.7);
+    color: #fff;
+    padding: 1px 5px;
+    border-radius: 2px;
+    margin-bottom: 4px;
+    width: fit-content;
+    letter-spacing: 0.05em;
+}
+
+.masonry-title {
+    font-size: 0.68rem;
+    color: #fff;
+    margin: 0 0 4px;
+    line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    font-family: var(--font-mono);
 }
-.metadata-text {
-    font-size: 0.75em;
-    color: #b0b0b0 !important;
+
+.masonry-meta-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 0.58rem;
+    color: rgba(255,255,255,0.5);
 }
-.card-footer {
-    padding: 0.75rem;
-    background: rgba(35, 37, 38, 0.6) !important;
+
+.masonry-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.m-btn {
+    display: inline-block;
+    padding: 2px 7px;
+    font-size: 0.58rem;
+    font-family: var(--font-mono);
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 2px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s;
+    backdrop-filter: blur(6px);
+    letter-spacing: 0.04em;
+    line-height: 1.6;
 }
-.card-footer .btn {
-    font-size: 0.8em;
-    padding: 0.3em 0.8em;
-    border-radius: 6px;
+.m-btn:hover { background: rgba(255,255,255,0.22); color: #fff; text-decoration: none; }
+.m-btn-del {
+    background: rgba(239,68,68,0.2);
+    border-color: rgba(239,68,68,0.35);
+    color: #fca5a5;
 }
-.pagination {
-    --bs-pagination-bg: rgba(35, 37, 38, 0.8);
-    --bs-pagination-border-color: rgba(255,255,255,0.15);
-    --bs-pagination-color: #e0e0e0;
-    --bs-pagination-hover-bg: rgba(255, 69, 0, 0.2);
-    --bs-pagination-hover-color: #fff;
-    --bs-pagination-active-bg: #ff4500;
-    --bs-pagination-active-color: #fff;
-    --bs-pagination-focus-bg: rgba(255, 69, 0, 0.2);
-    --bs-pagination-focus-color: #fff;
+.m-btn-del:hover { background: rgba(239,68,68,0.4); color: #fca5a5; }
+
+/* ── LIST VIEW ──────────────────────────────── */
+.list-view { display: none; }
+
+.list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 5px;
+    transition: border-color 0.15s;
 }
-.page-link {
-    background-color: rgba(35, 37, 38, 0.8) !important;
-    color: #e0e0e0 !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
-    border-radius: 6px;
-    margin: 0 2px;
-}
-.page-link:hover, .page-link:focus {
-    background-color: rgba(255, 69, 0, 0.3) !important;
-    color: #fff !important;
-    border-color: #ff4500 !important;
-    transform: translateY(-1px);
-}
-.page-item.active .page-link {
-    background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
-    color: #fff !important;
-    border-color: #ff4500 !important;
-}
-.page-item.disabled .page-link {
-    background-color: rgba(35, 37, 38, 0.5) !important;
-    color: #666 !important;
-    border-color: rgba(255,255,255,0.1) !important;
-}
-.view-toggle-btn.active {
-    background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
-    color: #fff !important;
-    border-color: #ff4500 !important;
-}
-.list-view-container {
-    display: none;
-}
-.card-view-container {
+.list-item:hover { border-color: var(--border-2); }
+.list-item.selected { border-color: var(--accent) !important; background: rgba(255,69,0,0.05) !important; }
+
+.list-thumb {
+    width: 100px;
+    height: 66px;
+    object-fit: cover;
+    border-radius: var(--r);
+    flex-shrink: 0;
+    background: var(--surface-2);
     display: block;
 }
-.list-view-item {
-    background: rgba(35, 37, 38, 0.8) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px;
-    padding: 1rem;
-    margin-bottom: 0.75rem;
-    transition: all 0.2s ease;
+
+.list-thumb-placeholder {
+    width: 100px; height: 66px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-2); border-radius: var(--r);
+    color: var(--text-muted); font-size: 1.1rem; flex-shrink: 0;
 }
-.list-view-item:hover {
-    background: rgba(35, 37, 38, 0.95) !important;
-    transform: translateX(2px);
+
+.list-content { flex: 1; min-width: 0; }
+.list-title {
+    font-size: 0.78rem;
+    color: var(--text);
+    margin: 0 0 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.list-view-item.selected {
-    border-color: #ff4500 !important;
-    background: rgba(255, 69, 0, 0.15) !important;
-}
-.list-view-thumbnail-container {
-    position: relative;
+.list-meta { font-size: 0.62rem; color: var(--text-dim); display: flex; gap: 10px; flex-wrap: wrap; }
+.list-meta a { color: var(--accent); text-decoration: none; }
+.list-meta a:hover { color: var(--accent-hi); }
+
+.list-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.list-checkbox {
+    width: 15px; height: 15px;
+    accent-color: var(--accent);
+    cursor: pointer;
     flex-shrink: 0;
 }
-.list-view-thumbnail {
-    width: 120px;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 6px;
-    margin-right: 1rem;
-}
-.list-view-content {
-    flex: 1;
-}
-.list-view-checkbox {
-    margin-right: 0.75rem;
-    width: 20px;
-    height: 20px;
-    cursor: pointer;
-}
-.list-view-actions {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-}
 </style>
-<!-- Compact Inline Stats -->
-<div class="row mb-2">
-    <div class="col-12">
-        <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between">
-            <div class="d-flex flex-wrap gap-2">
-                <span class="stat-compact">
-                    <i class="fas fa-images"></i>
-                    <strong>{{ stats.total_images or 0 }}</strong> images
-                </span>
-                <span class="stat-compact">
-                    <i class="fas fa-hdd"></i>
-                    <strong>{{ "%.1f"|format((stats.total_size_mb or 0)/1024) }}</strong> GB
-                </span>
-                <span class="stat-compact">
-                    <i class="fas fa-users"></i>
-                    <strong>{{ stats.total_users or 0 }}</strong> authors
-                </span>
-                {% if stats.total_subreddits %}
-                <span class="stat-compact">
-                    <i class="fab fa-reddit"></i>
-                    <strong>{{ stats.total_subreddits }}</strong> subreddits
-                </span>
-                {% endif %}
-            </div>
-            {% if stats.subreddit_counts %}
-            <div class="d-flex flex-wrap gap-1">
-                {% set sorted_subs = stats.subreddit_counts.items() | list | sort(attribute='1', reverse=True) %}
-                {% for subreddit, count in sorted_subs[:5] %}
-                <a href="?subreddit={{ subreddit }}" class="btn btn-sm btn-outline-secondary" style="font-size:0.75rem; padding:0.2rem 0.5rem;">
-                    r/{{ subreddit[:15] }}{% if subreddit|length > 15 %}...{% endif %} <span class="badge bg-secondary">{{ count }}</span>
-                </a>
-                {% endfor %}
-            </div>
-            {% endif %}
-        </div>
+
+<!-- ── STATS ──────────────────────────────────── -->
+{% set stats = stats if stats is defined else {} %}
+<div class="vault-stats mb-2 fade-in">
+    <div class="vault-stat">
+        <span class="vault-stat-num">{{ stats.total_images or 0 }}</span>
+        <span class="vault-stat-label">Images</span>
     </div>
+    <div class="vault-stat">
+        <span class="vault-stat-num">{{ "%.1f"|format((stats.total_size_mb or 0)/1024) }}</span>
+        <span class="vault-stat-label">GB</span>
+    </div>
+    <div class="vault-stat">
+        <span class="vault-stat-num">{{ stats.total_users or 0 }}</span>
+        <span class="vault-stat-label">Authors</span>
+    </div>
+    {% if stats.total_subreddits %}
+    <div class="vault-stat">
+        <span class="vault-stat-num">{{ stats.total_subreddits }}</span>
+        <span class="vault-stat-label">Subs</span>
+    </div>
+    {% endif %}
+    {% if stats.subreddit_counts %}
+    <div class="vault-sub-pills">
+        {% set sorted_subs = stats.subreddit_counts.items() | list | sort(attribute='1', reverse=True) %}
+        {% for subreddit, count in sorted_subs[:7] %}
+        <a href="?subreddit={{ subreddit }}" class="sub-pill">
+            r/{{ subreddit[:14] }}{% if subreddit|length > 14 %}…{% endif %}
+            <span class="pill-count">{{ count }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
 </div>
 
-<!-- Subreddit Filter -->
-<div class="row mb-1">
-    <div class="col-12">
-        <div class="card filter-card" style="padding:0.25rem 0.25rem;">
-            <div class="card-body py-1 px-1">
-                <form method="GET" id="filterForm">
-                    <div class="row g-1 align-items-center">
-                        <div class="col-md-3">
-                            <label for="subreddit" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">Subreddit</label>
-                            <select class="form-select form-select-sm" id="subreddit" name="subreddit" style="font-size:0.90em;">
-                                <option value="">All Subreddits</option>
-                                {% for sr in subreddits %}
-                                    <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="user" class="form-label" style="font-size:0.90em; margin-bottom:0.1em;">User</label>
-                            <select class="form-select form-select-sm" id="user" name="user" style="font-size:0.90em;">
-                                <option value="">All Users</option>
-                                {% for u in users %}
-                                    <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-2 d-flex align-items-end">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="onlyEnabled" name="only_enabled" value="1" {% if only_enabled %}checked{% endif %}>
-                                <label class="form-check-label" for="onlyEnabled" style="font-size:0.85em;">
-                                    Only Enabled
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-1 d-flex align-items-end gap-1">
-                            <button type="submit" class="btn btn-primary btn-sm" title="Filter">
-                                <i class="fas fa-filter"></i>
-                            </button>
-                            {% if filter_subreddit or filter_user %}
-                            <a href="/" class="btn btn-outline-secondary btn-sm" title="Clear">
-                                <i class="fas fa-times"></i>
-                            </a>
-                            {% endif %}
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
+<!-- ── FILTER ─────────────────────────────────── -->
+<div class="filter-strip">
+    <form method="GET" id="filterForm" style="display:contents;">
+        <span class="filter-label">r/</span>
+        <select class="form-select form-select-sm" id="subreddit" name="subreddit" style="width:auto;min-width:130px;">
+            <option value="">all subreddits</option>
+            {% for sr in subreddits %}
+            <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
+            {% endfor %}
+        </select>
+
+        <div class="filter-sep"></div>
+
+        <span class="filter-label">u/</span>
+        <select class="form-select form-select-sm" id="user" name="user" style="width:auto;min-width:120px;">
+            <option value="">all users</option>
+            {% for u in users %}
+            <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
+            {% endfor %}
+        </select>
+
+        <div class="filter-sep"></div>
+
+        <label class="filter-check-wrap">
+            <input type="checkbox" id="onlyEnabled" name="only_enabled" value="1" {% if only_enabled %}checked{% endif %}>
+            <span>enabled only</span>
+        </label>
+
+        <button type="submit" class="btn btn-sm btn-primary" title="Apply filter">
+            <i class="fas fa-filter"></i>
+        </button>
+        {% if filter_subreddit or filter_user %}
+        <a href="/" class="btn btn-sm btn-outline-secondary" title="Clear filters">
+            <i class="fas fa-times"></i>
+        </a>
+        {% endif %}
+
+        <span class="filter-count">{{ images|length }} shown</span>
+    </form>
 </div>
 
-
-<!-- Image Gallery -->
-<div class="row mb-4 fade-in" id="gallerySection">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 class="mb-0"><i class="fas fa-images"></i> Gallery{% if filter_user %} - u/{{ filter_user }}{% endif %}</h4>
-            <div class="d-flex align-items-center gap-2">
-                {% if filter_user %}
-                <button type="button" class="btn btn-sm btn-danger" onclick="deleteAllUserPosts('{{ filter_user }}')" title="Delete All Posts by {{ filter_user }}">
-                    <i class="fas fa-trash-alt"></i> Delete All Posts
-                </button>
-                {% endif %}
-                <span class="stat-compact">
-                    <strong id="selectedCount">0</strong> selected
-                </span>
-                <div class="btn-group" role="group" aria-label="View toggle">
-                    <button type="button" class="btn btn-sm btn-outline-primary view-toggle-btn active" data-view="card" title="Card View">
-                        <i class="fas fa-th"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-outline-primary view-toggle-btn" data-view="list" title="List View">
-                        <i class="fas fa-list"></i>
-                    </button>
-                </div>
-                <button type="button" class="btn btn-sm btn-danger" id="deleteSelectedBtn" style="display:none;" title="Delete Selected">
-                    <i class="fas fa-trash"></i> Delete Selected
-                </button>
-                <span class="stat-compact">
-                    <strong>{{ images|length }}</strong> shown
-                </span>
-            </div>
-        </div>
+<!-- ── GALLERY BAR ────────────────────────────── -->
+<div class="gallery-bar">
+    <span class="gallery-bar-title">
+        {% if filter_user %}u/{{ filter_user }}{% else %}Gallery{% endif %}
+    </span>
+    <div class="gallery-bar-actions">
+        {% if filter_user %}
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ filter_user }}')">
+            <i class="fas fa-trash-alt"></i> Delete All
+        </button>
+        {% endif %}
+        <span class="stat-compact" id="selectedBadge" style="display:none;">
+            <strong id="selectedCount">0</strong> selected
+        </span>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="deleteSelectedBtn" style="display:none;">
+            <i class="fas fa-trash"></i> Delete
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary view-toggle-btn active" data-view="card" title="Grid view">
+            <i class="fas fa-th"></i>
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary view-toggle-btn" data-view="list" title="List view">
+            <i class="fas fa-list"></i>
+        </button>
     </div>
 </div>
 
 {% if images %}
-<!-- Card View -->
-<div class="card-view-container">
-<div class="row">
-    {% for image in images %}
-    <div class="col-md-3 col-6 mb-4">
-        <div class="card h-100" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
-            <div class="card-body p-0">
-                {% set post_images = image.post_images if image.post_images else [image] %}
-                {% set image_count = image.image_count if image.image_count else 1 %}
-                
-                {% if image_count > 1 %}
-                    {# Carousel for multiple images #}
-                    <div id="carousel-{{ image.post_id }}" class="carousel slide" data-bs-ride="false" style="height:200px;">
-                        <div class="carousel-inner" style="height:100%;">
-                            {% for post_img in post_images %}
-                            <div class="carousel-item {% if loop.first %}active{% endif %}" style="height:100%;">
-                                {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
-                                {% if post_img.thumb_path %}
-                                    {# Use local thumbnail #}
-                                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" class="image-thumbnail d-block w-100" alt="{{ image.title or 'Image' }}" style="height:100%;object-fit:cover;" loading="lazy">
-                                {% elif post_img.web_path %}
-                                    {# Fallback to full image if no thumbnail #}
-                                    {% if ext == 'mp4' %}
-                                        <video controls class="image-thumbnail" style="width:100%;height:100%;object-fit:cover;">
-                                            <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
-                                        </video>
-                                    {% else %}
-                                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="image-thumbnail d-block w-100" alt="{{ image.title or 'Image' }}" style="height:100%;object-fit:cover;" loading="lazy">
-                                    {% endif %}
-                                {% elif post_img.url %}
-                                    {# Fallback to remote URL #}
-                                    {% set thumb = post_img.url.split(',')[0].strip() %}
-                                    {% if ext == 'mp4' %}
-                                        <video controls class="image-thumbnail lazy-load" style="width:100%;height:100%;object-fit:cover;" data-src="{{ thumb }}">
-                                            Your browser does not support the video tag.
-                                        </video>
-                                    {% else %}
-                                        <img data-src="{{ thumb }}" class="image-thumbnail lazy-load d-block w-100" alt="{{ image.title or 'Image' }}" loading="lazy" style="height:100%;object-fit:cover;">
-                                    {% endif %}
-                                {% else %}
-                                    <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:100%;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
-                                        <small class="text-muted"><i class="fas fa-image"></i> Not available</small>
-                                    </div>
-                                {% endif %}
-                            </div>
-                            {% endfor %}
-                        </div>
-                        {% if image_count > 1 %}
-                        <button class="carousel-control-prev" type="button" data-bs-target="#carousel-{{ image.post_id }}" data-bs-slide="prev" style="width:30px;height:30px;top:50%;transform:translateY(-50%);left:5px;">
-                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                            <span class="visually-hidden">Previous</span>
-                        </button>
-                        <button class="carousel-control-next" type="button" data-bs-target="#carousel-{{ image.post_id }}" data-bs-slide="next" style="width:30px;height:30px;top:50%;transform:translateY(-50%);right:5px;">
-                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                            <span class="visually-hidden">Next</span>
-                        </button>
-                        <div class="position-absolute top-0 end-0 m-1">
-                            <span class="badge bg-dark opacity-75">{{ image_count }} <i class="fas fa-images"></i></span>
-                        </div>
-                        {% endif %}
-                    </div>
-                {% else %}
-                    {# Single image #}
-                    {% set ext = image.filename.split('.')[-1].lower() %}
-                    {% if image.thumb_path %}
-                        {# Use local thumbnail #}
-                        <img src="{{ url_for('serve_thumbnail', filename=image.thumb_path) }}" class="image-thumbnail" alt="{{ image.title or 'Image' }}" style="width:100%;height:200px;object-fit:cover;" loading="lazy">
-                    {% elif image.web_path %}
-                        {# Fallback to full image if no thumbnail #}
-                        {% if ext == 'mp4' %}
-                            <video controls class="image-thumbnail" style="width:100%;height:200px;object-fit:cover;">
-                                <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
-                            </video>
-                        {% else %}
-                            <img src="{{ url_for('static', filename=image.web_path) }}" class="image-thumbnail" alt="{{ image.title or 'Image' }}" style="width:100%;height:200px;object-fit:cover;" loading="lazy">
-                        {% endif %}
-                    {% elif image.url %}
-                        {# Fallback to remote URL #}
-                        {% set thumb = image.url.split(',')[0].strip() %}
-                        {% if ext == 'mp4' %}
-                            <video controls class="image-thumbnail lazy-load" style="width:100%;height:200px;object-fit:cover;" data-src="{{ thumb }}">
-                                Your browser does not support the video tag.
-                            </video>
-                        {% else %}
-                            <img data-src="{{ thumb }}" class="image-thumbnail lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy" style="width:100%;height:200px;object-fit:cover;">
-                        {% endif %}
+
+<!-- ── MASONRY / CARD VIEW ───────────────────── -->
+<div class="masonry-grid" id="cardView">
+{% for image in images %}
+{% set post_images = image.post_images if image.post_images else [image] %}
+{% set image_count = image.image_count if image.image_count else 1 %}
+<div class="masonry-item" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
+
+    {% if image_count > 1 %}
+    <!-- Carousel -->
+    <div id="carousel-{{ image.post_id }}" class="carousel slide" data-bs-ride="false">
+        <div class="carousel-inner">
+            {% for post_img in post_images %}
+            <div class="carousel-item {% if loop.first %}active{% endif %}">
+                {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
+                {% if post_img.thumb_path %}
+                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+                {% elif post_img.web_path %}
+                    {% if ext == 'mp4' %}
+                        <video controls class="masonry-img"><source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4"></video>
                     {% else %}
-                        <div class="image-thumbnail d-flex align-items-center justify-content-center" style="height:200px;background:linear-gradient(135deg, #232526 0%, #414345 100%);">
-                            <small class="text-muted"><i class="fas fa-image"></i> Not available</small>
-                        </div>
+                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
                     {% endif %}
+                {% elif post_img.url %}
+                    <img data-src="{{ post_img.url.split(',')[0].strip() }}" class="masonry-img lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy">
+                {% else %}
+                    <div class="masonry-placeholder"><i class="fas fa-image"></i></div>
                 {% endif %}
             </div>
-            <div class="card-footer">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div class="flex-grow-1">
-                        {% if image.flair %}
-                        <span class="badge bg-info mb-1" style="font-size:0.7em;">{{ image.flair }}</span>
-                        {% endif %}
-                        <span class="card-title d-block">{{ image.title or image.filename }}</span>
-                    </div>
-                    <div class="btn-group btn-group-sm" role="group">
-                        {% if image.post_id %}
-                        <a href="/details/{{ image.post_id }}" class="btn btn-outline-primary">Details</a>
-                        <button type="button" class="btn btn-outline-warning" onclick="deletePost({{ image.post_id }}, '{{ image.title or image.filename }}')" title="Delete Post">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ image.author }}')" title="Delete Post by user">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
+            {% endfor %}
         </div>
+        <button class="carousel-control-prev" type="button" data-bs-target="#carousel-{{ image.post_id }}" data-bs-slide="prev">
+            <span class="carousel-control-prev-icon"></span>
+        </button>
+        <button class="carousel-control-next" type="button" data-bs-target="#carousel-{{ image.post_id }}" data-bs-slide="next">
+            <span class="carousel-control-next-icon"></span>
+        </button>
+        <span class="multi-badge">{{ image_count }} <i class="fas fa-clone"></i></span>
     </div>
-    {% endfor %}
-</div>
-</div>
 
-<!-- List View -->
-<div class="list-view-container">
-    {% for image in images %}
-    <div class="list-view-item" data-post-id="{{ image.post_id }}">
-        <div class="d-flex align-items-center">
+    {% else %}
+    <!-- Single image -->
+    {% set ext = image.filename.split('.')[-1].lower() if image.filename else 'jpg' %}
+    {% if image.thumb_path %}
+        <img src="{{ url_for('serve_thumbnail', filename=image.thumb_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+    {% elif image.web_path %}
+        {% if ext == 'mp4' %}
+            <video controls class="masonry-img"><source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4"></video>
+        {% else %}
+            <img src="{{ url_for('static', filename=image.web_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+        {% endif %}
+    {% elif image.url %}
+        {% set thumb = image.url.split(',')[0].strip() %}
+        {% if ext == 'mp4' %}
+            <video controls class="masonry-img lazy-load" data-src="{{ thumb }}"></video>
+        {% else %}
+            <img data-src="{{ thumb }}" class="masonry-img lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy">
+        {% endif %}
+    {% else %}
+        <div class="masonry-placeholder"><i class="fas fa-image"></i></div>
+    {% endif %}
+    {% endif %}
+
+    <!-- Hover overlay -->
+    <div class="masonry-overlay">
+        {% if image.flair %}<span class="masonry-flair">{{ image.flair }}</span>{% endif %}
+        <p class="masonry-title">{{ image.title or image.filename or 'Untitled' }}</p>
+        <div class="masonry-meta-row">
+            <span>r/{{ image.subreddit or '?' }}</span>
+            {% if image.score is not none %}<span><i class="fas fa-arrow-up"></i> {{ image.score }}</span>{% endif %}
+            {% if image.comment_count %}<span><i class="fas fa-comment"></i> {{ image.comment_count }}</span>{% endif %}
+        </div>
+        <div class="masonry-actions">
             {% if image.post_id %}
-            <input type="checkbox" class="list-view-checkbox post-checkbox" data-post-id="{{ image.post_id }}" aria-label="Select post">
+            <a href="/details/{{ image.post_id }}" class="m-btn">Details</a>
+            {% if image.author %}
+            <a href="?user={{ image.author }}" class="m-btn">u/{{ image.author }}</a>
             {% endif %}
-            <div class="list-view-thumbnail-container">
-                {% set post_images = image.post_images if image.post_images else [image] %}
-                {% set image_count = image.image_count if image.image_count else 1 %}
-                {% set first_img = post_images[0] %}
-                {% set ext = first_img.filename.split('.')[-1].lower() if first_img.filename else 'jpg' %}
-                {% if first_img.thumb_path %}
-                    <img src="{{ url_for('serve_thumbnail', filename=first_img.thumb_path) }}" class="list-view-thumbnail" alt="{{ image.title or 'Image' }}" loading="lazy">
-                {% elif first_img.web_path %}
-                    {% if ext == 'mp4' %}
-                        <video controls class="list-view-thumbnail" style="object-fit:cover;">
-                            <source src="{{ url_for('static', filename=first_img.web_path) }}" type="video/mp4">
-                        </video>
-                    {% else %}
-                        <img src="{{ url_for('static', filename=first_img.web_path) }}" class="list-view-thumbnail" alt="{{ image.title or 'Image' }}" loading="lazy">
-                    {% endif %}
-                {% elif first_img.url %}
-                    {% set thumb = first_img.url.split(',')[0].strip() %}
-                    {% if ext == 'mp4' %}
-                        <video controls class="list-view-thumbnail lazy-load" data-src="{{ thumb }}" style="object-fit:cover;">
-                            Your browser does not support the video tag.
-                        </video>
-                    {% else %}
-                        <img data-src="{{ thumb }}" class="list-view-thumbnail lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy">
-                    {% endif %}
-                {% else %}
-                    <div class="list-view-thumbnail d-flex align-items-center justify-content-center" style="background:linear-gradient(135deg, #232526 0%, #414345 100%);">
-                        <small class="text-muted"><i class="fas fa-image"></i></small>
-                    </div>
-                {% endif %}
-                {% if image_count > 1 %}
-                <span class="badge bg-dark" style="position:absolute;top:2px;right:2px;">{{ image_count }}</span>
-                {% endif %}
-            </div>
-            <div class="list-view-content">
-                <h6 class="mb-1">
-                    {% if image.flair %}
-                    <span class="badge bg-info me-1" style="font-size:0.75em;">{{ image.flair }}</span>
-                    {% endif %}
-                    {{ image.title or image.filename or 'Untitled' }}
-                </h6>
-                <div class="metadata-text">
-                    <small>
-                        <i class="fas fa-user"></i> 
-                        {% if image.author %}
-                        <a href="?user={{ image.author }}" class="text-decoration-none" style="color: #ff4500;" title="View all posts by {{ image.author }}">
-                            {{ image.author }}
-                        </a>
-                        {% else %}
-                        Unknown
-                        {% endif %}
-                        <span class="ms-2"><i class="fab fa-reddit"></i> r/{{ image.subreddit or 'unknown' }}</span>
-                        {% if image.score is not none %}
-                        <span class="ms-2"><i class="fas fa-arrow-up"></i> {{ image.score }}</span>
-                        {% endif %}
-                        {% if image.comment_count %}
-                        <span class="ms-2"><i class="fas fa-comments"></i> {{ image.comment_count }}</span>
-                        {% endif %}
-                        {% if image.created_utc %}
-                        <span class="ms-2"><i class="fas fa-clock"></i> {{ image.created_utc|format_datetime }}</span>
-                        {% endif %}
-                    </small>
-                </div>
-            </div>
-            <div class="list-view-actions">
-                {% if image.post_id %}
-                {% if image.author %}
-                <a href="?user={{ image.author }}" class="btn btn-sm btn-outline-success" title="View all posts by {{ image.author }}">
-                    <i class="fas fa-user"></i> User
-                </a>
-                {% endif %}
-                <a href="/details/{{ image.post_id }}" class="btn btn-sm btn-outline-primary" title="View Details">
-                    <i class="fas fa-info-circle"></i> Details
-                </a>
-                <button type="button" class="btn btn-sm btn-outline-warning" onclick="deletePost({{ image.post_id }}, '{{ (image.title or image.filename)|replace("'", "\\'") }}')" title="Delete Post">
-                    <i class="fas fa-trash"></i>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ image.author }}')" title="Delete Post by user">
-                    <i class="fas fa-trash"></i>
-                </button>
-                {% endif %}
-            </div>
+            <button class="m-btn m-btn-del" onclick="event.stopPropagation();deletePost({{ image.post_id }},'{{ (image.title or image.filename or '')|replace("'","\\'")|truncate(40) }}')">Del</button>
+            {% endif %}
         </div>
     </div>
-    {% endfor %}
+</div>
+{% endfor %}
 </div>
 
-<!-- Pagination -->
-<div class="row">
-    <div class="col-12 d-flex justify-content-center">
-        <nav aria-label="Page navigation">
-            <ul class="pagination">
-                {% if current_page > 1 %}
-                <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page - 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Previous</a>
-                </li>
-                {% endif %}
-                
-                {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
-                <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                    <a class="page-link" href="?page={{ page_num }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">{{ page_num }}</a>
-                </li>
-                {% endfor %}
-                
-                {% if images|length == 20 %}
-                <li class="page-item">
-                    <a class="page-link" href="?page={{ current_page + 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}#gallerySection">Next</a>
-                </li>
-                {% endif %}
-            </ul>
-        </nav>
+<!-- ── LIST VIEW ─────────────────────────────── -->
+<div class="list-view" id="listView">
+{% for image in images %}
+{% set post_images = image.post_images if image.post_images else [image] %}
+{% set image_count = image.image_count if image.image_count else 1 %}
+{% set first_img = post_images[0] %}
+{% set ext = first_img.filename.split('.')[-1].lower() if first_img.filename else 'jpg' %}
+<div class="list-item" data-post-id="{{ image.post_id }}">
+    {% if image.post_id %}
+    <input type="checkbox" class="list-checkbox post-checkbox" data-post-id="{{ image.post_id }}">
+    {% endif %}
+
+    <!-- Thumbnail -->
+    <div style="position:relative;flex-shrink:0;">
+    {% if first_img.thumb_path %}
+        <img src="{{ url_for('serve_thumbnail', filename=first_img.thumb_path) }}" class="list-thumb" alt="" loading="lazy">
+    {% elif first_img.web_path %}
+        {% if ext == 'mp4' %}
+            <video class="list-thumb" style="object-fit:cover;"><source src="{{ url_for('static', filename=first_img.web_path) }}" type="video/mp4"></video>
+        {% else %}
+            <img src="{{ url_for('static', filename=first_img.web_path) }}" class="list-thumb" alt="" loading="lazy">
+        {% endif %}
+    {% elif first_img.url %}
+        <img data-src="{{ first_img.url.split(',')[0].strip() }}" class="list-thumb lazy-load" alt="" loading="lazy">
+    {% else %}
+        <div class="list-thumb-placeholder"><i class="fas fa-image"></i></div>
+    {% endif %}
+    {% if image_count > 1 %}
+    <span style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.7);color:#fff;font-size:0.55rem;padding:1px 5px;border-radius:2px;">{{ image_count }}</span>
+    {% endif %}
     </div>
+
+    <div class="list-content">
+        <p class="list-title">
+            {% if image.flair %}<span class="badge bg-info me-1">{{ image.flair }}</span>{% endif %}
+            {{ image.title or image.filename or 'Untitled' }}
+        </p>
+        <div class="list-meta">
+            {% if image.author %}
+            <span><i class="fas fa-user"></i> <a href="?user={{ image.author }}">{{ image.author }}</a></span>
+            {% endif %}
+            <span><i class="fab fa-reddit"></i> r/{{ image.subreddit or 'unknown' }}</span>
+            {% if image.score is not none %}<span><i class="fas fa-arrow-up"></i> {{ image.score }}</span>{% endif %}
+            {% if image.comment_count %}<span><i class="fas fa-comments"></i> {{ image.comment_count }}</span>{% endif %}
+            {% if image.created_utc %}<span><i class="fas fa-clock"></i> {{ image.created_utc|format_datetime }}</span>{% endif %}
+        </div>
+    </div>
+
+    <div class="list-actions">
+        {% if image.post_id %}
+        {% if image.author %}
+        <a href="?user={{ image.author }}" class="btn btn-sm btn-outline-secondary" title="Filter by user"><i class="fas fa-user"></i></a>
+        {% endif %}
+        <a href="/details/{{ image.post_id }}" class="btn btn-sm btn-outline-secondary" title="Details"><i class="fas fa-info-circle"></i></a>
+        <button class="btn btn-sm btn-outline-danger" onclick="deletePost({{ image.post_id }},'{{ (image.title or image.filename or '')|replace("'","\\'")|truncate(40) }}')" title="Delete"><i class="fas fa-trash"></i></button>
+        {% if image.author %}
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ image.author }}')" title="Delete all by user"><i class="fas fa-user-times"></i></button>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- ── PAGINATION ─────────────────────────────── -->
+<div class="d-flex justify-content-center mt-4">
+    <nav>
+        <ul class="pagination pagination-sm">
+            {% if current_page > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ current_page - 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">‹ Prev</a>
+            </li>
+            {% endif %}
+            {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
+            <li class="page-item {% if page_num == current_page %}active{% endif %}">
+                <a class="page-link" href="?page={{ page_num }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">{{ page_num }}</a>
+            </li>
+            {% endfor %}
+            {% if images|length == 20 %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ current_page + 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">Next ›</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
 </div>
 
 {% else %}
-<div class="row">
-    <div class="col-12">
-        <div class="alert alert-info text-center">
-            <i class="fas fa-info-circle fa-3x mb-3"></i>
-            <h4>No images found</h4>
-            <p>Try adjusting your search filters or download some images first!</p>
-        </div>
-    </div>
+<div class="alert alert-info text-center py-5">
+    <i class="fas fa-images fa-2x mb-3 d-block" style="color:var(--text-muted);"></i>
+    <strong>No images found</strong>
+    <p class="mb-0 mt-1" style="font-size:0.78rem;color:var(--text-dim);">Try adjusting your filters or download some images first.</p>
 </div>
 {% endif %}
 
 <script>
-// View toggle functionality
-let currentView = localStorage.getItem('viewPreference') || 'card';
+let currentView = localStorage.getItem('viewPref') || 'card';
 
 function switchView(view) {
-    const cardView = document.querySelector('.card-view-container');
-    const listView = document.querySelector('.list-view-container');
-    const toggleButtons = document.querySelectorAll('.view-toggle-btn');
+    const cardView = document.getElementById('cardView');
+    const listView = document.getElementById('listView');
     const deleteBtn = document.getElementById('deleteSelectedBtn');
-    
-    // Update active button
-    toggleButtons.forEach(btn => {
-        if (btn.dataset.view === view) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
+    const selectedBadge = document.getElementById('selectedBadge');
+
+    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
     });
-    
-    // Toggle views
+
     if (view === 'list') {
-        cardView.style.display = 'none';
-        listView.style.display = 'block';
-        deleteBtn.style.display = 'inline-block';
+        if (cardView) cardView.style.display = 'none';
+        if (listView) listView.style.display = 'block';
+        if (deleteBtn) deleteBtn.style.display = 'inline-block';
+        if (selectedBadge) selectedBadge.style.display = 'inline-flex';
     } else {
-        cardView.style.display = 'block';
-        listView.style.display = 'none';
-        deleteBtn.style.display = 'none';
-        // Clear selections when switching to card view
+        if (cardView) cardView.style.display = 'block';
+        if (listView) listView.style.display = 'none';
+        if (deleteBtn) deleteBtn.style.display = 'none';
+        if (selectedBadge) selectedBadge.style.display = 'none';
         document.querySelectorAll('.post-checkbox').forEach(cb => {
             cb.checked = false;
-            updateSelectedCount();
+            const item = cb.closest('.list-item');
+            if (item) item.classList.remove('selected');
         });
+        updateSelectedCount();
     }
-    
-    // Save preference
-    localStorage.setItem('viewPreference', view);
+
+    localStorage.setItem('viewPref', view);
     currentView = view;
 }
 
-// Initialize view on page load
+function updateSelectedCount() {
+    const n = document.querySelectorAll('.post-checkbox:checked').length;
+    const el = document.getElementById('selectedCount');
+    if (el) el.textContent = n;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    // Set initial view
     switchView(currentView);
-    
-    // View toggle button handlers
+
     document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            switchView(this.dataset.view);
-        });
+        btn.addEventListener('click', () => switchView(btn.dataset.view));
     });
-    
-    // Checkbox change handler
-    document.querySelectorAll('.post-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', function() {
-            const listItem = this.closest('.list-view-item');
-            if (this.checked) {
-                listItem.classList.add('selected');
-            } else {
-                listItem.classList.remove('selected');
-            }
+
+    document.querySelectorAll('.post-checkbox').forEach(cb => {
+        cb.addEventListener('change', function() {
+            const item = this.closest('.list-item');
+            if (item) item.classList.toggle('selected', this.checked);
             updateSelectedCount();
         });
     });
-    
-    // Delete selected button handler
-    document.getElementById('deleteSelectedBtn').addEventListener('click', function() {
-        deleteSelectedPosts();
+
+    const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+    if (deleteSelectedBtn) {
+        deleteSelectedBtn.addEventListener('click', deleteSelectedPosts);
+    }
+
+    // Auto-submit filter on change
+    ['subreddit', 'user', 'onlyEnabled'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', () => document.getElementById('filterForm').submit());
     });
 });
-
-function updateSelectedCount() {
-    const selected = document.querySelectorAll('.post-checkbox:checked').length;
-    document.getElementById('selectedCount').textContent = selected;
-}
 
 function deleteSelectedPosts() {
-    const selectedCheckboxes = document.querySelectorAll('.post-checkbox:checked');
-    if (selectedCheckboxes.length === 0) {
-        alert('No posts selected');
-        return;
-    }
-    
-    const postIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.postId));
+    const checked = document.querySelectorAll('.post-checkbox:checked');
+    if (!checked.length) { alert('No posts selected'); return; }
+    const postIds = Array.from(checked).map(cb => parseInt(cb.dataset.postId));
     const count = postIds.length;
-    
-    if (!confirm(`Are you sure you want to delete ${count} post(s)?\n\nThis will:\n- Delete the post(s) from the database\n- If images are not linked to other posts, they will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
-        return;
-    }
-    
-    // Disable button and show loading state
-    const deleteBtn = document.getElementById('deleteSelectedBtn');
-    const originalHTML = deleteBtn.innerHTML;
-    deleteBtn.disabled = true;
-    deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-    
+
+    if (!confirm(`Delete ${count} post(s)? This cannot be undone.`)) return;
+
+    const btn = document.getElementById('deleteSelectedBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
     fetch('/api/delete-posts-batch', {
         method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ post_ids: postIds })
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
         if (data.success) {
-            // Remove deleted items from view
-            postIds.forEach(postId => {
-                const listItem = document.querySelector(`.list-view-item[data-post-id="${postId}"]`);
-                const cardItem = document.querySelector(`.card[data-post-id="${postId}"]`)?.closest('.col-md-3, .col-6');
-                if (listItem) {
-                    listItem.style.transition = 'opacity 0.3s';
-                    listItem.style.opacity = '0';
-                    setTimeout(() => listItem.remove(), 300);
-                }
-                if (cardItem) {
-                    cardItem.style.transition = 'opacity 0.3s';
-                    cardItem.style.opacity = '0';
-                    setTimeout(() => cardItem.remove(), 300);
-                }
+            postIds.forEach(id => {
+                const li = document.querySelector(`.list-item[data-post-id="${id}"]`);
+                const card = document.querySelector(`.masonry-item[data-post-id="${id}"]`);
+                [li, card].forEach(el => {
+                    if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }
+                });
             });
-            
-            // Reset UI
             updateSelectedCount();
-            deleteBtn.disabled = false;
-            deleteBtn.innerHTML = originalHTML;
-            
-            // Show success message
-            const alert = document.createElement('div');
-            alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
-            alert.style.zIndex = '9999';
-            alert.innerHTML = `<strong>Success!</strong> ${count} post(s) deleted successfully.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
-            document.body.appendChild(alert);
-            setTimeout(() => alert.remove(), 3000);
-            
-            // Reload page after a short delay to refresh the count
-            setTimeout(() => {
-                window.location.reload();
-            }, 1500);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-trash"></i> Delete';
+            showToast(`${count} post(s) deleted`);
+            setTimeout(() => window.location.reload(), 1500);
         } else {
-            alert('Error: ' + (data.error || 'Failed to delete posts'));
-            deleteBtn.disabled = false;
-            deleteBtn.innerHTML = originalHTML;
+            alert('Error: ' + (data.error || 'Failed'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-trash"></i> Delete';
         }
     })
-    .catch(error => {
-        alert('Error: ' + error);
-        deleteBtn.disabled = false;
-        deleteBtn.innerHTML = originalHTML;
+    .catch(err => {
+        alert('Error: ' + err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-trash"></i> Delete';
     });
 }
 
-// Auto-submit form on subreddit change
-document.addEventListener('DOMContentLoaded', function () {
-    const form = document.getElementById('filterForm');
-    const autoSubmitIds = ['subreddit', 'user', 'onlyEnabled'];
-
-    autoSubmitIds.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('change', () => form.submit());
-        }
-    });
-
-    if (window.location.hash === '#gallerySection') {
-        const gallery = document.getElementById('gallerySection');
-        if (gallery) {
-            gallery.scrollIntoView({ behavior: 'smooth' });
-        }
-    }
-});
-
-// Delete all posts by a user
 function deleteAllUserPosts(username) {
-    if (!username) {
-        alert('Username is required');
-        return;
-    }
-    
-    if (!confirm(`Are you sure you want to delete ALL posts by user "${username}"?\n\nThis will:\n- Delete all posts from this user from the database\n- If images are not linked to other posts, they will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
-        return;
-    }
-    
-    // Show loading state
-    const deleteBtn = event.target.closest('button');
-    const originalHTML = deleteBtn.innerHTML;
-    deleteBtn.disabled = true;
-    deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-    
+    if (!username) { alert('Username required'); return; }
+    if (!confirm(`Delete ALL posts by "${username}"? This cannot be undone.`)) return;
+
+    const btn = event.target.closest('button');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+
     fetch(`/api/delete-posts-by-user/${encodeURIComponent(username)}`, {
         method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
         if (data.success) {
-            // Show success message
-            const alert = document.createElement('div');
-            alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
-            alert.style.zIndex = '9999';
-            alert.innerHTML = `<strong>Success!</strong> ${data.deleted_count} post(s) deleted successfully for user ${username}.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
-            document.body.appendChild(alert);
-            setTimeout(() => alert.remove(), 3000);
-            
-            // TODO: remove the parent div containing the delete button if we are in the user filter view
-
+            showToast(`${data.deleted_count} post(s) deleted for ${username}`);
+            setTimeout(() => window.location.reload(), 1500);
         } else {
-            alert('Error: ' + (data.error || 'Failed to delete posts'));
-            deleteBtn.disabled = false;
-            deleteBtn.innerHTML = originalHTML;
+            alert('Error: ' + (data.error || 'Failed'));
+            if (btn) { btn.disabled = false; btn.innerHTML = orig; }
         }
     })
-    .catch(error => {
-        alert('Error: ' + error);
-        deleteBtn.disabled = false;
-        deleteBtn.innerHTML = originalHTML;
+    .catch(err => {
+        alert('Error: ' + err);
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
     });
 }
 
-// Enhanced lazy loading and error handling
-document.addEventListener('DOMContentLoaded', function() {
-    // Handle lazy loaded images
-    const lazyImages = document.querySelectorAll('img[data-src]');
-    if ('IntersectionObserver' in window) {
-        const imageObserver = new IntersectionObserver((entries, observer) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const img = entry.target;
-                    img.src = img.dataset.src;
-                    img.classList.add('loaded');
-                    img.removeAttribute('data-src');
-                    observer.unobserve(img);
-                }
-            });
-        }, { rootMargin: '50px' });
-
-        lazyImages.forEach(img => imageObserver.observe(img));
-    } else {
-        // Fallback for browsers without IntersectionObserver
-        lazyImages.forEach(img => {
-            img.src = img.dataset.src;
-            img.classList.add('loaded');
-        });
-    }
-
-    // Error handling for images
-    document.querySelectorAll('.image-thumbnail').forEach(img => {
-        img.addEventListener('error', function() {
-            this.style.background = 'linear-gradient(135deg, #232526 0%, #414345 100%)';
-            this.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;"><i class="fas fa-exclamation-triangle"></i></div>';
-        });
-    });
-
-    // Add fade-in animation to cards
-    const cards = document.querySelectorAll('.card');
-    cards.forEach((card, index) => {
-        card.style.animationDelay = `${index * 0.05}s`;
-        card.classList.add('fade-in');
-    });
-});
-
-// Delete post function
 function deletePost(postId, title) {
-    if (!confirm(`Are you sure you want to delete "${title}"?\n\nThis will:\n- Delete the post from the database\n- If the image is not linked to other posts, it will be deleted and moved to /deleted folder\n\nThis action cannot be undone!`)) {
-        return;
-    }
-    
+    if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
+
     fetch(`/api/delete-post/${postId}`, {
         method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
         if (data.success) {
-            // Remove from card view
-            const card = document.querySelector(`.card[data-post-id="${postId}"]`)?.closest('.col-md-3, .col-6');
-            if (card) {
-                card.style.transition = 'opacity 0.3s';
-                card.style.opacity = '0';
-                setTimeout(() => card.remove(), 300);
-            }
-            
-            // Remove from list view
-            const listItem = document.querySelector(`.list-view-item[data-post-id="${postId}"]`);
-            if (listItem) {
-                listItem.style.transition = 'opacity 0.3s';
-                listItem.style.opacity = '0';
-                setTimeout(() => {
-                    listItem.remove();
-                    updateSelectedCount();
-                }, 300);
-            }
-            
-            // Show success message
-            const alert = document.createElement('div');
-            alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
-            alert.style.zIndex = '9999';
-            alert.innerHTML = '<strong>Success!</strong> Post deleted successfully.<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
-            document.body.appendChild(alert);
-            setTimeout(() => alert.remove(), 3000);
+            const card = document.querySelector(`.masonry-item[data-post-id="${postId}"]`);
+            const li = document.querySelector(`.list-item[data-post-id="${postId}"]`);
+            [card, li].forEach(el => {
+                if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }
+            });
+            showToast('Post deleted');
         } else {
-            alert('Error: ' + (data.error || 'Failed to delete post'));
+            alert('Error: ' + (data.error || 'Failed'));
         }
     })
-    .catch(error => {
-        alert('Error: ' + error);
-    });
+    .catch(err => alert('Error: ' + err));
 }
+
+function showToast(msg) {
+    const t = document.createElement('div');
+    t.className = 'position-fixed top-0 start-50 translate-middle-x mt-3';
+    t.style.cssText = 'z-index:9999;background:var(--surface);border:1px solid var(--border-2);color:var(--text);padding:8px 18px;border-radius:var(--r);font-size:0.75rem;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,0.5);';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2800);
+}
+
+// Enhanced lazy loading
+document.addEventListener('DOMContentLoaded', function() {
+    if ('IntersectionObserver' in window) {
+        const obs = new IntersectionObserver((entries, o) => {
+            entries.forEach(e => {
+                if (e.isIntersecting) {
+                    const img = e.target;
+                    if (img.dataset.src) { img.src = img.dataset.src; img.classList.add('loaded'); img.removeAttribute('data-src'); }
+                    o.unobserve(img);
+                }
+            });
+        }, { rootMargin: '100px' });
+        document.querySelectorAll('img[data-src]').forEach(img => obs.observe(img));
+    } else {
+        document.querySelectorAll('img[data-src]').forEach(img => { img.src = img.dataset.src; img.classList.add('loaded'); });
+    }
+});
 </script>
 
 {% endblock %}

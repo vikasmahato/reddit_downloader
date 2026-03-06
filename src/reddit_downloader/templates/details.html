@@ -1,143 +1,60 @@
 {% extends "base.html" %}
 
-{% block title %}Image Details - Reddit Image Browser{% endblock %}
+{% block title %}Details — Reddit Vault{% endblock %}
 
 {% block content %}
 <style>
-.deleted-image {
-    background-color: #2c2c2c !important;
+.deleted-image { opacity: 0.5; }
+.detail-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px; height: 32px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r);
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.75rem;
+    transition: border-color 0.15s, color 0.15s;
 }
-.card,
-.card-header,
-.card-footer {
-    background: rgba(35, 37, 38, 0.8) !important;
-    backdrop-filter: blur(10px);
-    color: #e0e0e0 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+.detail-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+.detail-img-wrap { background: #050505; border-radius: var(--r); overflow: hidden; }
+.detail-img-wrap img, .detail-img-wrap video {
+    max-width: 100%;
+    max-height: 70vh;
+    width: auto;
+    height: auto;
+    display: block;
+    margin: 0 auto;
 }
-.card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+.comment-item {
+    border-bottom: 1px solid var(--border);
+    padding: 0.6rem 0;
 }
-.card-body {
-    background: rgba(35, 37, 38, 0.6) !important;
-    color: #e0e0e0 !important;
-}
-.table {
-    background: rgba(35, 37, 38, 0.6) !important;
-    color: #e0e0e0 !important;
-    border-radius: 8px;
-}
-.table th,
-.table td {
-    border-color: rgba(255,255,255,0.1) !important;
-}
-.btn-primary, .btn-outline-primary {
-    background: linear-gradient(135deg, #ff4500 0%, #ff6b35 100%) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 8px;
-    font-weight: 600;
-}
-.btn-primary:hover, .btn-outline-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(255, 69, 0, 0.4);
-}
-.btn-outline-secondary, .btn-secondary {
-    background: rgba(35, 37, 38, 0.8) !important;
-    color: #e0e0e0 !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
-    border-radius: 8px;
-}
-.btn-outline-secondary:hover, .btn-secondary:hover {
-    background: rgba(255,255,255,0.1) !important;
-    transform: translateY(-1px);
-}
-.btn-outline-info, .btn-info {
-    background: rgba(35, 37, 38, 0.8) !important;
-    color: #e0e0e0 !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
-    border-radius: 8px;
-}
-.btn-outline-info:hover, .btn-info:hover {
-    background: rgba(255,255,255,0.1) !important;
-    transform: translateY(-1px);
-}
-.btn-outline-danger, .btn-danger {
-    background: rgba(35, 37, 38, 0.8) !important;
-    color: #e0e0e0 !important;
-    border: 1px solid rgba(255,255,255,0.15) !important;
-    border-radius: 8px;
-}
-.btn-outline-danger:hover, .btn-danger:hover {
-    background: rgba(231, 76, 60, 0.3) !important;
-    transform: translateY(-1px);
-}
-.badge {
-    background-color: #232526 !important;
-    color: #e0e0e0 !important;
-}
-.list-group-item {
-    background-color: #232526 !important;
-    color: #e0e0e0 !important;
-    border-color: #444 !important;
-}
-.alert {
-    background-color: #232526 !important;
-    color: #e0e0e0 !important;
-    border-color: #444 !important;
-}
-pre code {
-    background-color: #232526 !important;
-    color: #e0e0e0 !important;
-}
-.carousel-control-prev, .carousel-control-next {
-    width: 50px;
-    height: 50px;
-    background-color: rgba(0, 0, 0, 0.5);
-    border-radius: 50%;
-    top: 50%;
-    transform: translateY(-50%);
-}
-.carousel-control-prev {
-    left: 10px;
-}
-.carousel-control-next {
-    right: 10px;
-}
-.carousel-indicators {
-    margin-bottom: 1rem;
-}
-.carousel-indicators button {
-    background-color: rgba(255, 255, 255, 0.5);
-    border: 2px solid rgba(255, 255, 255, 0.8);
-}
-.carousel-indicators button.active {
-    background-color: #ff4500;
-    border-color: #ff4500;
-}
+.comment-item:last-child { border-bottom: none; }
+.comment-author { font-size: 0.7rem; color: var(--accent); font-weight: 500; }
+.comment-meta   { font-size: 0.58rem; color: var(--text-muted); margin: 1px 0 3px; }
+.comment-body   { font-size: 0.72rem; color: var(--text); line-height: 1.45; }
+.sidebar-section { margin-bottom: 0.75rem; }
 </style>
 <div class="row">
     <div class="col-md-8">
         <div class="card{% if image.is_deleted %} deleted-image{% endif %}">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h4><i class="fas fa-info-circle"></i> Image Details</h4>
-                <div>
+            <div class="card-header d-flex justify-content-between align-items-center gap-2">
+                <h4 style="font-size:0.85rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin:0;">
+                    <i class="fas fa-image me-2"></i>Details
+                </h4>
+                <div class="d-flex align-items-center gap-2 ms-auto">
                     {% if image.post_images and image.post_images|length > 1 %}
                         {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
-                        <span class="badge bg-secondary me-2">{{ current_index + 1 }} / {{ image.post_images|length }}</span>
+                        <span style="font-size:0.65rem;color:var(--text-muted);">{{ current_index + 1 }} / {{ image.post_images|length }}</span>
                     {% endif %}
                     {% if image.prev_post_id %}
-                    <a href="/details/{{ image.prev_post_id }}" class="btn btn-outline-secondary btn-sm me-1" title="Previous Post">
-                        <i class="fas fa-arrow-left"></i>
-                    </a>
+                    <a href="/details/{{ image.prev_post_id }}" class="detail-nav-btn" title="Previous Post"><i class="fas fa-arrow-left"></i></a>
                     {% endif %}
                     {% if image.next_post_id %}
-                    <a href="/details/{{ image.next_post_id }}" class="btn btn-outline-secondary btn-sm" title="Next Post">
-                        <i class="fas fa-arrow-right"></i>
-                    </a>
+                    <a href="/details/{{ image.next_post_id }}" class="detail-nav-btn" title="Next Post"><i class="fas fa-arrow-right"></i></a>
                     {% endif %}
                 </div>
             </div>
@@ -153,7 +70,7 @@ pre code {
                     <span class="badge bg-info text-dark">u/{{ image.author or 'Unknown' }}</span>
                 </div>
                 {# Use only the local served file on the details page; do NOT use remote URLs or fallbacks #}
-                <div class="text-center mb-4">
+                <div class="detail-img-wrap mb-4 text-center p-3">
                     {% set post_images = image.post_images if image.post_images else [image] %}
                     {% set image_count = image.image_count if image.image_count else 1 %}
                     {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
@@ -353,15 +270,15 @@ pre code {
         <div class="card-body">
             {% set comments = image.comments | safe | loads %}
             {% if comments and comments|length > 0 %}
-            <ul class="list-group" id="commentsList">
+            <div id="commentsList">
                 {% for comment in comments %}
-                <li class="list-group-item">
-                    <div class="fw-bold" style="font-size:0.80em;">{{ comment.author or 'Unknown' }}</div>
-                    <div class="text-muted" style="font-size:0.50em;">Score: {{ comment.score }} | {{ comment.created_utc | format_datetime }}</div>
-                    <div style="font-size:0.80em;">{{ comment.body }}</div>
-                </li>
+                <div class="comment-item">
+                    <div class="comment-author">{{ comment.author or 'Unknown' }}</div>
+                    <div class="comment-meta">score {{ comment.score }} · {{ comment.created_utc | format_datetime }}</div>
+                    <div class="comment-body">{{ comment.body }}</div>
+                </div>
                 {% endfor %}
-            </ul>
+            </div>
             {% else %}
             <div class="text-muted">No comments found.</div>
             {% endif %}
@@ -459,7 +376,8 @@ document.querySelectorAll('code').forEach(code => {
 });
 
 // AJAX for comment submission
-document.getElementById('commentForm').addEventListener('submit', function(e) {
+const _commentForm = document.getElementById('commentForm');
+if (_commentForm) _commentForm.addEventListener('submit', function(e) {
     e.preventDefault();
     var commentText = document.getElementById('commentText').value.trim();
     var statusDiv = document.getElementById('commentStatus');
@@ -485,11 +403,11 @@ document.getElementById('commentForm').addEventListener('submit', function(e) {
         if (data.success) {
             // Add new comment to the top of the list
             var commentsList = document.getElementById('commentsList');
-            var newComment = document.createElement('li');
-            newComment.className = 'list-group-item';
-            newComment.innerHTML = `<div class='fw-bold' style='font-size:0.80em;'>${data.comment.author || 'You'}</div>
-                <div class='text-muted' style='font-size:0.50em;'>Score: ${data.comment.score || 1} | just now</div>
-                <div style='font-size:0.80em;'>${data.comment.body}</div>`;
+            var newComment = document.createElement('div');
+            newComment.className = 'comment-item';
+            newComment.innerHTML = `<div class='comment-author'>${data.comment.author || 'You'}</div>
+                <div class='comment-meta'>score ${data.comment.score || 1} · just now</div>
+                <div class='comment-body'>${data.comment.body}</div>`;
             if (commentsList) {
                 commentsList.prepend(newComment);
             }
@@ -508,7 +426,7 @@ document.getElementById('commentForm').addEventListener('submit', function(e) {
         statusDiv.className = 'alert alert-danger';
         statusDiv.textContent = 'Network error.';
     });
-});
+}); // end if (_commentForm)
 
 // Update URL when carousel changes on details page
 document.addEventListener('DOMContentLoaded', function() {
@@ -530,11 +448,11 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (data.comments.length > 0) {
                     commentsList.innerHTML = '';
                     data.comments.forEach(function(comment) {
-                        var li = document.createElement('li');
-                        li.className = 'list-group-item';
-                        li.innerHTML = `<div class='fw-bold' style='font-size:0.80em;'>${comment.author || 'Unknown'}</div>
-                            <div class='text-muted' style='font-size:0.50em;'>Score: ${comment.score || 1} | ${comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : ''}</div>
-                            <div style='font-size:0.80em;'>${comment.body}</div>`;
+                        var li = document.createElement('div');
+                        li.className = 'comment-item';
+                        li.innerHTML = `<div class='comment-author'>${comment.author || 'Unknown'}</div>
+                            <div class='comment-meta'>score ${comment.score || 1} · ${comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : ''}</div>
+                            <div class='comment-body'>${comment.body}</div>`;
                         commentsList.appendChild(li);
                     });
                 } else {
