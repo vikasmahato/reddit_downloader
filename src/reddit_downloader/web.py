@@ -8,6 +8,8 @@ Provides search, filtering, and gallery view capabilities.
 
 import os
 import sqlite3
+import threading
+import requests as http_requests
 from flask import Flask, render_template, request, jsonify, send_file, url_for, send_from_directory, redirect
 from pathlib import Path
 import json
@@ -18,6 +20,10 @@ from PIL import Image, ExifTags
 import mysql.connector
 from mysql.connector import pooling
 import configparser
+
+# Cache for related subreddits (name -> list of related names)
+_related_subreddits_cache = {}
+_related_cache_lock = threading.Lock()
 
 # Get the directory where this file is located
 _current_dir = Path(__file__).parent
@@ -1128,6 +1134,170 @@ def api_toggle_scrape_list(item_id):
         return jsonify({'success': True, 'enabled': new_enabled, 'message': 'Status updated successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/subreddit-map')
+def subreddit_map():
+    """Page showing a visual network map of tracked subreddits and related ones."""
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits()
+    users = ui_handler.get_users()
+    return render_template('subreddit_map.html', stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/subreddit-map-data')
+def api_subreddit_map_data():
+    """Returns nodes and links for the subreddit map visualization."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT sl.id, sl.name, sl.enabled,
+                   COUNT(DISTINCT p.id) as post_count
+            FROM scrape_lists sl
+            LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
+            WHERE sl.type = 'subreddit'
+            GROUP BY sl.id, sl.name, sl.enabled
+            ORDER BY sl.name
+        """)
+        scraped = cursor.fetchall()
+        conn.close()
+
+        scraped_names_lower = {s['name'].lower() for s in scraped}
+
+        # Fetch related subreddits from Reddit's public search API (with cache)
+        related_map = {}
+        headers = {'User-Agent': 'subreddit-map-viewer/1.0'}
+
+        for sub in scraped:
+            name = sub['name']
+            name_lower = name.lower()
+            with _related_cache_lock:
+                if name_lower in _related_subreddits_cache:
+                    related_map[name] = _related_subreddits_cache[name_lower]
+                    continue
+
+            try:
+                resp = http_requests.get(
+                    f'https://www.reddit.com/subreddits/search.json?q={name}&limit=8',
+                    headers=headers,
+                    timeout=4
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    rel_names = []
+                    for child in data.get('data', {}).get('children', []):
+                        display = child.get('data', {}).get('display_name', '')
+                        if display and display.lower() != name_lower:
+                            rel_names.append(display)
+                    with _related_cache_lock:
+                        _related_subreddits_cache[name_lower] = rel_names
+                    related_map[name] = rel_names
+            except Exception:
+                related_map[name] = []
+
+        # Build node list
+        nodes = []
+        for sub in scraped:
+            nodes.append({
+                'id': sub['name'],
+                'name': sub['name'],
+                'status': 'enabled' if sub['enabled'] else 'disabled',
+                'db_id': sub['id'],
+                'post_count': int(sub.get('post_count') or 0),
+                'in_list': True,
+            })
+
+        # Add related subreddits not already tracked
+        added_related = set()
+        for sub_name, rel_list in related_map.items():
+            for rel in rel_list:
+                rel_lower = rel.lower()
+                if rel_lower not in scraped_names_lower and rel_lower not in added_related:
+                    nodes.append({
+                        'id': rel,
+                        'name': rel,
+                        'status': 'related',
+                        'db_id': None,
+                        'post_count': 0,
+                        'in_list': False,
+                    })
+                    added_related.add(rel_lower)
+
+        # Build links
+        node_ids_lower = {n['id'].lower() for n in nodes}
+        links = []
+        for sub_name, rel_list in related_map.items():
+            for rel in rel_list:
+                if rel.lower() in node_ids_lower:
+                    links.append({'source': sub_name, 'target': rel})
+
+        return jsonify({'success': True, 'nodes': nodes, 'links': links})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scrape-lists/by-name/<name>', methods=['POST'])
+def api_add_scrape_list_by_name(name):
+    """Add a subreddit to the scrape list by name."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO scrape_lists (type, name, enabled) VALUES ('subreddit', %s, TRUE)",
+                (name,)
+            )
+            conn.commit()
+            item_id = cursor.lastrowid
+            conn.close()
+            return jsonify({'success': True, 'id': item_id})
+        except mysql.connector.IntegrityError:
+            conn.rollback()
+            conn.close()
+            return jsonify({'success': False, 'error': 'Already in list'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scrape-lists/toggle-by-name/<name>', methods=['POST'])
+def api_toggle_scrape_list_by_name(name):
+    """Toggle enabled status of a subreddit in the scrape list by name."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, enabled FROM scrape_lists WHERE name = %s AND type = 'subreddit'",
+            (name,)
+        )
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Not found in scrape list'}), 404
+        new_enabled = not result['enabled']
+        cursor.execute("UPDATE scrape_lists SET enabled = %s WHERE id = %s", (new_enabled, result['id']))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'enabled': new_enabled, 'id': result['id']})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/scrape-lists/remove-by-name/<name>', methods=['DELETE'])
+def api_remove_scrape_list_by_name(name):
+    """Remove a subreddit from the scrape list by name."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM scrape_lists WHERE name = %s AND type = 'subreddit'",
+            (name,)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/delete-posts-by-user/<username>', methods=['DELETE'])
 def delete_posts_by_user(username):

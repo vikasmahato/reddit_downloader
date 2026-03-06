@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+
+{% block title %}Subreddit Map - Reddit Image Browser{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="fas fa-project-diagram"></i> Subreddit Map</h2>
+            <div class="d-flex gap-2 align-items-center">
+                <input type="text" id="search-input" class="form-control form-control-sm" placeholder="Search subreddits..." style="width:200px;" oninput="highlightSearch(this.value)">
+                <button class="btn btn-sm btn-outline-secondary" onclick="resetView()">
+                    <i class="fas fa-compress-arrows-alt"></i> Reset View
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="loadData()">
+                    <i class="fas fa-sync"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Legend -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card p-2 px-3">
+            <div class="d-flex gap-4 align-items-center flex-wrap" style="font-size:0.9rem;">
+                <span class="fw-bold">Legend:</span>
+                <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:5px;"></span>Enabled (scraping active)</span>
+                <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ef4444;vertical-align:middle;margin-right:5px;"></span>Disabled (in list, paused)</span>
+                <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#6b7280;vertical-align:middle;margin-right:5px;"></span>Related (not tracked)</span>
+                <span class="text-muted ms-auto small"><i class="fas fa-info-circle"></i> Click to manage &bull; Drag to move &bull; Scroll to zoom &bull; Node size = post count</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Map Container -->
+<div class="row">
+    <div class="col-12">
+        <div class="card" style="height: 72vh; position: relative; overflow: hidden; padding: 0;">
+            <div id="loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:10;">
+                <div class="spinner-border text-warning" role="status" style="width:2.5rem;height:2.5rem;"></div>
+                <div class="mt-2 text-muted">Loading subreddit map...</div>
+                <div class="mt-1 text-muted small" id="loading-detail"></div>
+            </div>
+            <svg id="graph-svg" style="width:100%;height:100%;border-radius:12px;background:rgba(12,12,12,0.6);"></svg>
+        </div>
+    </div>
+</div>
+
+<!-- Node Action Popup -->
+<div id="node-popup" style="display:none;position:fixed;z-index:2000;background:rgba(28,30,31,0.98);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:16px 18px;min-width:250px;max-width:300px;box-shadow:0 12px 40px rgba(0,0,0,0.7);">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 id="popup-title" class="mb-0 fw-bold" style="color:#ff6b35;font-size:1rem;"></h6>
+        <button onclick="closePopup()" style="background:none;border:none;color:#888;cursor:pointer;font-size:1.2rem;line-height:1;padding:0 0 0 8px;">&times;</button>
+    </div>
+    <div id="popup-stats" class="mb-3" style="font-size:0.82rem;"></div>
+    <div id="popup-actions" class="d-flex flex-column gap-2"></div>
+</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+let svgEl, g, simulation, zoomBehavior;
+let currentNodes = [], currentLinks = [];
+let nodeSelection, linkSelection;
+
+function loadData() {
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('loading-detail').textContent = 'Fetching subreddit data and related subs from Reddit...';
+
+    fetch('/api/subreddit-map-data')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('loading').style.display = 'none';
+            if (data.success) {
+                currentNodes = data.nodes;
+                currentLinks = data.links;
+                renderGraph(data.nodes, data.links);
+            } else {
+                showError('Error loading data: ' + data.error);
+            }
+        })
+        .catch(() => showError('Failed to connect to server'));
+}
+
+function showError(msg) {
+    document.getElementById('loading').innerHTML = `<div class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${msg}</div>`;
+}
+
+function renderGraph(nodes, links) {
+    const svgNode = document.getElementById('graph-svg');
+    const width = svgNode.clientWidth;
+    const height = svgNode.clientHeight;
+
+    d3.select('#graph-svg').selectAll('*').remove();
+
+    svgEl = d3.select('#graph-svg');
+
+    zoomBehavior = d3.zoom()
+        .scaleExtent([0.05, 5])
+        .on('zoom', event => g.attr('transform', event.transform));
+
+    svgEl.call(zoomBehavior);
+    svgEl.on('click', () => closePopup());
+
+    g = svgEl.append('g');
+
+    // Add arrow marker for links (optional subtle style)
+    svgEl.append('defs').append('marker')
+        .attr('id', 'arrowhead')
+        .attr('viewBox', '-0 -3 6 6')
+        .attr('refX', 12)
+        .attr('markerWidth', 4)
+        .attr('markerHeight', 4)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M 0,-3 L 6,0 L 0,3')
+        .attr('fill', 'rgba(255,255,255,0.1)');
+
+    const colorMap = {
+        enabled: '#22c55e',
+        disabled: '#ef4444',
+        related: '#6b7280',
+    };
+
+    const maxPosts = d3.max(nodes, d => d.post_count) || 1;
+    const sizeScale = d3.scaleSqrt().domain([0, maxPosts]).range([9, 34]);
+
+    const nodeRadius = d => d.in_list ? Math.max(11, sizeScale(d.post_count)) : 8;
+
+    // Links
+    linkSelection = g.append('g').attr('class', 'links')
+        .selectAll('line')
+        .data(links)
+        .enter().append('line')
+        .attr('stroke', 'rgba(255,255,255,0.1)')
+        .attr('stroke-width', 1);
+
+    // Node groups
+    nodeSelection = g.append('g').attr('class', 'nodes')
+        .selectAll('g')
+        .data(nodes)
+        .enter().append('g')
+        .attr('class', 'node-group')
+        .attr('cursor', 'pointer')
+        .call(
+            d3.drag()
+                .on('start', dragStarted)
+                .on('drag', dragged)
+                .on('end', dragEnded)
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            showPopup(event, d);
+        });
+
+    nodeSelection.append('circle')
+        .attr('r', nodeRadius)
+        .attr('fill', d => colorMap[d.status])
+        .attr('stroke', d => d.in_list ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.15)')
+        .attr('stroke-width', d => d.in_list ? 2 : 1)
+        .attr('opacity', d => d.status === 'related' ? 0.65 : 0.92)
+        .attr('data-id', d => d.id);
+
+    nodeSelection.append('text')
+        .text(d => d.name)
+        .attr('y', d => nodeRadius(d) + 11)
+        .attr('text-anchor', 'middle')
+        .attr('fill', d => d.status === 'related' ? '#9ca3af' : '#d1d5db')
+        .attr('font-size', d => d.in_list ? '10px' : '8.5px')
+        .attr('font-family', 'sans-serif')
+        .attr('pointer-events', 'none')
+        .attr('opacity', d => d.status === 'related' ? 0.7 : 1);
+
+    // Simulation
+    simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
+            // Longer distance between tracked and related
+            const srcIn = typeof d.source === 'object' ? d.source.in_list : true;
+            const tgtIn = typeof d.target === 'object' ? d.target.in_list : false;
+            return srcIn && tgtIn ? 90 : 130;
+        }))
+        .force('charge', d3.forceManyBody().strength(d => d.in_list ? -280 : -120))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => nodeRadius(d) + 8))
+        .on('tick', ticked);
+
+    function ticked() {
+        linkSelection
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+
+        nodeSelection.attr('transform', d => `translate(${d.x},${d.y})`);
+    }
+}
+
+function dragStarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+}
+
+function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+}
+
+function resetView() {
+    if (!svgEl) return;
+    svgEl.transition().duration(400).call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+function highlightSearch(query) {
+    if (!nodeSelection) return;
+    const q = query.toLowerCase().trim();
+    nodeSelection.selectAll('circle')
+        .attr('opacity', d => {
+            if (!q) return d.status === 'related' ? 0.65 : 0.92;
+            return d.name.toLowerCase().includes(q) ? 1 : 0.15;
+        });
+    nodeSelection.selectAll('text')
+        .attr('opacity', d => {
+            if (!q) return d.status === 'related' ? 0.7 : 1;
+            return d.name.toLowerCase().includes(q) ? 1 : 0.1;
+        });
+}
+
+let activePopupNode = null;
+
+function showPopup(event, d) {
+    activePopupNode = d;
+    const popup = document.getElementById('node-popup');
+
+    document.getElementById('popup-title').textContent = 'r/' + d.name;
+
+    const colorMap = { enabled: '#22c55e', disabled: '#ef4444', related: '#6b7280' };
+    const labelMap = { enabled: 'Enabled', disabled: 'Disabled', related: 'Not tracked' };
+    let statsHtml = `<span style="display:inline-block;background:${colorMap[d.status]};color:#fff;border-radius:6px;padding:1px 8px;font-size:0.78rem;">${labelMap[d.status]}</span>`;
+    if (d.post_count > 0) {
+        statsHtml += `<span class="text-muted ms-2">${d.post_count} posts downloaded</span>`;
+    }
+    document.getElementById('popup-stats').innerHTML = statsHtml;
+
+    let actionsHtml = `<a href="https://www.reddit.com/r/${encodeURIComponent(d.name)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm" style="background:rgba(255,69,0,0.15);border:1px solid rgba(255,69,0,0.4);color:#ff6b35;">
+        <i class="fab fa-reddit"></i> Open r/${d.name} on Reddit
+    </a>`;
+
+    if (d.in_list) {
+        if (d.status === 'enabled') {
+            actionsHtml += `<button class="btn btn-sm btn-outline-warning" onclick="toggleSub('${d.name}')">
+                <i class="fas fa-pause-circle"></i> Pause Scraping
+            </button>`;
+        } else {
+            actionsHtml += `<button class="btn btn-sm btn-outline-success" onclick="toggleSub('${d.name}')">
+                <i class="fas fa-play-circle"></i> Resume Scraping
+            </button>`;
+        }
+        actionsHtml += `<button class="btn btn-sm btn-outline-danger" onclick="removeSub('${d.name}')">
+            <i class="fas fa-trash-alt"></i> Remove from Scrape List
+        </button>`;
+    } else {
+        actionsHtml += `<button class="btn btn-sm btn-outline-success" onclick="addSub('${d.name}')">
+            <i class="fas fa-plus-circle"></i> Start Scraping This Sub
+        </button>`;
+    }
+
+    document.getElementById('popup-actions').innerHTML = actionsHtml;
+
+    // Position within viewport
+    const margin = 12;
+    const popupW = 270;
+    const popupH = 200;
+    let x = event.clientX + 14;
+    let y = event.clientY + 10;
+    if (x + popupW > window.innerWidth - margin) x = event.clientX - popupW - 14;
+    if (y + popupH > window.innerHeight - margin) y = event.clientY - popupH - 10;
+    popup.style.left = Math.max(margin, x) + 'px';
+    popup.style.top = Math.max(margin, y) + 'px';
+    popup.style.display = 'block';
+}
+
+function closePopup() {
+    document.getElementById('node-popup').style.display = 'none';
+    activePopupNode = null;
+}
+
+function updateNodeVisual(name, newStatus) {
+    const colorMap = { enabled: '#22c55e', disabled: '#ef4444', related: '#6b7280' };
+    if (!nodeSelection) return;
+    nodeSelection.filter(d => d.name === name)
+        .each(d => { d.status = newStatus; d.in_list = newStatus !== 'related'; })
+        .select('circle')
+        .attr('fill', colorMap[newStatus])
+        .attr('stroke', newStatus !== 'related' ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.15)')
+        .attr('stroke-width', newStatus !== 'related' ? 2 : 1);
+}
+
+function addSub(name) {
+    fetch(`/api/scrape-lists/by-name/${encodeURIComponent(name)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const node = currentNodes.find(n => n.name === name);
+                if (node) { node.status = 'enabled'; node.in_list = true; node.db_id = data.id; }
+                updateNodeVisual(name, 'enabled');
+                closePopup();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        });
+}
+
+function toggleSub(name) {
+    fetch(`/api/scrape-lists/toggle-by-name/${encodeURIComponent(name)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const newStatus = data.enabled ? 'enabled' : 'disabled';
+                const node = currentNodes.find(n => n.name === name);
+                if (node) { node.status = newStatus; }
+                updateNodeVisual(name, newStatus);
+                closePopup();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        });
+}
+
+function removeSub(name) {
+    if (!confirm(`Remove r/${name} from scrape list? It will become a grey "related" node.`)) return;
+    fetch(`/api/scrape-lists/remove-by-name/${encodeURIComponent(name)}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const node = currentNodes.find(n => n.name === name);
+                if (node) { node.status = 'related'; node.in_list = false; node.db_id = null; }
+                updateNodeVisual(name, 'related');
+                closePopup();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        });
+}
+
+// Close popup on click outside
+document.getElementById('node-popup').addEventListener('click', e => e.stopPropagation());
+
+loadData();
+</script>
+
+<style>
+.node-group circle {
+    transition: opacity 0.2s;
+}
+.node-group:hover circle {
+    filter: brightness(1.2);
+}
+</style>
+
+{% endblock %}
