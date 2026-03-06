@@ -9,6 +9,7 @@ Provides search, filtering, and gallery view capabilities.
 import os
 import sqlite3
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests as http_requests
 from flask import Flask, render_template, request, jsonify, send_file, url_for, send_from_directory, redirect
 from pathlib import Path
@@ -42,6 +43,38 @@ def _save_related_cache(cache: dict) -> None:
         pass
 
 _related_subreddits_cache: dict = _load_related_cache()
+
+_MAP_HEADERS = {'User-Agent': 'subreddit-map-viewer/1.0'}
+
+def _fetch_related_sub(name: str) -> tuple:
+    """Fetch related subreddits for one sub. Returns (name, rel_names, was_new_fetch).
+    Checks the in-memory cache first; only hits Reddit API on a miss."""
+    name_lower = name.lower()
+    with _related_cache_lock:
+        if name_lower in _related_subreddits_cache:
+            return name, _related_subreddits_cache[name_lower], False
+    try:
+        resp = http_requests.get(
+            f'https://www.reddit.com/subreddits/search.json?q={name}&limit=20&include_over_18=1',
+            headers=_MAP_HEADERS,
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            children = resp.json().get('data', {}).get('children', [])
+            rel_names = [
+                c['data']['display_name'] for c in children
+                if c.get('data', {}).get('display_name', '').lower() != name_lower
+                and c.get('data', {}).get('display_name')
+            ]
+            with _related_cache_lock:
+                _related_subreddits_cache[name_lower] = rel_names
+            return name, rel_names, True
+    except Exception:
+        pass
+    # Cache the miss too so we don't retry until the user clears cache
+    with _related_cache_lock:
+        _related_subreddits_cache[name_lower] = []
+    return name, [], True
 
 # Get the directory where this file is located
 _current_dir = Path(__file__).parent
@@ -1195,46 +1228,69 @@ def api_subreddit_map_data():
 
         scraped_names_lower = {s['name'].lower() for s in scraped}
 
-        # Fetch related subreddits — served from file cache when available.
-        # Reddit API is only called for subreddits missing from the cache.
-        related_map = {}
-        headers = {'User-Agent': 'subreddit-map-viewer/1.0'}
+        related_map: dict = {}
         newly_fetched = False
 
-        for sub in scraped:
-            name = sub['name']
-            name_lower = name.lower()
-            with _related_cache_lock:
-                if name_lower in _related_subreddits_cache:
-                    related_map[name] = _related_subreddits_cache[name_lower]
-                    continue
-
-            try:
-                resp = http_requests.get(
-                    f'https://www.reddit.com/subreddits/search.json?q={name}&limit=8&include_over_18=1',
-                    headers=headers,
-                    timeout=4
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    rel_names = []
-                    for child in data.get('data', {}).get('children', []):
-                        display = child.get('data', {}).get('display_name', '')
-                        if display and display.lower() != name_lower:
-                            rel_names.append(display)
-                    with _related_cache_lock:
-                        _related_subreddits_cache[name_lower] = rel_names
-                    related_map[name] = rel_names
+        # ── Depth-1: parallel fetch for all tracked subs ──────────────────
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            futures = {ex.submit(_fetch_related_sub, sub['name']): sub['name'] for sub in scraped}
+            for future in as_completed(futures):
+                name, rel_names, was_new = future.result()
+                related_map[name] = rel_names
+                if was_new:
                     newly_fetched = True
-            except Exception:
-                related_map[name] = []
 
-        # Persist to file whenever we fetched anything new
+        # ── Depth-2: fetch related-of-related for the most connected subs ─
+        # Count how many tracked subs link to each depth-1 sub
+        depth1_freq: dict = {}
+        depth1_display: dict = {}   # lowercase → display_name
+        for rel_list in related_map.values():
+            for rel in rel_list:
+                rl = rel.lower()
+                depth1_freq[rl] = depth1_freq.get(rl, 0) + 1
+                depth1_display[rl] = rel
+
+        # Top 40 most-connected depth-1 subs (excluding already-tracked)
+        top_d1_lower = sorted(
+            [k for k in depth1_freq if k not in scraped_names_lower],
+            key=lambda x: depth1_freq[x], reverse=True
+        )[:40]
+
+        # Load any already-cached depth-2 results
+        for k in top_d1_lower:
+            with _related_cache_lock:
+                if k in _related_subreddits_cache:
+                    display = depth1_display.get(k, k)
+                    if display not in related_map:
+                        related_map[display] = _related_subreddits_cache[k]
+
+        # Fetch remaining uncached depth-1 subs in parallel
+        to_fetch_d2 = [
+            depth1_display.get(k, k)
+            for k in top_d1_lower
+            if k not in _related_subreddits_cache
+        ]
+        if to_fetch_d2:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                futures = {ex.submit(_fetch_related_sub, name): name for name in to_fetch_d2}
+                for future in as_completed(futures):
+                    name, rel_names, was_new = future.result()
+                    if rel_names:
+                        related_map[name] = rel_names
+                    if was_new:
+                        newly_fetched = True
+
         if newly_fetched:
             with _related_cache_lock:
                 _save_related_cache(_related_subreddits_cache)
 
-        # Build node list
+        # ── Build node list ────────────────────────────────────────────────
+        # Determine which subs are directly connected to tracked subs (depth 1)
+        depth1_names_lower: set = set()
+        for sub in scraped:
+            for rel in related_map.get(sub['name'], []):
+                depth1_names_lower.add(rel.lower())
+
         nodes = []
         for sub in scraped:
             nodes.append({
@@ -1244,10 +1300,10 @@ def api_subreddit_map_data():
                 'db_id': sub['id'],
                 'post_count': int(sub.get('post_count') or 0),
                 'in_list': True,
+                'depth': 0,
             })
 
-        # Add related subreddits not already tracked
-        added_related = set()
+        added_related: set = set()
         for sub_name, rel_list in related_map.items():
             for rel in rel_list:
                 rel_lower = rel.lower()
@@ -1259,10 +1315,11 @@ def api_subreddit_map_data():
                         'db_id': None,
                         'post_count': 0,
                         'in_list': False,
+                        'depth': 1 if rel_lower in depth1_names_lower else 2,
                     })
                     added_related.add(rel_lower)
 
-        # Build links
+        # ── Build links ────────────────────────────────────────────────────
         node_ids_lower = {n['id'].lower() for n in nodes}
         links = []
         for sub_name, rel_list in related_map.items():

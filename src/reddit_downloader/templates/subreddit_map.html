@@ -1,361 +1,225 @@
 {% extends "base.html" %}
 
-{% block title %}Subreddit Map - Reddit Image Browser{% endblock %}
+{% block title %}Subreddit Map — Reddit Vault{% endblock %}
 
 {% block content %}
-<div class="row mb-3">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center">
-            <h2><i class="fas fa-project-diagram"></i> Subreddit Map</h2>
-            <div class="d-flex gap-2 align-items-center">
-                <input type="text" id="search-input" class="form-control form-control-sm" placeholder="Search subreddits..." style="width:200px;" oninput="highlightSearch(this.value)">
-                <button class="btn btn-sm btn-outline-secondary" onclick="resetView()">
-                    <i class="fas fa-compress-arrows-alt"></i> Reset View
-                </button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="loadData()">
-                    <i class="fas fa-sync"></i> Refresh
-                </button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="clearCacheAndReload()" title="Clear cached related-subreddit data and refetch from Reddit">
-                    <i class="fas fa-broom"></i> Clear Cache
-                </button>
-            </div>
-        </div>
+<style>
+/* ── HEADER ────────────────────────────────── */
+.map-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+}
+.map-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0;
+}
+.map-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    flex-wrap: wrap;
+}
+
+/* ── LEGEND ────────────────────────────────── */
+.map-legend {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.45rem 0.9rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.65rem;
+    flex-wrap: wrap;
+}
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+}
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.legend-hint { margin-left: auto; color: var(--text-muted); font-size: 0.6rem; }
+
+/* ── MAP CARD ──────────────────────────────── */
+#map-card {
+    position: relative;
+    height: 74vh;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+    background: #030303;
+}
+
+#map-card:fullscreen,
+#map-card:-webkit-full-screen {
+    width: 100vw !important;
+    height: 100vh !important;
+    border-radius: 0 !important;
+}
+
+#map-card:fullscreen #graph-svg,
+#map-card:-webkit-full-screen #graph-svg {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+#graph-svg { width: 100%; height: 100%; display: block; }
+
+/* ── LOADING OVERLAY ───────────────────────── */
+#map-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background: #030303;
+    z-index: 10;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+#map-loading .spinner-border { color: var(--accent); width: 2rem; height: 2rem; border-width: 2px; }
+#map-load-detail { font-size: 0.62rem; }
+
+/* ── MAP STATS BAR ─────────────────────────── */
+#map-stats {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: var(--r);
+    padding: 4px 10px;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    display: none;
+}
+
+/* ── NODE POPUP ────────────────────────────── */
+#node-popup {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    background: rgba(14,14,14,0.97);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    padding: 14px 16px;
+    min-width: 240px;
+    max-width: 290px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.8);
+}
+#popup-title { color: var(--accent-hi); font-family: var(--font-head); font-size: 0.95rem; font-weight: 700; }
+#popup-stats { font-size: 0.7rem; margin: 6px 0 10px; }
+#popup-actions { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── SEARCH INPUT ──────────────────────────── */
+#map-search {
+    width: 170px;
+    font-size: 0.68rem !important;
+    padding: 0.25rem 0.6rem !important;
+    height: 28px;
+}
+</style>
+
+<!-- Header -->
+<div class="map-header">
+    <h4 class="map-title"><i class="fas fa-project-diagram me-2"></i>Subreddit Map</h4>
+    <div class="map-controls">
+        <input type="text" id="map-search" class="form-control form-control-sm" placeholder="Search…" oninput="highlightSearch(this.value)">
+        <label class="filter-check-wrap ms-1" style="font-size:0.65rem;">
+            <input type="checkbox" id="showLabels" onchange="updateLabelOpacity(currentScale)">
+            <span>Labels</span>
+        </label>
+        <button class="btn btn-sm btn-outline-secondary" onclick="zoomIn()" title="Zoom in"><i class="fas fa-plus"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="zoomOut()" title="Zoom out"><i class="fas fa-minus"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="resetView()" title="Fit to screen"><i class="fas fa-compress-arrows-alt"></i></button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadData()" title="Refresh (use cached data)"><i class="fas fa-sync"></i> Refresh</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="clearCacheAndReload()" title="Delete cache file and re-fetch from Reddit"><i class="fas fa-broom"></i> Clear Cache</button>
+        <button class="btn btn-sm btn-outline-secondary" id="fullscreenBtn" onclick="toggleFullscreen()" title="Fullscreen">
+            <i class="fas fa-expand"></i>
+        </button>
     </div>
 </div>
 
 <!-- Legend -->
-<div class="row mb-3">
-    <div class="col-12">
-        <div class="card p-2 px-3">
-            <div class="d-flex gap-4 align-items-center flex-wrap" style="font-size:0.9rem;">
-                <span class="fw-bold">Legend:</span>
-                <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#22c55e;vertical-align:middle;margin-right:5px;"></span>Enabled (scraping active)</span>
-                <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ef4444;vertical-align:middle;margin-right:5px;"></span>Disabled (in list, paused)</span>
-                <span><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#6b7280;vertical-align:middle;margin-right:5px;"></span>Related (not tracked)</span>
-                <span class="text-muted ms-auto small"><i class="fas fa-info-circle"></i> Click to manage &bull; Drag to move &bull; Scroll to zoom &bull; Node size = post count</span>
-            </div>
-        </div>
-    </div>
+<div class="map-legend">
+    <span style="font-size:0.6rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin-right:4px;">Legend</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#22c55e;box-shadow:0 0 6px #22c55e;"></span>Enabled (tracked)</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#ef4444;box-shadow:0 0 6px #ef4444;"></span>Disabled (tracked)</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#6b7280;"></span>Related (depth 1)</span>
+    <span class="legend-item"><span class="legend-dot" style="background:#374151;"></span>Related (depth 2)</span>
+    <span class="legend-hint">Click node to manage &bull; Scroll to zoom &bull; Drag to pan &bull; Labels appear on zoom</span>
 </div>
 
-<!-- Map Container -->
-<div class="row">
-    <div class="col-12">
-        <div class="card" style="height: 72vh; position: relative; overflow: hidden; padding: 0;">
-            <div id="loading" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:10;">
-                <div class="spinner-border text-warning" role="status" style="width:2.5rem;height:2.5rem;"></div>
-                <div class="mt-2 text-muted">Loading subreddit map...</div>
-                <div class="mt-1 text-muted small" id="loading-detail"></div>
-            </div>
-            <svg id="graph-svg" style="width:100%;height:100%;border-radius:12px;background:rgba(12,12,12,0.6);"></svg>
-        </div>
+<!-- Map -->
+<div id="map-card">
+    <div id="map-loading">
+        <div class="spinner-border" role="status"></div>
+        <span>Building subreddit map…</span>
+        <span id="map-load-detail">Fetching data (uncached subs hit Reddit API)</span>
     </div>
+    <svg id="graph-svg"></svg>
+    <div id="map-stats"></div>
 </div>
 
-<!-- Node Action Popup -->
-<div id="node-popup" style="display:none;position:fixed;z-index:2000;background:rgba(28,30,31,0.98);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:16px 18px;min-width:250px;max-width:300px;box-shadow:0 12px 40px rgba(0,0,0,0.7);">
-    <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 id="popup-title" class="mb-0 fw-bold" style="color:#ff6b35;font-size:1rem;"></h6>
-        <button onclick="closePopup()" style="background:none;border:none;color:#888;cursor:pointer;font-size:1.2rem;line-height:1;padding:0 0 0 8px;">&times;</button>
+<!-- Node action popup -->
+<div id="node-popup">
+    <div class="d-flex justify-content-between align-items-center mb-1">
+        <span id="popup-title"></span>
+        <button onclick="closePopup()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;padding:0 0 0 8px;">&times;</button>
     </div>
-    <div id="popup-stats" class="mb-3" style="font-size:0.82rem;"></div>
-    <div id="popup-actions" class="d-flex flex-column gap-2"></div>
+    <div id="popup-stats"></div>
+    <div id="popup-actions"></div>
 </div>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
-let svgEl, g, simulation, zoomBehavior;
-let currentNodes = [], currentLinks = [];
+let svgEl, gRoot, simulation, zoomBehavior;
 let nodeSelection, linkSelection;
+let currentNodes = [], currentLinks = [];
+let currentScale = 1;
 
+// ── DATA LOADING ─────────────────────────────────────────────────────────
 function loadData() {
-    document.getElementById('loading').style.display = 'block';
-    document.getElementById('loading-detail').textContent = 'Fetching subreddit data and related subs from Reddit...';
+    document.getElementById('map-loading').style.display = 'flex';
+    document.getElementById('map-stats').style.display = 'none';
 
     fetch('/api/subreddit-map-data')
         .then(r => r.json())
         .then(data => {
-            document.getElementById('loading').style.display = 'none';
+            document.getElementById('map-loading').style.display = 'none';
             if (data.success) {
                 currentNodes = data.nodes;
                 currentLinks = data.links;
                 renderGraph(data.nodes, data.links);
             } else {
-                showError('Error loading data: ' + data.error);
+                document.getElementById('map-loading').innerHTML =
+                    `<div style="color:var(--danger)"><i class="fas fa-exclamation-triangle"></i> ${data.error}</div>`;
             }
         })
-        .catch(() => showError('Failed to connect to server'));
-}
-
-function showError(msg) {
-    document.getElementById('loading').innerHTML = `<div class="text-danger"><i class="fas fa-exclamation-triangle"></i> ${msg}</div>`;
-}
-
-function renderGraph(nodes, links) {
-    const svgNode = document.getElementById('graph-svg');
-    const width = svgNode.clientWidth;
-    const height = svgNode.clientHeight;
-
-    d3.select('#graph-svg').selectAll('*').remove();
-
-    svgEl = d3.select('#graph-svg');
-
-    zoomBehavior = d3.zoom()
-        .scaleExtent([0.05, 5])
-        .on('zoom', event => g.attr('transform', event.transform));
-
-    svgEl.call(zoomBehavior);
-    svgEl.on('click', () => closePopup());
-
-    g = svgEl.append('g');
-
-    // Add arrow marker for links (optional subtle style)
-    svgEl.append('defs').append('marker')
-        .attr('id', 'arrowhead')
-        .attr('viewBox', '-0 -3 6 6')
-        .attr('refX', 12)
-        .attr('markerWidth', 4)
-        .attr('markerHeight', 4)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M 0,-3 L 6,0 L 0,3')
-        .attr('fill', 'rgba(255,255,255,0.1)');
-
-    const colorMap = {
-        enabled: '#22c55e',
-        disabled: '#ef4444',
-        related: '#6b7280',
-    };
-
-    const maxPosts = d3.max(nodes, d => d.post_count) || 1;
-    const sizeScale = d3.scaleSqrt().domain([0, maxPosts]).range([9, 34]);
-
-    const nodeRadius = d => d.in_list ? Math.max(11, sizeScale(d.post_count)) : 8;
-
-    // Links
-    linkSelection = g.append('g').attr('class', 'links')
-        .selectAll('line')
-        .data(links)
-        .enter().append('line')
-        .attr('stroke', 'rgba(255,255,255,0.1)')
-        .attr('stroke-width', 1);
-
-    // Node groups
-    nodeSelection = g.append('g').attr('class', 'nodes')
-        .selectAll('g')
-        .data(nodes)
-        .enter().append('g')
-        .attr('class', 'node-group')
-        .attr('cursor', 'pointer')
-        .call(
-            d3.drag()
-                .on('start', dragStarted)
-                .on('drag', dragged)
-                .on('end', dragEnded)
-        )
-        .on('click', (event, d) => {
-            event.stopPropagation();
-            showPopup(event, d);
-        });
-
-    nodeSelection.append('circle')
-        .attr('r', nodeRadius)
-        .attr('fill', d => colorMap[d.status])
-        .attr('stroke', d => d.in_list ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.15)')
-        .attr('stroke-width', d => d.in_list ? 2 : 1)
-        .attr('opacity', d => d.status === 'related' ? 0.65 : 0.92)
-        .attr('data-id', d => d.id);
-
-    nodeSelection.append('text')
-        .text(d => d.name)
-        .attr('y', d => nodeRadius(d) + 11)
-        .attr('text-anchor', 'middle')
-        .attr('fill', d => d.status === 'related' ? '#9ca3af' : '#d1d5db')
-        .attr('font-size', d => d.in_list ? '10px' : '8.5px')
-        .attr('font-family', 'sans-serif')
-        .attr('pointer-events', 'none')
-        .attr('opacity', d => d.status === 'related' ? 0.7 : 1);
-
-    // Simulation
-    simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
-            // Longer distance between tracked and related
-            const srcIn = typeof d.source === 'object' ? d.source.in_list : true;
-            const tgtIn = typeof d.target === 'object' ? d.target.in_list : false;
-            return srcIn && tgtIn ? 90 : 130;
-        }))
-        .force('charge', d3.forceManyBody().strength(d => d.in_list ? -280 : -120))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(d => nodeRadius(d) + 8))
-        .on('tick', ticked);
-
-    function ticked() {
-        linkSelection
-            .attr('x1', d => d.source.x)
-            .attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y);
-
-        nodeSelection.attr('transform', d => `translate(${d.x},${d.y})`);
-    }
-}
-
-function dragStarted(event, d) {
-    if (!event.active) simulation.alphaTarget(0.3).restart();
-    d.fx = d.x;
-    d.fy = d.y;
-}
-
-function dragged(event, d) {
-    d.fx = event.x;
-    d.fy = event.y;
-}
-
-function dragEnded(event, d) {
-    if (!event.active) simulation.alphaTarget(0);
-    d.fx = null;
-    d.fy = null;
-}
-
-function resetView() {
-    if (!svgEl) return;
-    svgEl.transition().duration(400).call(zoomBehavior.transform, d3.zoomIdentity);
-}
-
-function highlightSearch(query) {
-    if (!nodeSelection) return;
-    const q = query.toLowerCase().trim();
-    nodeSelection.selectAll('circle')
-        .attr('opacity', d => {
-            if (!q) return d.status === 'related' ? 0.65 : 0.92;
-            return d.name.toLowerCase().includes(q) ? 1 : 0.15;
-        });
-    nodeSelection.selectAll('text')
-        .attr('opacity', d => {
-            if (!q) return d.status === 'related' ? 0.7 : 1;
-            return d.name.toLowerCase().includes(q) ? 1 : 0.1;
+        .catch(() => {
+            document.getElementById('map-loading').innerHTML =
+                '<div style="color:var(--danger)"><i class="fas fa-exclamation-triangle"></i> Failed to connect</div>';
         });
 }
-
-let activePopupNode = null;
-
-function showPopup(event, d) {
-    activePopupNode = d;
-    const popup = document.getElementById('node-popup');
-
-    document.getElementById('popup-title').textContent = 'r/' + d.name;
-
-    const colorMap = { enabled: '#22c55e', disabled: '#ef4444', related: '#6b7280' };
-    const labelMap = { enabled: 'Enabled', disabled: 'Disabled', related: 'Not tracked' };
-    let statsHtml = `<span style="display:inline-block;background:${colorMap[d.status]};color:#fff;border-radius:6px;padding:1px 8px;font-size:0.78rem;">${labelMap[d.status]}</span>`;
-    if (d.post_count > 0) {
-        statsHtml += `<span class="text-muted ms-2">${d.post_count} posts downloaded</span>`;
-    }
-    document.getElementById('popup-stats').innerHTML = statsHtml;
-
-    let actionsHtml = `<a href="https://www.reddit.com/r/${encodeURIComponent(d.name)}" target="_blank" rel="noopener noreferrer" class="btn btn-sm" style="background:rgba(255,69,0,0.15);border:1px solid rgba(255,69,0,0.4);color:#ff6b35;">
-        <i class="fab fa-reddit"></i> Open r/${d.name} on Reddit
-    </a>`;
-
-    if (d.in_list) {
-        if (d.status === 'enabled') {
-            actionsHtml += `<button class="btn btn-sm btn-outline-warning" onclick="toggleSub('${d.name}')">
-                <i class="fas fa-pause-circle"></i> Pause Scraping
-            </button>`;
-        } else {
-            actionsHtml += `<button class="btn btn-sm btn-outline-success" onclick="toggleSub('${d.name}')">
-                <i class="fas fa-play-circle"></i> Resume Scraping
-            </button>`;
-        }
-        actionsHtml += `<button class="btn btn-sm btn-outline-danger" onclick="removeSub('${d.name}')">
-            <i class="fas fa-trash-alt"></i> Remove from Scrape List
-        </button>`;
-    } else {
-        actionsHtml += `<button class="btn btn-sm btn-outline-success" onclick="addSub('${d.name}')">
-            <i class="fas fa-plus-circle"></i> Start Scraping This Sub
-        </button>`;
-    }
-
-    document.getElementById('popup-actions').innerHTML = actionsHtml;
-
-    // Position within viewport
-    const margin = 12;
-    const popupW = 270;
-    const popupH = 200;
-    let x = event.clientX + 14;
-    let y = event.clientY + 10;
-    if (x + popupW > window.innerWidth - margin) x = event.clientX - popupW - 14;
-    if (y + popupH > window.innerHeight - margin) y = event.clientY - popupH - 10;
-    popup.style.left = Math.max(margin, x) + 'px';
-    popup.style.top = Math.max(margin, y) + 'px';
-    popup.style.display = 'block';
-}
-
-function closePopup() {
-    document.getElementById('node-popup').style.display = 'none';
-    activePopupNode = null;
-}
-
-function updateNodeVisual(name, newStatus) {
-    const colorMap = { enabled: '#22c55e', disabled: '#ef4444', related: '#6b7280' };
-    if (!nodeSelection) return;
-    nodeSelection.filter(d => d.name === name)
-        .each(d => { d.status = newStatus; d.in_list = newStatus !== 'related'; })
-        .select('circle')
-        .attr('fill', colorMap[newStatus])
-        .attr('stroke', newStatus !== 'related' ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.15)')
-        .attr('stroke-width', newStatus !== 'related' ? 2 : 1);
-}
-
-function addSub(name) {
-    fetch(`/api/scrape-lists/by-name/${encodeURIComponent(name)}`, { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                const node = currentNodes.find(n => n.name === name);
-                if (node) { node.status = 'enabled'; node.in_list = true; node.db_id = data.id; }
-                updateNodeVisual(name, 'enabled');
-                closePopup();
-            } else {
-                alert('Error: ' + data.error);
-            }
-        });
-}
-
-function toggleSub(name) {
-    fetch(`/api/scrape-lists/toggle-by-name/${encodeURIComponent(name)}`, { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                const newStatus = data.enabled ? 'enabled' : 'disabled';
-                const node = currentNodes.find(n => n.name === name);
-                if (node) { node.status = newStatus; }
-                updateNodeVisual(name, newStatus);
-                closePopup();
-            } else {
-                alert('Error: ' + data.error);
-            }
-        });
-}
-
-function removeSub(name) {
-    if (!confirm(`Remove r/${name} from scrape list? It will become a grey "related" node.`)) return;
-    fetch(`/api/scrape-lists/remove-by-name/${encodeURIComponent(name)}`, { method: 'DELETE' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                const node = currentNodes.find(n => n.name === name);
-                if (node) { node.status = 'related'; node.in_list = false; node.db_id = null; }
-                updateNodeVisual(name, 'related');
-                closePopup();
-            } else {
-                alert('Error: ' + data.error);
-            }
-        });
-}
-
-// Close popup on click outside
-document.getElementById('node-popup').addEventListener('click', e => e.stopPropagation());
 
 function clearCacheAndReload() {
     fetch('/api/subreddit-map-cache/clear', { method: 'POST' })
@@ -364,16 +228,351 @@ function clearCacheAndReload() {
         .catch(() => loadData());
 }
 
+// ── GRAPH RENDERING ──────────────────────────────────────────────────────
+function renderGraph(nodes, links) {
+    const container = document.getElementById('graph-svg');
+    const W = container.clientWidth  || 1200;
+    const H = container.clientHeight || 700;
+
+    d3.select('#graph-svg').selectAll('*').remove();
+
+    svgEl = d3.select('#graph-svg');
+
+    // ── SVG defs: glow filters ────────────────────────────────────────
+    const defs = svgEl.append('defs');
+
+    function makeGlow(id, color, blur) {
+        const f = defs.append('filter')
+            .attr('id', id)
+            .attr('x', '-60%').attr('y', '-60%')
+            .attr('width', '220%').attr('height', '220%');
+        f.append('feGaussianBlur').attr('stdDeviation', blur).attr('result', 'blur');
+        const merge = f.append('feMerge');
+        merge.append('feMergeNode').attr('in', 'blur');
+        merge.append('feMergeNode').attr('in', 'SourceGraphic');
+    }
+
+    makeGlow('glow-green', '#22c55e', 4);
+    makeGlow('glow-red',   '#ef4444', 4);
+    makeGlow('glow-grey',  '#6b7280', 2);
+
+    // ── Zoom & pan ────────────────────────────────────────────────────
+    zoomBehavior = d3.zoom()
+        .scaleExtent([0.02, 10])
+        .on('zoom', event => {
+            gRoot.attr('transform', event.transform);
+            currentScale = event.transform.k;
+            updateLabelOpacity(currentScale);
+        });
+
+    svgEl.call(zoomBehavior);
+    svgEl.on('dblclick.zoom', null); // disable double-click zoom (conflicts with popup close)
+    svgEl.on('click', () => closePopup());
+
+    gRoot = svgEl.append('g');
+
+    // ── Color & size helpers ──────────────────────────────────────────
+    const colorOf = d => {
+        if (d.status === 'enabled')  return '#22c55e';
+        if (d.status === 'disabled') return '#ef4444';
+        if (d.depth === 1)           return '#6b7280';
+        return '#374151';
+    };
+
+    const filterOf = d => {
+        if (d.status === 'enabled')  return 'url(#glow-green)';
+        if (d.status === 'disabled') return 'url(#glow-red)';
+        if (d.depth === 1)           return 'url(#glow-grey)';
+        return 'none';
+    };
+
+    const maxPosts = d3.max(nodes, d => d.post_count) || 1;
+    const sizeScale = d3.scaleSqrt().domain([0, maxPosts]).range([9, 28]);
+
+    const radiusOf = d => {
+        if (d.in_list) return Math.max(10, sizeScale(d.post_count));
+        if (d.depth === 1) return 6;
+        return 4;
+    };
+
+    // ── Links ─────────────────────────────────────────────────────────
+    // Build a quick lookup so we can tell if a link source is tracked
+    const nodeById = {};
+    nodes.forEach(n => { nodeById[n.id.toLowerCase()] = n; });
+
+    linkSelection = gRoot.append('g').attr('class', 'links')
+        .selectAll('line')
+        .data(links)
+        .enter().append('line')
+        .attr('stroke', d => {
+            const src = nodeById[(typeof d.source === 'object' ? d.source.id : d.source).toLowerCase()];
+            return src && src.in_list ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.05)';
+        })
+        .attr('stroke-width', d => {
+            const src = nodeById[(typeof d.source === 'object' ? d.source.id : d.source).toLowerCase()];
+            return src && src.in_list ? 1.2 : 0.6;
+        });
+
+    // ── Nodes ─────────────────────────────────────────────────────────
+    nodeSelection = gRoot.append('g').attr('class', 'nodes')
+        .selectAll('g')
+        .data(nodes)
+        .enter().append('g')
+        .attr('class', 'node-grp')
+        .attr('cursor', 'pointer')
+        .call(d3.drag()
+            .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.25).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+            .on('end',   (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+        )
+        .on('click', (event, d) => { event.stopPropagation(); showPopup(event, d); });
+
+    nodeSelection.append('circle')
+        .attr('r', radiusOf)
+        .attr('fill', colorOf)
+        .attr('filter', filterOf)
+        .attr('opacity', d => d.depth === 2 ? 0.6 : 0.9);
+
+    nodeSelection.append('text')
+        .text(d => d.name)
+        .attr('y', d => radiusOf(d) + 10)
+        .attr('text-anchor', 'middle')
+        .attr('fill', d => d.in_list ? '#d4d4d4' : (d.depth === 1 ? '#6b7280' : '#374151'))
+        .attr('font-size', d => d.in_list ? '10px' : (d.depth === 1 ? '8px' : '7px'))
+        .attr('font-family', "'IBM Plex Mono', monospace")
+        .attr('pointer-events', 'none')
+        .attr('opacity', 0); // start hidden; updateLabelOpacity reveals them
+
+    // ── Radial initial positions for tracked subs ─────────────────────
+    const tracked = nodes.filter(d => d.in_list);
+    const r0 = Math.min(W, H) * 0.12;
+    tracked.forEach((d, i) => {
+        const angle = (2 * Math.PI * i) / Math.max(tracked.length, 1);
+        d.x = W / 2 + r0 * Math.cos(angle);
+        d.y = H / 2 + r0 * Math.sin(angle);
+    });
+
+    // ── Force simulation ──────────────────────────────────────────────
+    simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links)
+            .id(d => d.id)
+            .distance(d => {
+                const s = typeof d.source === 'object' ? d.source : nodeById[d.source?.toLowerCase()];
+                const t = typeof d.target === 'object' ? d.target : nodeById[d.target?.toLowerCase()];
+                if (s?.in_list && t?.in_list) return 100;
+                if (s?.in_list || t?.in_list) return 120;
+                return 80;
+            })
+            .strength(0.25)
+        )
+        .force('charge', d3.forceManyBody().strength(d => {
+            if (d.in_list)  return -600;
+            if (d.depth === 1) return -140;
+            return -50;
+        }))
+        .force('center', d3.forceCenter(W / 2, H / 2).strength(0.04))
+        .force('collision', d3.forceCollide().radius(d => radiusOf(d) + (d.in_list ? 12 : 6)))
+        .alphaDecay(0.012)
+        .velocityDecay(0.35)
+        .on('tick', () => {
+            linkSelection
+                .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+            nodeSelection.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+    // Stats bar
+    const statsEl = document.getElementById('map-stats');
+    statsEl.textContent = `${nodes.length} nodes  ·  ${links.length} edges  ·  ${nodes.filter(d => d.in_list).length} tracked`;
+    statsEl.style.display = 'block';
+
+    // Initial label opacity
+    updateLabelOpacity(currentScale);
+}
+
+// ── ZOOM CONTROLS ────────────────────────────────────────────────────────
+function zoomIn()  { if (svgEl) svgEl.transition().duration(280).call(zoomBehavior.scaleBy, 1.6); }
+function zoomOut() { if (svgEl) svgEl.transition().duration(280).call(zoomBehavior.scaleBy, 0.625); }
+
+function resetView() {
+    if (!svgEl) return;
+    const container = document.getElementById('graph-svg');
+    const W = container.clientWidth || 1200;
+    const H = container.clientHeight || 700;
+    svgEl.transition().duration(500).call(
+        zoomBehavior.transform,
+        d3.zoomIdentity.translate(W / 2, H / 2).scale(0.8).translate(-W / 2, -H / 2)
+    );
+}
+
+// ── LABEL VISIBILITY ─────────────────────────────────────────────────────
+function updateLabelOpacity(scale) {
+    if (!nodeSelection) return;
+    const forceShow = document.getElementById('showLabels')?.checked;
+    nodeSelection.selectAll('text').attr('opacity', d => {
+        if (forceShow) return 1;
+        if (d.in_list)   return scale > 0.2  ? Math.min(1, (scale - 0.15) / 0.15) : 0;
+        if (d.depth === 1) return scale > 1.2 ? Math.min(0.85, (scale - 1.2) / 0.6) : 0;
+        return scale > 3 ? Math.min(0.65, (scale - 3) / 1) : 0;
+    });
+}
+
+// ── SEARCH HIGHLIGHT ─────────────────────────────────────────────────────
+function highlightSearch(q) {
+    if (!nodeSelection) return;
+    q = q.toLowerCase().trim();
+    nodeSelection.selectAll('circle').attr('opacity', d => {
+        if (!q) return d.depth === 2 ? 0.6 : 0.9;
+        return d.name.toLowerCase().includes(q) ? 1 : 0.08;
+    });
+    nodeSelection.selectAll('text').attr('opacity', d => {
+        if (!q) return document.getElementById('showLabels')?.checked ? 1 : 0;
+        return d.name.toLowerCase().includes(q) ? 1 : 0;
+    });
+}
+
+// ── FULLSCREEN ───────────────────────────────────────────────────────────
+function toggleFullscreen() {
+    const card = document.getElementById('map-card');
+    if (!document.fullscreenElement) {
+        (card.requestFullscreen || card.webkitRequestFullscreen).call(card);
+    } else {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    }
+}
+
+document.addEventListener('fullscreenchange', handleFullscreenChange);
+document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+function handleFullscreenChange() {
+    const btn = document.getElementById('fullscreenBtn');
+    const icon = btn.querySelector('i');
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+        icon.className = 'fas fa-compress';
+        btn.title = 'Exit fullscreen';
+    } else {
+        icon.className = 'fas fa-expand';
+        btn.title = 'Fullscreen';
+    }
+    // Let browser finish the transition then resize forces
+    setTimeout(() => {
+        if (!simulation) return;
+        const svg = document.getElementById('graph-svg');
+        const W = svg.clientWidth, H = svg.clientHeight;
+        simulation.force('center', d3.forceCenter(W / 2, H / 2).strength(0.04));
+        simulation.alpha(0.3).restart();
+    }, 150);
+}
+
+// ── NODE POPUP ───────────────────────────────────────────────────────────
+function showPopup(event, d) {
+    const popup = document.getElementById('node-popup');
+    document.getElementById('popup-title').textContent = 'r/' + d.name;
+
+    const colors = { enabled: '#22c55e', disabled: '#ef4444', related: '#6b7280' };
+    const labels = { enabled: 'Enabled', disabled: 'Disabled', related: 'Not tracked' };
+    let stats = `<span style="display:inline-flex;align-items:center;gap:5px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:${colors[d.status]};display:inline-block;"></span>
+        <span style="color:${colors[d.status]};font-size:0.7rem;">${labels[d.status]}</span>
+    </span>`;
+    if (d.post_count > 0) stats += `<span style="font-size:0.68rem;color:var(--text-muted);margin-left:8px;">${d.post_count} posts</span>`;
+    if (d.depth > 0) stats += `<span style="font-size:0.65rem;color:var(--text-muted);margin-left:8px;">depth ${d.depth}</span>`;
+    document.getElementById('popup-stats').innerHTML = stats;
+
+    let actions = `<a href="https://www.reddit.com/r/${encodeURIComponent(d.name)}" target="_blank" rel="noopener noreferrer"
+        class="btn btn-sm btn-outline-secondary w-100 text-start">
+        <i class="fab fa-reddit me-2"></i>Open r/${d.name} on Reddit
+    </a>`;
+
+    if (d.in_list) {
+        const toggleLabel = d.status === 'enabled' ? 'Pause Scraping' : 'Resume Scraping';
+        const toggleClass = d.status === 'enabled' ? 'btn-outline-warning' : 'btn-outline-success';
+        const toggleIcon  = d.status === 'enabled' ? 'fa-pause-circle' : 'fa-play-circle';
+        actions += `<button class="btn btn-sm ${toggleClass} w-100 text-start" onclick="toggleSub('${d.name}')">
+            <i class="fas ${toggleIcon} me-2"></i>${toggleLabel}
+        </button>`;
+        actions += `<button class="btn btn-sm btn-outline-danger w-100 text-start" onclick="removeSub('${d.name}')">
+            <i class="fas fa-trash-alt me-2"></i>Remove from Scrape List
+        </button>`;
+    } else {
+        actions += `<button class="btn btn-sm btn-outline-success w-100 text-start" onclick="addSub('${d.name}')">
+            <i class="fas fa-plus-circle me-2"></i>Start Scraping This Sub
+        </button>`;
+    }
+
+    document.getElementById('popup-actions').innerHTML = actions;
+
+    const margin = 10, pw = 260, ph = 210;
+    let x = event.clientX + 14, y = event.clientY + 10;
+    if (x + pw > window.innerWidth  - margin) x = event.clientX - pw - 14;
+    if (y + ph > window.innerHeight - margin) y = event.clientY - ph - 10;
+    popup.style.left = Math.max(margin, x) + 'px';
+    popup.style.top  = Math.max(margin, y) + 'px';
+    popup.style.display = 'block';
+}
+
+function closePopup() { document.getElementById('node-popup').style.display = 'none'; }
+
+document.getElementById('node-popup').addEventListener('click', e => e.stopPropagation());
+
+// ── NODE ACTIONS ─────────────────────────────────────────────────────────
+function updateNodeVisual(name, newStatus) {
+    const colors = { enabled: '#22c55e', disabled: '#ef4444', related: '#6b7280' };
+    const filters = { enabled: 'url(#glow-green)', disabled: 'url(#glow-red)', related: 'url(#glow-grey)' };
+    if (!nodeSelection) return;
+    nodeSelection.filter(d => d.name === name).each(d => {
+        d.status = newStatus;
+        d.in_list = newStatus !== 'related';
+        if (newStatus === 'related') d.depth = 1;
+    })
+    .select('circle')
+    .attr('fill', d => colors[d.status])
+    .attr('filter', d => filters[d.status] || 'none');
+}
+
+function addSub(name) {
+    fetch(`/api/scrape-lists/by-name/${encodeURIComponent(name)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const node = currentNodes.find(n => n.name === name);
+                if (node) { node.status = 'enabled'; node.in_list = true; node.db_id = data.id; node.depth = 0; }
+                updateNodeVisual(name, 'enabled');
+                closePopup();
+            } else { alert('Error: ' + data.error); }
+        });
+}
+
+function toggleSub(name) {
+    fetch(`/api/scrape-lists/toggle-by-name/${encodeURIComponent(name)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const ns = data.enabled ? 'enabled' : 'disabled';
+                const node = currentNodes.find(n => n.name === name);
+                if (node) node.status = ns;
+                updateNodeVisual(name, ns);
+                closePopup();
+            } else { alert('Error: ' + data.error); }
+        });
+}
+
+function removeSub(name) {
+    if (!confirm(`Remove r/${name} from scrape list?`)) return;
+    fetch(`/api/scrape-lists/remove-by-name/${encodeURIComponent(name)}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                const node = currentNodes.find(n => n.name === name);
+                if (node) { node.status = 'related'; node.in_list = false; node.db_id = null; node.depth = 1; }
+                updateNodeVisual(name, 'related');
+                closePopup();
+            } else { alert('Error: ' + data.error); }
+        });
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────────
 loadData();
 </script>
-
-<style>
-.node-group circle {
-    transition: opacity 0.2s;
-}
-.node-group:hover circle {
-    filter: brightness(1.2);
-}
-</style>
 
 {% endblock %}
