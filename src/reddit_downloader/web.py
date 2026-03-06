@@ -21,9 +21,27 @@ import mysql.connector
 from mysql.connector import pooling
 import configparser
 
-# Cache for related subreddits (name -> list of related names)
-_related_subreddits_cache = {}
+# File-backed cache for related subreddits (name_lower -> list of related names).
+# Loaded from disk at startup; written back whenever new entries are fetched.
+# Reddit API is only called for subreddits NOT already in the cache file.
+_RELATED_CACHE_FILE = Path.cwd() / 'subreddit_map_cache.json'
 _related_cache_lock = threading.Lock()
+
+def _load_related_cache() -> dict:
+    try:
+        if _RELATED_CACHE_FILE.exists():
+            return json.loads(_RELATED_CACHE_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        pass
+    return {}
+
+def _save_related_cache(cache: dict) -> None:
+    try:
+        _RELATED_CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False), encoding='utf-8')
+    except Exception:
+        pass
+
+_related_subreddits_cache: dict = _load_related_cache()
 
 # Get the directory where this file is located
 _current_dir = Path(__file__).parent
@@ -1146,9 +1164,14 @@ def subreddit_map():
 
 @app.route('/api/subreddit-map-cache/clear', methods=['POST'])
 def api_clear_subreddit_map_cache():
-    """Clear the related-subreddits cache so it refetches from Reddit."""
+    """Clear the related-subreddits cache (memory + file) so the next load refetches from Reddit."""
     with _related_cache_lock:
         _related_subreddits_cache.clear()
+    try:
+        if _RELATED_CACHE_FILE.exists():
+            _RELATED_CACHE_FILE.unlink()
+    except Exception:
+        pass
     return jsonify({'success': True, 'message': 'Cache cleared'})
 
 
@@ -1172,9 +1195,11 @@ def api_subreddit_map_data():
 
         scraped_names_lower = {s['name'].lower() for s in scraped}
 
-        # Fetch related subreddits from Reddit's public search API (with cache)
+        # Fetch related subreddits — served from file cache when available.
+        # Reddit API is only called for subreddits missing from the cache.
         related_map = {}
         headers = {'User-Agent': 'subreddit-map-viewer/1.0'}
+        newly_fetched = False
 
         for sub in scraped:
             name = sub['name']
@@ -1200,8 +1225,14 @@ def api_subreddit_map_data():
                     with _related_cache_lock:
                         _related_subreddits_cache[name_lower] = rel_names
                     related_map[name] = rel_names
+                    newly_fetched = True
             except Exception:
                 related_map[name] = []
+
+        # Persist to file whenever we fetched anything new
+        if newly_fetched:
+            with _related_cache_lock:
+                _save_related_cache(_related_subreddits_cache)
 
         # Build node list
         nodes = []
