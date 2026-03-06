@@ -15,6 +15,9 @@
                 <button class="btn btn-sm btn-outline-secondary" onclick="loadData()">
                     <i class="fas fa-sync"></i> Refresh
                 </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="clearCacheAndReload()" title="Clear cached related-subreddit data and refetch from Reddit">
+                    <i class="fas fa-broom"></i> Clear Cache
+                </button>
             </div>
         </div>
     </div>
@@ -353,6 +356,13 @@ function removeSub(name) {
 
 // Close popup on click outside
 document.getElementById('node-popup').addEventListener('click', e => e.stopPropagation());
+
+function clearCacheAndReload() {
+    fetch('/api/subreddit-map-cache/clear', { method: 'POST' })
+        .then(r => r.json())
+        .then(() => loadData())
+        .catch(() => loadData());
+}
 
 loadData();
 </script>

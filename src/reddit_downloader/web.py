@@ -1144,6 +1144,14 @@ def subreddit_map():
     return render_template('subreddit_map.html', stats=stats, subreddits=subreddits, users=users)
 
 
+@app.route('/api/subreddit-map-cache/clear', methods=['POST'])
+def api_clear_subreddit_map_cache():
+    """Clear the related-subreddits cache so it refetches from Reddit."""
+    with _related_cache_lock:
+        _related_subreddits_cache.clear()
+    return jsonify({'success': True, 'message': 'Cache cleared'})
+
+
 @app.route('/api/subreddit-map-data')
 def api_subreddit_map_data():
     """Returns nodes and links for the subreddit map visualization."""
@@ -1178,7 +1186,7 @@ def api_subreddit_map_data():
 
             try:
                 resp = http_requests.get(
-                    f'https://www.reddit.com/subreddits/search.json?q={name}&limit=8',
+                    f'https://www.reddit.com/subreddits/search.json?q={name}&limit=8&include_over_18=1',
                     headers=headers,
                     timeout=4
                 )
