@@ -433,7 +433,9 @@ let currentPage   = 1;
 let totalGroups   = 0;
 let perPage       = 20;
 
-let _pollTimer    = null;   // interval for active operation polling
+let _pollTimer      = null;
+let _prevHashRunning = false;
+let _prevScanRunning = false;
 let logPanelOpen  = false;
 let logPanelFor   = null;   // 'hash' | 'scan'
 let _confirmResolve = null;
@@ -657,23 +659,19 @@ async function pollOps() {
             fetch('/api/duplicates/scan/status').then(r => r.json()),
         ]);
 
-        const anyRunning = hashSt.running || scanSt.running;
+        const hashJustFinished = _prevHashRunning && !hashSt.running;
+        const scanJustFinished = _prevScanRunning && !scanSt.running;
+        _prevHashRunning = !!hashSt.running;
+        _prevScanRunning = !!scanSt.running;
 
         if (currentView === 'folders') {
             updateFolderRowProgress(hashSt, 'hash');
             updateFolderRowProgress(scanSt, 'scan');
-
-            // Refresh folder list when operations complete
-            if (!anyRunning) {
-                const prevHashFolder = hashSt.folder;
-                const prevScanFolder = scanSt.folder;
-                if (prevHashFolder || prevScanFolder) {
-                    await loadFolders();
-                }
+            if (hashJustFinished || scanJustFinished) {
+                await loadFolders();
             }
         } else if (currentView === 'groups') {
-            // If the current folder's scan just finished, reload groups
-            if (!scanSt.running && scanSt.folder === currentFolder) {
+            if (scanJustFinished && scanSt.folder === currentFolder) {
                 await loadFolderStats();
                 await loadGroups();
             }
