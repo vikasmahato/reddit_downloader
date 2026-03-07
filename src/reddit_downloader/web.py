@@ -1669,6 +1669,12 @@ CREATE TABLE IF NOT EXISTS dup_files (
 CREATE INDEX IF NOT EXISTS idx_df_group   ON dup_files(group_id);
 CREATE INDEX IF NOT EXISTS idx_df_deleted ON dup_files(group_id, is_deleted);
 CREATE INDEX IF NOT EXISTS idx_df_imgid   ON dup_files(image_id);
+CREATE TABLE IF NOT EXISTS phash_cache (
+    path  TEXT    PRIMARY KEY,
+    mtime REAL    NOT NULL,
+    size  INTEGER NOT NULL,
+    phash TEXT
+);
 """
 
 _MEDIA_EXT = {'.jpg','.jpeg','.png','.gif','.bmp','.webp','.mp4','.webm','.mov','.avi','.mkv'}
