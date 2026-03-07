@@ -466,8 +466,7 @@ def run_scan(
 
     hashed_count = len(file_hashes)
     progress(
-        f'Hashed {hashed_count:,} files ({cache_hits:,} from cache, {skipped:,} skipped). '
-        f'Building BK-tree…',
+        f'Hashed {hashed_count:,} files ({cache_hits:,} from cache, {skipped:,} skipped).',
         cache_hits + done, total,
     )
 
@@ -482,32 +481,56 @@ def run_scan(
         n_new_fails  = len(new_cache_entries) - n_new_hashes
         progress(f'Cached {n_new_hashes:,} new hashes + {n_new_fails:,} failures.', 0, 0)
 
-    # 3. Build BK-tree
-    tree = BKTree()
-    for fp, h in file_hashes:
-        tree.add(h, str(fp))
+    # 3. Numpy vectorized similarity search (replaces BK-tree for large n)
+    #    Uses a 16-bit popcount lookup table to compute Hamming distances
+    #    in bulk — orders of magnitude faster than per-pair Python calls.
+    n = len(file_hashes)
+    paths_arr = [str(fp) for fp, _ in file_hashes]
 
-    # 4. BK-tree search + union-find (with stop checks)
+    # Build uint64 numpy array of all hashes
+    hash_arr = np.array([h for _, h in file_hashes], dtype=np.uint64)
+
+    # 16-bit popcount lookup table (built once, ~64KB)
+    _PC = np.zeros(65536, dtype=np.uint8)
+    for _i in range(65536):
+        _PC[_i] = bin(_i).count('1')
+
     uf         = UnionFind()
     pair_min_d: dict[tuple[str, str], int] = {}
-    n_searched = len(file_hashes)
 
-    for i, (fp, h) in enumerate(file_hashes):
+    BATCH = 512  # queries per iteration; ~17MB working set at 270k hashes
+    progress(f'Searching similarities across {n:,} hashes (numpy, batch={BATCH})…', 0, n)
+
+    for i in range(0, n, BATCH):
         if _stop_requested:
-            n_searched = i
-            progress(f'Stop requested after BK-tree search of {i:,}/{len(file_hashes):,} — saving partial results…', i, len(file_hashes))
+            progress(f'Stop requested after {i:,}/{n:,} — saving partial results…', i, n)
             break
-        if i % 2000 == 0 and i > 0:
-            progress(f'Searching similarities… {i:,}/{len(file_hashes):,}', i, len(file_hashes))
-        sp      = str(fp)
-        similar = tree.search(h, threshold)
-        for other, dist in similar:
-            if other == sp:
-                continue
-            uf.union(sp, other)
-            key = (sp, other) if sp < other else (other, sp)
-            if key not in pair_min_d or dist < pair_min_d[key]:
-                pair_min_d[key] = dist
+        if i > 0 and i % (BATCH * 20) == 0:
+            progress(f'Searching similarities… {i:,}/{n:,}', i, n)
+
+        batch_end  = min(i + BATCH, n)
+        # XOR each query hash against every hash: (batch, n) uint64
+        xor = hash_arr[i:batch_end, None] ^ hash_arr[None, :]   # (B, n)
+        # Hamming distance via 4 × 16-bit lookup
+        dists = (
+            _PC[(xor >>  0) & 0xFFFF] +
+            _PC[(xor >> 16) & 0xFFFF] +
+            _PC[(xor >> 32) & 0xFFFF] +
+            _PC[(xor >> 48) & 0xFFFF]
+        ).astype(np.uint8)  # (B, n)
+
+        # Find pairs within threshold (upper triangle only to avoid duplicates)
+        qi_range = np.arange(i, batch_end)
+        for bi, gi in enumerate(qi_range):
+            row   = dists[bi]                                    # (n,)
+            match = np.where((row <= threshold) & (np.arange(n) > gi))[0]
+            for j in match:
+                pa, pb = paths_arr[gi], paths_arr[j]
+                uf.union(pa, pb)
+                key = (pa, pb) if pa < pb else (pb, pa)
+                d = int(row[j])
+                if key not in pair_min_d or d < pair_min_d[key]:
+                    pair_min_d[key] = d
 
     # 5. Filter to groups ≥ 2
     raw_groups: dict[str, list[str]] = {
