@@ -430,11 +430,18 @@ def run_scan(
     for fp, h in file_hashes:
         tree.add(h, str(fp))
 
-    # 4. BK-tree search + union-find
+    # 4. BK-tree search + union-find (with stop checks)
     uf         = UnionFind()
     pair_min_d: dict[tuple[str, str], int] = {}
+    n_searched = len(file_hashes)
 
-    for fp, h in file_hashes:
+    for i, (fp, h) in enumerate(file_hashes):
+        if _stop_requested:
+            n_searched = i
+            progress(f'Stop requested after BK-tree search of {i:,}/{len(file_hashes):,} — saving partial results…', i, len(file_hashes))
+            break
+        if i % 2000 == 0 and i > 0:
+            progress(f'Searching similarities… {i:,}/{len(file_hashes):,}', i, len(file_hashes))
         sp      = str(fp)
         similar = tree.search(h, threshold)
         for other, dist in similar:
