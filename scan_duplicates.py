@@ -223,13 +223,25 @@ CREATE TABLE IF NOT EXISTS scan_info (
     hash_size           INTEGER,
     is_partial          INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS folder_scan_info (
+    folder              TEXT    PRIMARY KEY,
+    scanned_at          TEXT,
+    scan_duration_sec   REAL,
+    total_files_scanned INTEGER,
+    total_groups        INTEGER,
+    total_wasted_bytes  INTEGER,
+    threshold           INTEGER,
+    hash_size           INTEGER,
+    is_partial          INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS dup_groups (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_hash    TEXT    NOT NULL UNIQUE,
+    file_hash    TEXT    NOT NULL,
     file_count   INTEGER NOT NULL,
     total_size   INTEGER NOT NULL,
     wasted_size  INTEGER NOT NULL,
-    min_distance INTEGER NOT NULL DEFAULT 0
+    min_distance INTEGER NOT NULL DEFAULT 0,
+    folder       TEXT
 );
 CREATE TABLE IF NOT EXISTS dup_files (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -286,6 +298,31 @@ def init_db(db_path: Path) -> sqlite3.Connection:
             COMMIT;
         """)
 
+    # Migrate dup_groups: add folder column and remove file_hash UNIQUE constraint
+    try:
+        cols = [row[1] for row in conn.execute('PRAGMA table_info(dup_groups)').fetchall()]
+        if 'folder' not in cols:
+            conn.executescript("""
+                BEGIN;
+                CREATE TABLE dup_groups_new (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_hash    TEXT    NOT NULL,
+                    file_count   INTEGER NOT NULL,
+                    total_size   INTEGER NOT NULL,
+                    wasted_size  INTEGER NOT NULL,
+                    min_distance INTEGER NOT NULL DEFAULT 0,
+                    folder       TEXT
+                );
+                INSERT INTO dup_groups_new
+                    SELECT id, file_hash, file_count, total_size, wasted_size, min_distance, NULL
+                    FROM dup_groups;
+                DROP TABLE dup_groups;
+                ALTER TABLE dup_groups_new RENAME TO dup_groups;
+                COMMIT;
+            """)
+    except Exception:
+        pass
+
     return conn
 
 
@@ -311,6 +348,7 @@ def _write_results(
     path_to_phash: dict,
     path_to_md5: dict,
     md5_to_db: dict,
+    folder_name: Optional[str] = None,
 ) -> int:
     """Write groups to SQLite. Returns total wasted bytes."""
     total_wasted = 0
@@ -334,10 +372,10 @@ def _write_results(
 
         rep_hash = hex(path_to_phash.get(root, 0))
         sc.execute(
-            'INSERT OR REPLACE INTO dup_groups '
-            '(file_hash, file_count, total_size, wasted_size, min_distance) '
-            'VALUES (?,?,?,?,?)',
-            (rep_hash, len(members), total_size, wasted_size, min_dist),
+            'INSERT INTO dup_groups '
+            '(file_hash, file_count, total_size, wasted_size, min_distance, folder) '
+            'VALUES (?,?,?,?,?,?)',
+            (rep_hash, len(members), total_size, wasted_size, min_dist, folder_name),
         )
         gid = sc.lastrowid
 
@@ -369,6 +407,8 @@ def run_scan(
     hash_size: int = DEFAULT_HASH_SIZE,
     images_only: bool = True,
     progress_cb: Callable[[str, int, int], None] = None,
+    folder_path: Optional[Path] = None,
+    use_cache_only: bool = False,
 ) -> dict:
     """
     Full pipeline.  Returns a stats dict.
@@ -401,11 +441,15 @@ def run_scan(
             pass
     progress(f'Loaded {len(phash_cache):,} cached hashes.', 0, 0)
 
-    # 1. List files (images only by default; videos are skipped)
+    # Derive folder name for DB storage (just the directory name, not full path)
+    folder_name: Optional[str] = folder_path.name if folder_path else None
+
+    # 1. List files — use folder_path if given, else scan entire downloads dir
     scan_exts = IMAGE_EXTENSIONS if images_only else MEDIA_EXTENSIONS
-    progress(f'Listing {"image" if images_only else "media"} files…', 0, 0)
+    scan_dir  = folder_path.resolve() if folder_path else dl_dir
+    progress(f'Listing {"image" if images_only else "media"} files in {scan_dir.name}…', 0, 0)
     all_paths = [
-        p for p in dl_dir.rglob('*')
+        p for p in scan_dir.rglob('*')
         if p.is_file() and p.suffix.lower() in scan_exts
     ]
     total   = len(all_paths)
@@ -437,6 +481,15 @@ def run_scan(
             to_hash.append((sp, mtime, size, hash_size))
 
     progress(f'{cache_hits:,} cache hits, {len(to_hash):,} to hash, {skipped:,} skipped.', cache_hits, total)
+
+    # If use_cache_only: skip hash computation entirely, treat uncached as skipped
+    if use_cache_only:
+        skipped += len(to_hash)
+        to_hash = []
+        progress(
+            f'Cache-only mode: {cache_hits:,} hashes loaded, {skipped:,} uncached/skipped.',
+            cache_hits, total,
+        )
 
     # 3. Hash uncached files in parallel
     done = 0
@@ -579,29 +632,53 @@ def run_scan(
         except Exception as e:
             progress(f'Warning: DB query failed ({e})')
 
-    # 7. Write SQLite (clear old results first)
+    # 7. Write SQLite (clear old results first, scoped to folder if given)
     is_partial = _stop_requested
     status_label = 'partial' if is_partial else 'complete'
     progress(f'Writing duplicates.db ({status_label})…', 0, 0)
 
-    sc.execute('DELETE FROM dup_files')
-    sc.execute('DELETE FROM dup_groups')
-    sc.execute('DELETE FROM scan_info')
+    if folder_name:
+        # Clear only this folder's results
+        sc.execute(
+            'DELETE FROM dup_files WHERE group_id IN '
+            '(SELECT id FROM dup_groups WHERE folder = ?)',
+            (folder_name,),
+        )
+        sc.execute('DELETE FROM dup_groups WHERE folder = ?', (folder_name,))
+    else:
+        # Global scan: clear all global (folder=NULL) results
+        sc.execute(
+            'DELETE FROM dup_files WHERE group_id IN '
+            '(SELECT id FROM dup_groups WHERE folder IS NULL)'
+        )
+        sc.execute('DELETE FROM dup_groups WHERE folder IS NULL')
+        sc.execute('DELETE FROM scan_info')
     sdb.commit()
 
     path_to_phash = {str(fp): h for fp, h in file_hashes}
     total_wasted  = _write_results(sc, sdb, raw_groups, pair_min_d,
-                                   path_to_phash, path_to_md5, md5_to_db)
+                                   path_to_phash, path_to_md5, md5_to_db,
+                                   folder_name)
 
     elapsed = time.time() - start
-    sc.execute(
-        "INSERT INTO scan_info "
-        "(id, scanned_at, scan_duration_sec, total_files_scanned, "
-        "total_groups, total_wasted_bytes, threshold, hash_size, is_partial) "
-        "VALUES (1, datetime('now','localtime'), ?, ?, ?, ?, ?, ?, ?)",
-        (elapsed, hashed_count, len(raw_groups), total_wasted, threshold, hash_size,
-         1 if is_partial else 0),
-    )
+    if folder_name:
+        sc.execute(
+            "INSERT OR REPLACE INTO folder_scan_info "
+            "(folder, scanned_at, scan_duration_sec, total_files_scanned, "
+            "total_groups, total_wasted_bytes, threshold, hash_size, is_partial) "
+            "VALUES (?, datetime('now','localtime'), ?, ?, ?, ?, ?, ?, ?)",
+            (folder_name, elapsed, hashed_count, len(raw_groups), total_wasted,
+             threshold, hash_size, 1 if is_partial else 0),
+        )
+    else:
+        sc.execute(
+            "INSERT INTO scan_info "
+            "(id, scanned_at, scan_duration_sec, total_files_scanned, "
+            "total_groups, total_wasted_bytes, threshold, hash_size, is_partial) "
+            "VALUES (1, datetime('now','localtime'), ?, ?, ?, ?, ?, ?, ?)",
+            (elapsed, hashed_count, len(raw_groups), total_wasted, threshold, hash_size,
+             1 if is_partial else 0),
+        )
     sdb.commit()
     sdb.close()
 
@@ -659,6 +736,10 @@ Hamming distance guide (out of 64 bits):
                     help='Also scan video files (mp4, webm, etc.) — slow, not recommended')
     ap.add_argument('--downloads-dir', default=str(DOWNLOADS_DIR),
                     help='Path to reddit_downloads folder')
+    ap.add_argument('--folder',
+                    help='Only scan this specific folder (full path). Uses cached hashes only.')
+    ap.add_argument('--use-cache-only', action='store_true',
+                    help='Skip hash computation; only use hashes already in phash_cache.')
     ap.add_argument('--progress-json', action='store_true',
                     help='Emit JSON progress lines (used by web UI)')
     args = ap.parse_args()
@@ -667,6 +748,16 @@ Hamming distance guide (out of 64 bits):
     if not dl_dir.exists():
         print(f'Error: {dl_dir} not found.', file=sys.stderr)
         sys.exit(1)
+
+    folder_path = None
+    use_cache_only = args.use_cache_only
+    if args.folder:
+        folder_path = Path(args.folder).resolve()
+        if not folder_path.exists():
+            print(f'Error: {folder_path} not found.', file=sys.stderr)
+            sys.exit(1)
+        # Default to cache-only when a specific folder is given
+        use_cache_only = True
 
     mysql_cfg = None if args.no_db else _get_mysql_config()
 
@@ -677,13 +768,15 @@ Hamming distance guide (out of 64 bits):
             print(msg)
 
     run_scan(
-        downloads_dir = dl_dir,
-        db_path       = DUPES_DB,
-        mysql_cfg     = mysql_cfg,
-        threshold     = args.threshold,
-        hash_size     = args.hash_size,
-        images_only   = not args.include_videos,
-        progress_cb   = cb,
+        downloads_dir  = dl_dir,
+        db_path        = DUPES_DB,
+        mysql_cfg      = mysql_cfg,
+        threshold      = args.threshold,
+        hash_size      = args.hash_size,
+        images_only    = not args.include_videos,
+        progress_cb    = cb,
+        folder_path    = folder_path,
+        use_cache_only = use_cache_only,
     )
 
 

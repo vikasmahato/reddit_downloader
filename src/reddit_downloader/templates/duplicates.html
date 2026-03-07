@@ -19,6 +19,117 @@
     color: var(--text-muted);
     margin: 0;
 }
+.dup-back-btn {
+    font-size: 0.65rem;
+    padding: 0.25rem 0.7rem;
+    border-radius: var(--r);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: all 0.15s;
+    display: none;
+}
+.dup-back-btn:hover { border-color: var(--accent); color: var(--accent); }
+#current-folder-label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--accent);
+    display: none;
+}
+
+/* ── FOLDER LIST ────────────────────────────────────── */
+.folder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.folder-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 0.6rem 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    transition: border-color 0.15s;
+}
+.folder-row:hover { border-color: var(--border-2); }
+.folder-row.is-active { border-color: var(--accent); }
+
+.folder-name {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text);
+    min-width: 140px;
+}
+.folder-meta {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    flex: 1;
+}
+.folder-meta-item { display: flex; flex-direction: column; gap: 1px; }
+.folder-meta-val { color: var(--text-dim); font-weight: 600; }
+.folder-meta-lbl { font-size: 0.55rem; letter-spacing: 0.06em; text-transform: uppercase; }
+
+.folder-actions {
+    display: flex;
+    gap: 0.35rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+.f-btn {
+    font-size: 0.62rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: var(--r);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.f-btn:hover { border-color: var(--border-2); color: var(--text); }
+.f-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.f-btn-primary { border-color: rgba(255,69,0,0.4); color: var(--accent); }
+.f-btn-primary:hover { background: rgba(255,69,0,0.1); border-color: var(--accent); }
+.f-btn-stop { border-color: rgba(239,68,68,0.4); color: #f87171; display: none; }
+.f-btn-stop:hover { background: rgba(239,68,68,0.1); border-color: #ef4444; }
+
+/* ── FOLDER PROGRESS ────────────────────────────────── */
+.folder-progress {
+    width: 100%;
+    margin-top: 0.35rem;
+    display: none;
+}
+.folder-progress-msg {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+    display: flex;
+    justify-content: space-between;
+}
+.progress-track {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+}
 
 /* ── STATS BAR ──────────────────────────────────────── */
 .dup-stats {
@@ -31,6 +142,7 @@
     padding: 0.7rem 1.2rem;
     margin-bottom: 1rem;
     flex-wrap: wrap;
+    display: none;
 }
 .dup-stat { display: flex; flex-direction: column; gap: 1px; }
 .dup-stat-val {
@@ -40,7 +152,6 @@
     color: var(--text);
     line-height: 1;
 }
-.dup-stat-val.danger  { color: var(--danger); }
 .dup-stat-val.warning { color: #f59e0b; }
 .dup-stat-label {
     font-size: 0.58rem;
@@ -48,11 +159,7 @@
     text-transform: uppercase;
     color: var(--text-muted);
 }
-.dup-stats-sep {
-    width: 1px; height: 32px;
-    background: var(--border);
-    flex-shrink: 0;
-}
+.dup-stats-sep { width: 1px; height: 32px; background: var(--border); flex-shrink: 0; }
 .dup-stats-actions { margin-left: auto; display: flex; gap: 0.5rem; align-items: center; }
 
 /* ── CONTROLS ───────────────────────────────────────── */
@@ -62,13 +169,7 @@
     gap: 0.5rem;
     margin-bottom: 1rem;
     flex-wrap: wrap;
-}
-.dup-controls label {
-    font-size: 0.62rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin: 0;
+    display: none;
 }
 .sort-btn {
     font-size: 0.65rem;
@@ -87,37 +188,7 @@
     color: var(--accent);
     background: rgba(255,69,0,0.08);
 }
-#total-label {
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    margin-left: auto;
-}
-
-/* ── SCAN PROGRESS ──────────────────────────────────── */
-#scan-progress-bar {
-    display: none;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-    font-size: 0.7rem;
-    color: var(--text-dim);
-}
-.progress-track {
-    height: 3px;
-    background: var(--border);
-    border-radius: 2px;
-    margin-top: 0.5rem;
-    overflow: hidden;
-}
-.progress-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 2px;
-    transition: width 0.3s;
-}
+#total-label { font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); margin-left: auto; }
 
 /* ── GROUP CARDS ─────────────────────────────────────── */
 .dup-group {
@@ -129,7 +200,6 @@
     transition: border-color 0.15s;
 }
 .dup-group:hover { border-color: var(--border-2); }
-
 .dup-group-head {
     display: flex;
     align-items: center;
@@ -139,12 +209,7 @@
     border-bottom: 1px solid var(--border);
     flex-wrap: wrap;
 }
-.dup-hash {
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    letter-spacing: 0.04em;
-}
+.dup-hash { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); letter-spacing: 0.04em; }
 .dup-badge {
     font-family: var(--font-mono);
     font-size: 0.6rem;
@@ -159,7 +224,6 @@
 .dup-badge-exact  { background: rgba(239,68,68,0.15);  color: #ef4444; }
 .dup-badge-near   { background: rgba(251,146,60,0.15); color: #fb923c; }
 .dup-badge-sim    { background: rgba(250,204,21,0.15); color: #facc15; }
-
 .dup-group-actions-head { margin-left: auto; display: flex; gap: 0.4rem; }
 .dup-btn {
     font-size: 0.62rem;
@@ -179,233 +243,57 @@
 
 /* ── FILE ROWS ───────────────────────────────────────── */
 .dup-files { display: flex; flex-direction: column; }
-
 .dup-file-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    display: flex; align-items: center; gap: 0.75rem;
     padding: 0.5rem 0.9rem;
     border-bottom: 1px solid rgba(255,255,255,0.04);
     transition: background 0.1s;
 }
 .dup-file-row:last-child { border-bottom: none; }
 .dup-file-row:hover { background: rgba(255,255,255,0.02); }
-.dup-file-row.is-deleted {
-    opacity: 0.35;
-    pointer-events: none;
-    text-decoration: line-through;
-}
-
+.dup-file-row.is-deleted { opacity: 0.35; pointer-events: none; text-decoration: line-through; }
 .dup-thumb-wrap {
-    flex-shrink: 0;
-    width: 52px;
-    height: 52px;
-    border-radius: 5px;
-    overflow: hidden;
-    background: var(--surface-2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-shrink: 0; width: 52px; height: 52px; border-radius: 5px; overflow: hidden;
+    background: var(--surface-2); display: flex; align-items: center; justify-content: center;
 }
-.dup-thumb-wrap img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-.dup-thumb-ext {
-    font-family: var(--font-mono);
-    font-size: 0.58rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-
+.dup-thumb-wrap img { width: 100%; height: 100%; object-fit: cover; }
+.dup-thumb-ext { font-family: var(--font-mono); font-size: 0.58rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .dup-file-info { flex: 1; min-width: 0; }
-.dup-file-path {
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.dup-file-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-top: 3px;
-    flex-wrap: wrap;
-}
-.dup-file-size {
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    color: var(--text-muted);
-}
-.dup-file-sub {
-    font-size: 0.6rem;
-    color: var(--accent);
-    font-family: var(--font-mono);
-}
-.dup-file-title {
-    font-size: 0.62rem;
-    color: var(--text-dim);
-    max-width: 320px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.dup-file-no-db {
-    font-size: 0.58rem;
-    color: var(--text-muted);
-    font-style: italic;
-}
-
+.dup-file-path { font-family: var(--font-mono); font-size: 0.62rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dup-file-meta { display: flex; align-items: center; gap: 0.6rem; margin-top: 3px; flex-wrap: wrap; }
+.dup-file-size { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); }
+.dup-file-sub  { font-size: 0.6rem; color: var(--accent); font-family: var(--font-mono); }
+.dup-file-title { font-size: 0.62rem; color: var(--text-dim); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dup-file-no-db { font-size: 0.58rem; color: var(--text-muted); font-style: italic; }
 .dup-file-actions { flex-shrink: 0; display: flex; gap: 0.35rem; align-items: center; }
-.dup-file-link {
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    text-decoration: none;
-    padding: 3px 6px;
-    border-radius: 4px;
-    border: 1px solid transparent;
-    transition: all 0.15s;
-}
+.dup-file-link { color: var(--text-muted); font-size: 0.7rem; text-decoration: none; padding: 3px 6px; border-radius: 4px; border: 1px solid transparent; transition: all 0.15s; }
 .dup-file-link:hover { border-color: var(--border); color: var(--text-dim); }
 
 /* ── PAGINATION ──────────────────────────────────────── */
-.dup-pagination {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    margin-top: 1.5rem;
-    padding-bottom: 2rem;
-}
-.page-btn {
-    font-size: 0.65rem;
-    padding: 0.3rem 0.7rem;
-    border-radius: var(--r);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-family: var(--font-mono);
-    transition: all 0.15s;
-}
+.dup-pagination { display: flex; align-items: center; justify-content: center; gap: 0.4rem; margin-top: 1.5rem; padding-bottom: 2rem; }
+.page-btn { font-size: 0.65rem; padding: 0.3rem 0.7rem; border-radius: var(--r); border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; font-family: var(--font-mono); transition: all 0.15s; }
 .page-btn.active { background: rgba(255,69,0,0.15); border-color: var(--accent); color: var(--accent); }
 .page-btn:hover:not(.active) { border-color: var(--border-2); color: var(--text-dim); }
 .page-btn:disabled { opacity: 0.3; cursor: default; }
 
-/* ── EMPTY STATES ───────────────────────────────────── */
-.dup-empty {
-    text-align: center;
-    padding: 4rem 2rem;
-    color: var(--text-muted);
-    font-size: 0.75rem;
-}
+/* ── EMPTY ───────────────────────────────────────────── */
+.dup-empty { text-align: center; padding: 4rem 2rem; color: var(--text-muted); font-size: 0.75rem; }
 .dup-empty i { font-size: 2.5rem; margin-bottom: 1rem; color: var(--border-2); display: block; }
 
-/* ── SCAN ERROR BANNER ──────────────────────────────── */
-#scan-error-banner {
-    display: none;
-    background: rgba(239,68,68,0.08);
-    border: 1px solid rgba(239,68,68,0.3);
-    border-radius: var(--r);
-    padding: 0.6rem 1rem;
-    margin-bottom: 0.75rem;
-    font-size: 0.7rem;
-    color: #f87171;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-#scan-error-banner i { flex-shrink: 0; }
-#scan-error-banner .err-msg { flex: 1; }
-#scan-error-banner .err-logs-link {
-    font-size: 0.62rem;
-    color: #f87171;
-    text-decoration: underline;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
 /* ── LOG PANEL ──────────────────────────────────────── */
-#log-panel {
-    display: none;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    margin-bottom: 1rem;
-    overflow: hidden;
-}
-.log-panel-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 0.9rem;
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--border);
-}
-.log-panel-title {
-    font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
-.log-panel-close {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.75rem;
-    padding: 0 4px;
-    line-height: 1;
-}
+#log-panel { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); margin-bottom: 1rem; overflow: hidden; }
+.log-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.9rem; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.log-panel-title { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.log-panel-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.75rem; padding: 0 4px; }
 .log-panel-close:hover { color: var(--text); }
-#log-output {
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    line-height: 1.6;
-    color: var(--text-dim);
-    padding: 0.75rem 1rem;
-    max-height: 300px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
-}
+#log-output { font-family: var(--font-mono); font-size: 0.6rem; line-height: 1.6; color: var(--text-dim); padding: 0.75rem 1rem; max-height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 #log-output .log-err  { color: #f87171; }
 #log-output .log-warn { color: #fb923c; }
 #log-output .log-ok   { color: #4ade80; }
 
 /* ── TOAST ──────────────────────────────────────────── */
-#toast-container {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    pointer-events: none;
-}
-.toast-item {
-    pointer-events: auto;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: var(--r);
-    padding: 0.55rem 0.9rem;
-    font-size: 0.68rem;
-    color: var(--text);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
-    max-width: 340px;
-    animation: toastIn 0.2s ease;
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-}
+#toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; pointer-events: none; }
+.toast-item { pointer-events: auto; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--r); padding: 0.55rem 0.9rem; font-size: 0.68rem; color: var(--text); box-shadow: 0 4px 24px rgba(0,0,0,0.4); max-width: 340px; animation: toastIn 0.2s ease; display: flex; align-items: flex-start; gap: 0.5rem; }
 .toast-item.toast-error  { border-left-color: #ef4444; }
 .toast-item.toast-warn   { border-left-color: #f59e0b; }
 .toast-item.toast-ok     { border-left-color: #22c55e; }
@@ -417,109 +305,37 @@
 @keyframes toastIn  { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
 @keyframes toastOut { from { opacity:1; } to { opacity:0; transform:translateY(8px); } }
 
-/* ── CONFIRM DIALOG ─────────────────────────────────── */
-#confirm-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.6);
-    z-index: 9998;
-    align-items: center;
-    justify-content: center;
-}
+/* ── CONFIRM ─────────────────────────────────────────── */
+#confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9998; align-items: center; justify-content: center; }
 #confirm-overlay.open { display: flex; }
-#confirm-box {
-    background: var(--surface);
-    border: 1px solid var(--border-2);
-    border-radius: var(--r-lg);
-    padding: 1.5rem 1.75rem;
-    max-width: 380px;
-    width: 90%;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-}
-.confirm-icon {
-    font-size: 1.5rem;
-    color: var(--danger);
-    margin-bottom: 0.75rem;
-}
-.confirm-title {
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: var(--text);
-    margin-bottom: 0.4rem;
-}
-.confirm-body {
-    font-size: 0.7rem;
-    color: var(--text-dim);
-    line-height: 1.5;
-    margin-bottom: 1.25rem;
-}
+#confirm-box { background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-lg); padding: 1.5rem 1.75rem; max-width: 380px; width: 90%; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
+.confirm-icon { font-size: 1.5rem; color: var(--danger); margin-bottom: 0.75rem; }
+.confirm-title { font-size: 0.8rem; font-weight: 700; color: var(--text); margin-bottom: 0.4rem; }
+.confirm-body  { font-size: 0.7rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 1.25rem; }
 .confirm-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
-.confirm-cancel {
-    font-size: 0.65rem; padding: 0.3rem 0.9rem;
-    border: 1px solid var(--border); background: transparent;
-    color: var(--text-muted); border-radius: var(--r); cursor: pointer;
-    font-family: var(--font-mono);
-}
+.confirm-cancel { font-size: 0.65rem; padding: 0.3rem 0.9rem; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: var(--r); cursor: pointer; font-family: var(--font-mono); }
 .confirm-cancel:hover { border-color: var(--border-2); color: var(--text); }
-.confirm-ok {
-    font-size: 0.65rem; padding: 0.3rem 0.9rem;
-    border: 1px solid rgba(239,68,68,0.5); background: rgba(239,68,68,0.12);
-    color: #f87171; border-radius: var(--r); cursor: pointer;
-    font-family: var(--font-mono);
-}
+.confirm-ok { font-size: 0.65rem; padding: 0.3rem 0.9rem; border: 1px solid rgba(239,68,68,0.5); background: rgba(239,68,68,0.12); color: #f87171; border-radius: var(--r); cursor: pointer; font-family: var(--font-mono); }
 .confirm-ok:hover { background: rgba(239,68,68,0.22); border-color: #ef4444; color: #fca5a5; }
+
+/* ── THRESHOLD SELECT ───────────────────────────────── */
+.threshold-wrap {
+    display: flex; align-items: center; gap: 0.4rem;
+    margin-left: auto;
+}
+.threshold-wrap label {
+    font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.08em; margin: 0;
+}
 </style>
 
 <!-- Header -->
 <div class="dup-header">
     <h4 class="dup-title"><i class="fas fa-copy me-2"></i>Duplicate Images</h4>
-</div>
-
-<!-- Stats bar -->
-<div class="dup-stats" id="stats-bar">
-    <div class="dup-stat">
-        <span class="dup-stat-val" id="stat-groups">—</span>
-        <span class="dup-stat-label">duplicate groups</span>
-    </div>
-    <div class="dup-stats-sep"></div>
-    <div class="dup-stat">
-        <span class="dup-stat-val warning" id="stat-wasted">—</span>
-        <span class="dup-stat-label">wasted space</span>
-    </div>
-    <div class="dup-stats-sep"></div>
-    <div class="dup-stat">
-        <span class="dup-stat-val" id="stat-files">—</span>
-        <span class="dup-stat-label">files scanned</span>
-    </div>
-    <div class="dup-stats-sep"></div>
-    <div class="dup-stat">
-        <span class="dup-stat-val" id="stat-scanned" style="font-size:0.75rem;">—</span>
-        <span class="dup-stat-label">last scan</span>
-    </div>
-    <div class="dup-stats-actions">
-        <span id="partial-badge" style="display:none;font-size:0.6rem;color:#fb923c;font-family:var(--font-mono);border:1px solid rgba(251,146,60,0.4);border-radius:4px;padding:2px 8px;" title="Scan was stopped early — results are incomplete">
-            <i class="fas fa-exclamation-triangle me-1"></i>Partial
-        </span>
-        <label style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin:0;">
-            Threshold
-        </label>
-        <select id="threshold-sel" class="form-select form-select-sm"
-                style="width:auto;font-size:0.65rem;background:var(--surface-2);border-color:var(--border);color:var(--text);padding:0.15rem 0.5rem;"
-                title="Max Hamming distance between perceptual hashes to consider images duplicates">
-            <option value="0">0 — Identical</option>
-            <option value="5">5 — Near-identical</option>
-            <option value="10" selected>10 — Similar (default)</option>
-            <option value="15">15 — Loose</option>
-            <option value="20">20 — Very loose</option>
-        </select>
-        <button class="btn btn-sm btn-outline-secondary" onclick="startScan()" id="scan-btn">
-            <i class="fas fa-search"></i> Scan Now
-        </button>
-        <button class="btn btn-sm btn-outline-danger" onclick="stopScan()" id="stop-btn" style="display:none;">
-            <i class="fas fa-stop"></i> Stop
-        </button>
-    </div>
+    <button class="dup-back-btn" id="back-btn" onclick="showFoldersView()">
+        <i class="fas fa-arrow-left me-1"></i>Folders
+    </button>
+    <span id="current-folder-label"></span>
 </div>
 
 <!-- Toast container -->
@@ -538,58 +354,88 @@
     </div>
 </div>
 
-<!-- Scan error banner -->
-<div id="scan-error-banner" style="display:none;">
-    <i class="fas fa-times-circle"></i>
-    <span class="err-msg" id="scan-error-msg"></span>
-    <span class="err-logs-link" onclick="toggleLogPanel()"><i class="fas fa-terminal me-1"></i>View logs</span>
-</div>
-
-<!-- Scan progress -->
-<div id="scan-progress-bar">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
-        <span id="scan-msg">Starting…</span>
-        <button class="dup-btn" onclick="toggleLogPanel()" title="Toggle log output" style="padding:0.1rem 0.45rem;">
-            <i class="fas fa-terminal"></i>
-        </button>
-    </div>
-    <div class="progress-track">
-        <div class="progress-fill" id="scan-fill" style="width:0%"></div>
-    </div>
-</div>
-
-<!-- Log panel -->
+<!-- Log panel (shared) -->
 <div id="log-panel">
     <div class="log-panel-head">
-        <span class="log-panel-title"><i class="fas fa-terminal me-2"></i>Scan Logs</span>
-        <button class="log-panel-close" onclick="toggleLogPanel()" title="Close"><i class="fas fa-times"></i></button>
+        <span class="log-panel-title"><i class="fas fa-terminal me-2"></i>Logs</span>
+        <button class="log-panel-close" onclick="closeLogPanel()"><i class="fas fa-times"></i></button>
     </div>
-    <div id="log-output"><span style="color:var(--text-muted);">No logs yet — run a scan.</span></div>
+    <div id="log-output"><span style="color:var(--text-muted);">No logs yet.</span></div>
 </div>
 
-<!-- Controls -->
-<div class="dup-controls" id="controls-bar" style="display:none;">
-    <span style="font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);">Sort by</span>
-    <button class="sort-btn active" id="sort-wasted" onclick="setSort('wasted_size')">Wasted Space</button>
-    <button class="sort-btn" id="sort-count" onclick="setSort('file_count')">Duplicate Count</button>
-    <span id="total-label"></span>
+<!-- ═══════════ FOLDERS VIEW ═══════════ -->
+<div id="folders-view">
+    <div id="folders-list">
+        <div class="dup-empty"><i class="fas fa-spinner fa-spin"></i>Loading folders…</div>
+    </div>
 </div>
 
-<!-- Groups container -->
-<div id="groups-container"></div>
+<!-- ═══════════ GROUPS VIEW ═══════════ -->
+<div id="groups-view" style="display:none">
+    <!-- Stats bar -->
+    <div class="dup-stats" id="stats-bar">
+        <div class="dup-stat">
+            <span class="dup-stat-val" id="stat-groups">—</span>
+            <span class="dup-stat-label">duplicate groups</span>
+        </div>
+        <div class="dup-stats-sep"></div>
+        <div class="dup-stat">
+            <span class="dup-stat-val warning" id="stat-wasted">—</span>
+            <span class="dup-stat-label">wasted space</span>
+        </div>
+        <div class="dup-stats-sep"></div>
+        <div class="dup-stat">
+            <span class="dup-stat-val" id="stat-scanned" style="font-size:0.75rem;">—</span>
+            <span class="dup-stat-label">last scan</span>
+        </div>
+        <div class="dup-stats-actions">
+            <span id="partial-badge" style="display:none;font-size:0.6rem;color:#fb923c;font-family:var(--font-mono);border:1px solid rgba(251,146,60,0.4);border-radius:4px;padding:2px 8px;">
+                <i class="fas fa-exclamation-triangle me-1"></i>Partial
+            </span>
+            <div class="threshold-wrap">
+                <label>Threshold</label>
+                <select id="threshold-sel" class="form-select form-select-sm"
+                        style="width:auto;font-size:0.65rem;background:var(--surface-2);border-color:var(--border);color:var(--text);padding:0.15rem 0.5rem;">
+                    <option value="0">0 — Identical</option>
+                    <option value="5">5 — Near-identical</option>
+                    <option value="10" selected>10 — Similar (default)</option>
+                    <option value="15">15 — Loose</option>
+                    <option value="20">20 — Very loose</option>
+                </select>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="startFindForCurrent()" id="rescan-btn">
+                <i class="fas fa-sync-alt"></i> Re-scan
+            </button>
+        </div>
+    </div>
 
-<!-- Pagination -->
-<div class="dup-pagination" id="pagination"></div>
+    <!-- Controls -->
+    <div class="dup-controls" id="controls-bar">
+        <span style="font-size:0.62rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);">Sort by</span>
+        <button class="sort-btn active" id="sort-wasted" onclick="setSort('wasted_size')">Wasted Space</button>
+        <button class="sort-btn" id="sort-count" onclick="setSort('file_count')">Duplicate Count</button>
+        <span id="total-label"></span>
+    </div>
+
+    <!-- Groups container -->
+    <div id="groups-container"></div>
+
+    <!-- Pagination -->
+    <div class="dup-pagination" id="pagination"></div>
+</div>
 
 <script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+let currentView   = 'folders';  // 'folders' | 'groups'
+let currentFolder = null;       // folder name when in groups view
 let currentSort   = 'wasted_size';
 let currentPage   = 1;
 let totalGroups   = 0;
 let perPage       = 20;
-let scanPollTimer = null;
+
+let _pollTimer    = null;   // interval for active operation polling
 let logPanelOpen  = false;
-let logOffset     = 0;
-let logPollTimer  = null;
+let logPanelFor   = null;   // 'hash' | 'scan'
 let _confirmResolve = null;
 
 function escHtml(str) {
@@ -599,38 +445,303 @@ function escHtml(str) {
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 (async function init() {
-    await loadStats();
-    await loadGroups();
+    await loadFolders();
+    startPoll();
 })();
 
-// ── STATS ─────────────────────────────────────────────────────────────────
-async function loadStats() {
+// ── VIEW SWITCHING ────────────────────────────────────────────────────────
+function showFoldersView() {
+    currentView   = 'folders';
+    currentFolder = null;
+    document.getElementById('folders-view').style.display = '';
+    document.getElementById('groups-view').style.display  = 'none';
+    document.getElementById('back-btn').style.display     = 'none';
+    document.getElementById('current-folder-label').style.display = 'none';
+    closeLogPanel();
+    loadFolders();
+}
+
+async function showGroupsView(folderName) {
+    currentView   = 'groups';
+    currentFolder = folderName;
+    currentPage   = 1;
+    document.getElementById('folders-view').style.display = 'none';
+    document.getElementById('groups-view').style.display  = '';
+    document.getElementById('back-btn').style.display     = '';
+    const lbl = document.getElementById('current-folder-label');
+    lbl.textContent = 'r/' + folderName;
+    lbl.style.display = '';
+    document.getElementById('stats-bar').style.display    = 'flex';
+    document.getElementById('controls-bar').style.display = 'flex';
+    await loadFolderStats();
+    await loadGroups();
+}
+
+// ── FOLDERS ───────────────────────────────────────────────────────────────
+async function loadFolders() {
+    if (currentView !== 'folders') return;
     try {
-        const data = await fetch('/api/duplicates/stats').then(r => r.json());
+        const data = await fetch('/api/duplicates/folders').then(r => r.json());
+        if (!data.success) {
+            document.getElementById('folders-list').innerHTML =
+                `<div class="dup-empty"><i class="fas fa-exclamation-triangle"></i>${escHtml(data.error)}</div>`;
+            return;
+        }
+        // Also grab current operation states to show active indicators
+        const [hashSt, scanSt] = await Promise.all([
+            fetch('/api/duplicates/hash/status').then(r => r.json()).catch(() => ({})),
+            fetch('/api/duplicates/scan/status').then(r => r.json()).catch(() => ({})),
+        ]);
+        renderFolderList(data.folders, hashSt, scanSt);
+    } catch(e) {
+        document.getElementById('folders-list').innerHTML =
+            `<div class="dup-empty"><i class="fas fa-exclamation-triangle"></i>${e}</div>`;
+    }
+}
+
+function renderFolderList(folders, hashSt, scanSt) {
+    if (!folders.length) {
+        document.getElementById('folders-list').innerHTML =
+            '<div class="dup-empty"><i class="fas fa-folder-open"></i>No folders found in reddit_downloads.</div>';
+        return;
+    }
+    const html = folders.map(f => renderFolderRow(f, hashSt, scanSt)).join('');
+    document.getElementById('folders-list').innerHTML =
+        `<div class="folder-list">${html}</div>`;
+}
+
+function renderFolderRow(f, hashSt, scanSt) {
+    const hashRunning = hashSt.running && hashSt.folder === f.name;
+    const scanRunning = scanSt.running && scanSt.folder === f.name;
+    const anyRunning  = hashRunning || scanRunning;
+
+    const hashPct = f.total_in_cache > 0
+        ? Math.round(f.cached_count * 100 / f.total_in_cache)
+        : (f.cached_count > 0 ? 100 : 0);
+
+    const metaHtml = `
+        <span class="folder-meta-item">
+            <span class="folder-meta-val">${f.cached_count.toLocaleString()}</span>
+            <span class="folder-meta-lbl">hashes cached${f.total_in_cache > f.cached_count ? ' / ' + f.total_in_cache.toLocaleString() + ' total' : ''}</span>
+        </span>
+        ${f.dup_groups > 0 ? `
+        <span class="folder-meta-item">
+            <span class="folder-meta-val">${f.dup_groups.toLocaleString()}</span>
+            <span class="folder-meta-lbl">dup groups${f.wasted_fmt ? ' · ' + f.wasted_fmt + ' wasted' : ''}</span>
+        </span>` : ''}
+        ${f.scanned_at ? `
+        <span class="folder-meta-item">
+            <span class="folder-meta-val" style="font-size:0.58rem;">${f.scanned_at}</span>
+            <span class="folder-meta-lbl">last scan${f.threshold != null ? ' · thr=' + f.threshold : ''}</span>
+        </span>` : ''}
+    `;
+
+    // Progress bar (shown during active ops)
+    const progressHtml = `
+        <div class="folder-progress" id="fprog-${f.name}" ${anyRunning ? 'style="display:block"' : ''}>
+            <div class="folder-progress-msg">
+                <span id="fprog-msg-${f.name}">${
+                    hashRunning ? (hashSt.message || 'Computing hashes…') :
+                    scanRunning ? (scanSt.message || 'Finding duplicates…') : ''
+                }</span>
+                <span id="fprog-pct-${f.name}"></span>
+            </div>
+            <div class="progress-track">
+                <div class="progress-fill" id="fprog-fill-${f.name}" style="width:${
+                    hashRunning && hashSt.total > 0 ? Math.round(hashSt.progress/hashSt.total*100) :
+                    scanRunning && scanSt.total > 0 ? Math.round(scanSt.progress/scanSt.total*100) : 0
+                }%"></div>
+            </div>
+        </div>
+    `;
+
+    const disabledAttr = anyRunning ? 'disabled' : '';
+
+    return `
+<div class="folder-row${anyRunning ? ' is-active' : ''}" id="frow-${f.name}">
+    <div class="folder-name"><i class="fas fa-folder me-1" style="color:var(--text-muted);font-size:0.65rem;"></i>${escHtml(f.name)}</div>
+    <div class="folder-meta">${metaHtml}</div>
+    <div class="folder-actions">
+        <button class="f-btn" id="fbtn-hash-${f.name}" ${disabledAttr}
+                onclick="startHash('${f.name}')" title="Compute pHash for all images">
+            <i class="fas fa-hashtag me-1"></i>Calc Hashes
+        </button>
+        <button class="f-btn" id="fbtn-find-${f.name}" ${disabledAttr}
+                onclick="startFind('${f.name}')" title="Find duplicates using cached hashes">
+            <i class="fas fa-search me-1"></i>Find Dupes
+        </button>
+        <button class="f-btn f-btn-primary" id="fbtn-show-${f.name}"
+                onclick="showGroupsView('${f.name}')" title="View duplicate groups for this folder">
+            <i class="fas fa-images me-1"></i>Show Dupes
+        </button>
+        <button class="f-btn f-btn-stop" id="fbtn-stop-hash-${f.name}" ${hashRunning ? 'style="display:inline-block"' : ''}
+                onclick="stopHash()" title="Stop">
+            <i class="fas fa-stop me-1"></i>Stop
+        </button>
+        <button class="f-btn f-btn-stop" id="fbtn-stop-find-${f.name}" ${scanRunning ? 'style="display:inline-block"' : ''}
+                onclick="stopFind()" title="Stop">
+            <i class="fas fa-stop me-1"></i>Stop
+        </button>
+    </div>
+    ${progressHtml}
+</div>`;
+}
+
+// ── HASH OPERATIONS ────────────────────────────────────────────────────────
+async function startHash(folderName) {
+    try {
+        const res = await fetch('/api/duplicates/hash', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder: folderName}),
+        }).then(r => r.json());
+        if (!res.success) { showToast(res.error, 'error'); return; }
+        showToast(`Computing hashes for r/${folderName}…`, 'ok');
+        await loadFolders();  // refresh to show progress bars
+    } catch(e) { showToast('Request failed: ' + e, 'error'); }
+}
+
+async function stopHash() {
+    try { await fetch('/api/duplicates/hash/stop', {method: 'POST'}); } catch(_) {}
+}
+
+// ── FIND OPERATIONS ────────────────────────────────────────────────────────
+async function startFind(folderName) {
+    const threshold = 10; // default; could expose UI control
+    try {
+        const res = await fetch('/api/duplicates/scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder: folderName, threshold}),
+        }).then(r => r.json());
+        if (!res.success) { showToast(res.error, 'error'); return; }
+        showToast(`Finding duplicates in r/${folderName}…`, 'ok');
+        await loadFolders();
+    } catch(e) { showToast('Request failed: ' + e, 'error'); }
+}
+
+async function stopFind() {
+    try { await fetch('/api/duplicates/scan/stop', {method: 'POST'}); } catch(_) {}
+}
+
+// ── RE-SCAN from groups view ──────────────────────────────────────────────
+async function startFindForCurrent() {
+    if (!currentFolder) return;
+    const threshold = parseInt(document.getElementById('threshold-sel').value);
+    const btn = document.getElementById('rescan-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    try {
+        const res = await fetch('/api/duplicates/scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder: currentFolder, threshold}),
+        }).then(r => r.json());
+        if (!res.success) { showToast(res.error, 'error'); }
+        else { showToast(`Re-scanning r/${currentFolder}…`, 'ok'); }
+    } catch(e) { showToast('Request failed: ' + e, 'error'); }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sync-alt"></i> Re-scan';
+}
+
+// ── POLLING ────────────────────────────────────────────────────────────────
+function startPoll() {
+    if (_pollTimer) return;
+    _pollTimer = setInterval(pollOps, 2000);
+}
+
+async function pollOps() {
+    try {
+        const [hashSt, scanSt] = await Promise.all([
+            fetch('/api/duplicates/hash/status').then(r => r.json()),
+            fetch('/api/duplicates/scan/status').then(r => r.json()),
+        ]);
+
+        const anyRunning = hashSt.running || scanSt.running;
+
+        if (currentView === 'folders') {
+            updateFolderRowProgress(hashSt, 'hash');
+            updateFolderRowProgress(scanSt, 'scan');
+
+            // Refresh folder list when operations complete
+            if (!anyRunning) {
+                const prevHashFolder = hashSt.folder;
+                const prevScanFolder = scanSt.folder;
+                if (prevHashFolder || prevScanFolder) {
+                    await loadFolders();
+                }
+            }
+        } else if (currentView === 'groups') {
+            // If the current folder's scan just finished, reload groups
+            if (!scanSt.running && scanSt.folder === currentFolder) {
+                await loadFolderStats();
+                await loadGroups();
+            }
+        }
+    } catch(_) {}
+}
+
+function updateFolderRowProgress(st, opType) {
+    if (!st.folder) return;
+    const frow    = document.getElementById(`frow-${st.folder}`);
+    const fprog   = document.getElementById(`fprog-${st.folder}`);
+    const fmsg    = document.getElementById(`fprog-msg-${st.folder}`);
+    const fpct    = document.getElementById(`fprog-pct-${st.folder}`);
+    const ffill   = document.getElementById(`fprog-fill-${st.folder}`);
+    const stopH   = document.getElementById(`fbtn-stop-hash-${st.folder}`);
+    const stopF   = document.getElementById(`fbtn-stop-find-${st.folder}`);
+    const btnH    = document.getElementById(`fbtn-hash-${st.folder}`);
+    const btnFind = document.getElementById(`fbtn-find-${st.folder}`);
+
+    if (!fprog) return;
+
+    if (st.running) {
+        frow && frow.classList.add('is-active');
+        fprog.style.display = 'block';
+        if (fmsg) fmsg.textContent = st.message || (opType === 'hash' ? 'Computing hashes…' : 'Finding duplicates…');
+        const pct = st.total > 0 ? Math.round(st.progress / st.total * 100) : 0;
+        if (fpct) fpct.textContent = pct + '%';
+        if (ffill) ffill.style.width = pct + '%';
+        if (btnH)    btnH.disabled    = true;
+        if (btnFind) btnFind.disabled = true;
+        if (opType === 'hash' && stopH) stopH.style.display = 'inline-block';
+        if (opType === 'scan' && stopF) stopF.style.display = 'inline-block';
+    } else {
+        frow && frow.classList.remove('is-active');
+        fprog.style.display = 'none';
+        if (btnH)    btnH.disabled    = false;
+        if (btnFind) btnFind.disabled = false;
+        if (stopH) stopH.style.display = 'none';
+        if (stopF) stopF.style.display = 'none';
+        if (st.error) showToast(st.error, 'error');
+    }
+}
+
+// ── FOLDER STATS (groups view) ────────────────────────────────────────────
+async function loadFolderStats() {
+    try {
+        const data = await fetch(`/api/duplicates/folder_stats?folder=${encodeURIComponent(currentFolder)}`).then(r => r.json());
         if (data.has_data) {
             document.getElementById('stat-groups').textContent  = data.total_groups.toLocaleString();
             document.getElementById('stat-wasted').textContent  = data.total_wasted_fmt;
-            document.getElementById('stat-files').textContent   = data.total_files_scanned.toLocaleString();
             document.getElementById('stat-scanned').textContent = data.scanned_at;
             document.getElementById('partial-badge').style.display = data.partial ? 'inline-flex' : 'none';
-            // Restore threshold selector to match last scan
             if (data.threshold != null) {
                 const sel = document.getElementById('threshold-sel');
                 const opt = sel.querySelector(`option[value="${data.threshold}"]`);
                 if (opt) sel.value = data.threshold;
             }
         } else {
-            document.getElementById('stat-groups').textContent  = '—';
+            document.getElementById('stat-groups').textContent  = '0';
             document.getElementById('stat-wasted').textContent  = '—';
-            document.getElementById('stat-files').textContent   = '—';
-            document.getElementById('stat-scanned').textContent = 'Never';
+            document.getElementById('stat-scanned').textContent = 'Never scanned';
         }
     } catch(_) {}
 }
 
-// ── TOAST ──────────────────────────────────────────────────────────────────
+// ── TOAST ─────────────────────────────────────────────────────────────────
 function showToast(msg, type = 'error') {
-    const icons = { error: 'fa-times-circle', warn: 'fa-exclamation-triangle', ok: 'fa-check-circle' };
+    const icons = {error: 'fa-times-circle', warn: 'fa-exclamation-triangle', ok: 'fa-check-circle'};
     const el = document.createElement('div');
     el.className = `toast-item toast-${type}`;
     el.innerHTML = `<i class="fas ${icons[type] || icons.error}"></i><span>${escHtml(msg)}</span>`;
@@ -641,7 +752,7 @@ function showToast(msg, type = 'error') {
     }, 4000);
 }
 
-// ── CONFIRM DIALOG ─────────────────────────────────────────────────────────
+// ── CONFIRM ───────────────────────────────────────────────────────────────
 function showConfirm(title, body) {
     document.getElementById('confirm-title').textContent = title;
     document.getElementById('confirm-body').textContent  = body;
@@ -659,21 +770,25 @@ document.getElementById('confirm-overlay').addEventListener('click', e => {
     }
 });
 
-// ── LOG PANEL ──────────────────────────────────────────────────────────────
-function toggleLogPanel() {
-    logPanelOpen = !logPanelOpen;
-    document.getElementById('log-panel').style.display = logPanelOpen ? 'block' : 'none';
-    if (logPanelOpen) fetchLogs();
+// ── LOG PANEL ─────────────────────────────────────────────────────────────
+function openLogPanel(opType) {
+    logPanelOpen = true;
+    logPanelFor  = opType;
+    document.getElementById('log-panel').style.display = 'block';
+    fetchLogs();
 }
-
+function closeLogPanel() {
+    logPanelOpen = false;
+    document.getElementById('log-panel').style.display = 'none';
+}
 async function fetchLogs() {
+    if (!logPanelOpen) return;
+    const url = logPanelFor === 'hash' ? '/api/duplicates/hash/logs?offset=0'
+                                       : '/api/duplicates/scan/logs?offset=0';
     try {
-        const data = await fetch(`/api/duplicates/scan/logs?offset=0`).then(r => r.json());
+        const data = await fetch(url).then(r => r.json());
         const out = document.getElementById('log-output');
-        if (!data.lines.length) {
-            out.innerHTML = '<span style="color:var(--text-muted);">No logs yet — run a scan.</span>';
-            return;
-        }
+        if (!data.lines.length) { out.innerHTML = '<span style="color:var(--text-muted);">No logs yet.</span>'; return; }
         out.innerHTML = data.lines.map(l => {
             const cls = l.startsWith('[stderr]') || /error|traceback|exception/i.test(l) ? 'log-err'
                       : /warning/i.test(l) ? 'log-warn'
@@ -682,111 +797,6 @@ async function fetchLogs() {
         }).join('\n');
         out.scrollTop = out.scrollHeight;
     } catch(_) {}
-}
-
-function startLogPolling() {
-    if (logPollTimer) return;
-    logPollTimer = setInterval(() => { if (logPanelOpen) fetchLogs(); }, 1000);
-}
-function stopLogPolling() {
-    clearInterval(logPollTimer);
-    logPollTimer = null;
-    if (logPanelOpen) fetchLogs(); // final fetch
-}
-
-// ── SCAN ──────────────────────────────────────────────────────────────────
-async function startScan() {
-    const btn = document.getElementById('scan-btn');
-    const threshold = parseInt(document.getElementById('threshold-sel').value);
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning…';
-    document.getElementById('scan-error-banner').style.display = 'none';
-    document.getElementById('scan-progress-bar').style.display = 'block';
-    document.getElementById('stop-btn').style.display  = 'inline-flex';
-    document.getElementById('partial-badge').style.display = 'none';
-
-    // Reset log panel
-    logOffset = 0;
-    document.getElementById('log-output').innerHTML = '<span style="color:var(--text-muted);">Starting scan…</span>';
-
-    try {
-        const res = await fetch('/api/duplicates/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ threshold }),
-        }).then(r => r.json());
-        if (!res.success && res.error !== 'Scan already running') {
-            showToast(res.error, 'error');
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
-            document.getElementById('scan-progress-bar').style.display = 'none';
-            return;
-        }
-    } catch(e) {
-        showToast('Failed to start scan: ' + e, 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
-        document.getElementById('scan-progress-bar').style.display = 'none';
-        return;
-    }
-
-    startLogPolling();
-    scanPollTimer = setInterval(pollScanStatus, 1500);
-}
-
-async function pollScanStatus() {
-    try {
-        const s = await fetch('/api/duplicates/scan/status').then(r => r.json());
-        document.getElementById('scan-msg').textContent = s.message || 'Running…';
-        const pct = s.total > 0 ? Math.round(s.progress / s.total * 100) : 0;
-        document.getElementById('scan-fill').style.width = pct + '%';
-
-        if (!s.running) {
-            clearInterval(scanPollTimer);
-            scanPollTimer = null;
-            stopLogPolling();
-            document.getElementById('scan-progress-bar').style.display = 'none';
-            document.getElementById('stop-btn').style.display = 'none';
-            const btn = document.getElementById('scan-btn');
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
-
-            if (s.error) {
-                document.getElementById('scan-error-msg').textContent = s.error;
-                document.getElementById('scan-error-banner').style.display = 'flex';
-                showToast(s.error, 'error');
-                if (!logPanelOpen) toggleLogPanel();
-                // Still reload in case partial results were written
-                currentPage = 1;
-                await loadStats();
-                await loadGroups();
-                return;
-            }
-
-            if (s.partial) {
-                showToast('Scan stopped — partial results saved.', 'warn');
-            } else {
-                showToast('Scan complete!', 'ok');
-            }
-            currentPage = 1;
-            await loadStats();
-            await loadGroups();
-        }
-    } catch(_) {}
-}
-
-async function stopScan() {
-    const btn = document.getElementById('stop-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    try {
-        await fetch('/api/duplicates/scan/stop', { method: 'POST' });
-        // pollScanStatus will detect running=false and finalize
-    } catch(e) {
-        showToast('Stop request failed: ' + e, 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-stop"></i> Stop';
-    }
 }
 
 // ── SORT ──────────────────────────────────────────────────────────────────
@@ -802,34 +812,24 @@ function setSort(key) {
 async function loadGroups() {
     const container = document.getElementById('groups-container');
     container.innerHTML = '<div class="dup-empty"><i class="fas fa-spinner fa-spin"></i>Loading…</div>';
-
     try {
-        const url = `/api/duplicates/groups?sort=${currentSort}&page=${currentPage}&per_page=${perPage}`;
+        const folder = currentFolder ? `&folder=${encodeURIComponent(currentFolder)}` : '';
+        const url = `/api/duplicates/groups?sort=${currentSort}&page=${currentPage}&per_page=${perPage}${folder}`;
         const data = await fetch(url).then(r => r.json());
-
         if (!data.success) {
-            container.innerHTML = `<div class="dup-empty"><i class="fas fa-exclamation-triangle"></i>${data.error}</div>`;
+            container.innerHTML = `<div class="dup-empty"><i class="fas fa-exclamation-triangle"></i>${escHtml(data.error)}</div>`;
             return;
         }
-
         totalGroups = data.total;
-        document.getElementById('controls-bar').style.display =
-            totalGroups > 0 ? 'flex' : 'none';
-        document.getElementById('total-label').textContent =
-            `${totalGroups.toLocaleString()} groups`;
-
+        document.getElementById('total-label').textContent = `${totalGroups.toLocaleString()} groups`;
         if (!data.groups.length) {
-            container.innerHTML = `
-                <div class="dup-empty">
-                    <i class="fas fa-check-circle" style="color:var(--success);"></i>
-                    ${totalGroups === 0
-                        ? 'No duplicates found — or run a scan first.'
-                        : 'No more groups on this page.'}
-                </div>`;
+            container.innerHTML = `<div class="dup-empty">
+                <i class="fas fa-check-circle" style="color:var(--success);"></i>
+                ${totalGroups === 0 ? 'No duplicates found. Run <b>Find Dupes</b> first.' : 'No more groups.'}
+            </div>`;
             renderPagination(0);
             return;
         }
-
         container.innerHTML = data.groups.map(renderGroup).join('');
         renderPagination(totalGroups);
     } catch(e) {
@@ -847,29 +847,20 @@ function simBadge(dist) {
 function renderGroup(g) {
     const filesHtml = g.files.map(f => renderFile(g, f)).join('');
     const subreddits = [...new Set(g.files.map(f => f.subreddit).filter(Boolean))];
-    const subBadges = subreddits.slice(0, 3).map(s =>
-        `<span class="dup-badge dup-badge-size">r/${s}</span>`).join('');
-    const simLabel = simBadge(g.min_distance || 0);
-
+    const subBadges  = subreddits.slice(0, 3).map(s => `<span class="dup-badge dup-badge-size">r/${s}</span>`).join('');
     return `
 <div class="dup-group" id="group-${g.id}">
     <div class="dup-group-head">
         <span class="dup-hash">${g.file_hash.slice(0,16)}…</span>
         <span class="dup-badge dup-badge-count">${g.file_count} copies</span>
-        ${simLabel}
+        ${simBadge(g.min_distance || 0)}
         <span class="dup-badge dup-badge-wasted">${g.wasted_size_fmt} wasted</span>
         <span class="dup-badge dup-badge-size">${g.total_size_fmt} total</span>
         ${subBadges}
         <div class="dup-group-actions-head">
-            <button class="dup-btn" onclick="keepFirst(${g.id})" title="Keep the first file, delete all others">
-                <i class="fas fa-shield-alt me-1"></i>Keep first
-            </button>
-            <button class="dup-btn" onclick="keepLargest(${g.id})" title="Keep the largest file, delete all others">
-                <i class="fas fa-star me-1"></i>Keep largest
-            </button>
-            <button class="dup-btn dup-btn-danger" onclick="deleteAll(${g.id})" title="Delete all copies">
-                <i class="fas fa-trash me-1"></i>Delete all
-            </button>
+            <button class="dup-btn" onclick="keepFirst(${g.id})"><i class="fas fa-shield-alt me-1"></i>Keep first</button>
+            <button class="dup-btn" onclick="keepLargest(${g.id})"><i class="fas fa-star me-1"></i>Keep largest</button>
+            <button class="dup-btn dup-btn-danger" onclick="deleteAll(${g.id})"><i class="fas fa-trash me-1"></i>Delete all</button>
         </div>
     </div>
     <div class="dup-files">${filesHtml}</div>
@@ -886,35 +877,22 @@ function renderFile(g, f) {
     } else {
         thumbHtml = `<span class="dup-thumb-ext">${ext}</span>`;
     }
-
     const shortPath = f.file_path.replace(/\\/g, '/').replace(/^.*?reddit_downloads\//, '');
     const postInfo  = f.subreddit
-        ? `<span class="dup-file-sub">r/${f.subreddit}</span>
-           ${f.post_title ? `<span class="dup-file-title">${escHtml(f.post_title.slice(0,80))}</span>` : ''}`
+        ? `<span class="dup-file-sub">r/${f.subreddit}</span>${f.post_title ? `<span class="dup-file-title">${escHtml(f.post_title.slice(0,80))}</span>` : ''}`
         : `<span class="dup-file-no-db">not in database</span>`;
-
-    const viewLink = f.web_url
-        ? `<a href="/reddit_downloads/${f.web_url}" target="_blank" class="dup-file-link" title="View"><i class="fas fa-external-link-alt"></i></a>`
-        : '';
-    const redditLink = f.permalink
-        ? `<a href="https://reddit.com${f.permalink}" target="_blank" rel="noopener" class="dup-file-link" title="Reddit post"><i class="fab fa-reddit-alien"></i></a>`
-        : '';
-
+    const viewLink   = f.web_url ? `<a href="/reddit_downloads/${f.web_url}" target="_blank" class="dup-file-link" title="View"><i class="fas fa-external-link-alt"></i></a>` : '';
+    const redditLink = f.permalink ? `<a href="https://reddit.com${f.permalink}" target="_blank" rel="noopener" class="dup-file-link" title="Reddit post"><i class="fab fa-reddit-alien"></i></a>` : '';
     return `
 <div class="dup-file-row" id="file-row-${f.id}">
     <div class="dup-thumb-wrap">${thumbHtml}</div>
     <div class="dup-file-info">
         <div class="dup-file-path" title="${escHtml(f.file_path)}">${escHtml(shortPath)}</div>
-        <div class="dup-file-meta">
-            <span class="dup-file-size">${f.file_size_fmt}</span>
-            ${postInfo}
-        </div>
+        <div class="dup-file-meta"><span class="dup-file-size">${f.file_size_fmt}</span>${postInfo}</div>
     </div>
     <div class="dup-file-actions">
         ${viewLink}${redditLink}
-        <button class="dup-btn dup-btn-danger" onclick="deleteFile(${f.id}, ${g.id})" title="Delete this copy">
-            <i class="fas fa-trash-alt"></i>
-        </button>
+        <button class="dup-btn dup-btn-danger" onclick="deleteFile(${f.id}, ${g.id})" title="Delete this copy"><i class="fas fa-trash-alt"></i></button>
     </div>
 </div>`;
 }
@@ -924,70 +902,51 @@ async function deleteFile(fileId, groupId) {
     await deleteBatch([fileId]);
     refreshGroup(groupId);
 }
-
 async function keepFirst(groupId) {
     const rows = document.querySelectorAll(`#group-${groupId} .dup-file-row:not(.is-deleted)`);
     if (rows.length <= 1) return;
     const ids = Array.from(rows).slice(1).map(r => parseInt(r.id.replace('file-row-', '')));
-    await deleteBatch(ids);
-    refreshGroup(groupId);
+    await deleteBatch(ids); refreshGroup(groupId);
 }
-
 async function keepLargest(groupId) {
     const rows = Array.from(document.querySelectorAll(`#group-${groupId} .dup-file-row:not(.is-deleted)`));
     if (rows.length <= 1) return;
-    // Sort by size text — we already render largest first, so skip the first one
     const ids = rows.slice(1).map(r => parseInt(r.id.replace('file-row-', '')));
-    await deleteBatch(ids);
-    refreshGroup(groupId);
+    await deleteBatch(ids); refreshGroup(groupId);
 }
-
 async function deleteAll(groupId) {
     const rows = document.querySelectorAll(`#group-${groupId} .dup-file-row:not(.is-deleted)`);
-    const ok = await showConfirm(
-        'Delete all copies',
-        `This will permanently delete all ${rows.length} copies in this group from disk and the database.`
-    );
+    const ok = await showConfirm('Delete all copies',
+        `This will permanently delete all ${rows.length} copies from disk and the database.`);
     if (!ok) return;
     const ids = Array.from(rows).map(r => parseInt(r.id.replace('file-row-', '')));
-    await deleteBatch(ids);
-    refreshGroup(groupId);
+    await deleteBatch(ids); refreshGroup(groupId);
 }
-
 async function deleteBatch(fileIds) {
     if (!fileIds.length) return;
+    fileIds.forEach(id => {
+        const row = document.getElementById(`file-row-${id}`);
+        if (row) row.classList.add('is-deleted');
+    });
     try {
-        // Mark rows immediately for instant feedback
-        fileIds.forEach(id => {
-            const row = document.getElementById(`file-row-${id}`);
-            if (row) row.classList.add('is-deleted');
-        });
-
         const res = await fetch('/api/duplicates/delete', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_ids: fileIds }),
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({file_ids: fileIds}),
         }).then(r => r.json());
-
-        if (!res.success) { showToast('Delete failed: ' + res.error, 'error'); return; }
+        if (!res.success) showToast('Delete failed: ' + res.error, 'error');
         if (res.errors?.length) showToast(`${res.errors.length} file(s) had errors`, 'warn');
-    } catch(e) {
-        showToast('Request failed: ' + e, 'error');
-    }
+    } catch(e) { showToast('Request failed: ' + e, 'error'); }
 }
-
 function refreshGroup(groupId) {
-    // Remove group if only 1 or 0 non-deleted rows remain
-    const el  = document.getElementById(`group-${groupId}`);
+    const el = document.getElementById(`group-${groupId}`);
     if (!el) return;
-    const alive = el.querySelectorAll('.dup-file-row:not(.is-deleted)').length;
-    if (alive <= 1) {
+    if (el.querySelectorAll('.dup-file-row:not(.is-deleted)').length <= 1) {
         el.style.transition = 'opacity 0.3s';
         el.style.opacity = '0';
         setTimeout(() => { el.remove(); updateTotalLabel(); }, 300);
     }
 }
-
 function updateTotalLabel() {
     const remaining = document.querySelectorAll('.dup-group').length;
     document.getElementById('total-label').textContent = `${remaining.toLocaleString()} groups`;
@@ -998,31 +957,15 @@ function renderPagination(total) {
     const totalPages = Math.ceil(total / perPage);
     const el = document.getElementById('pagination');
     if (totalPages <= 1) { el.innerHTML = ''; return; }
-
-    let html = `<button class="page-btn" onclick="goPage(${currentPage - 1})" ${currentPage <= 1 ? 'disabled' : ''}>
-        <i class="fas fa-chevron-left"></i>
-    </button>`;
-
+    let html = `<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage<=1?'disabled':''}><i class="fas fa-chevron-left"></i></button>`;
     const start = Math.max(1, currentPage - 3);
     const end   = Math.min(totalPages, currentPage + 3);
     if (start > 1) html += `<button class="page-btn" onclick="goPage(1)">1</button>${start > 2 ? '<span style="color:var(--text-muted);padding:0 4px">…</span>' : ''}`;
-    for (let p = start; p <= end; p++) {
-        html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" onclick="goPage(${p})">${p}</button>`;
-    }
-    if (end < totalPages) html += `${end < totalPages - 1 ? '<span style="color:var(--text-muted);padding:0 4px">…</span>' : ''}<button class="page-btn" onclick="goPage(${totalPages})">${totalPages}</button>`;
-
-    html += `<button class="page-btn" onclick="goPage(${currentPage + 1})" ${currentPage >= totalPages ? 'disabled' : ''}>
-        <i class="fas fa-chevron-right"></i>
-    </button>`;
+    for (let p = start; p <= end; p++) html += `<button class="page-btn ${p===currentPage?'active':''}" onclick="goPage(${p})">${p}</button>`;
+    if (end < totalPages) html += `${end < totalPages-1 ? '<span style="color:var(--text-muted);padding:0 4px">…</span>' : ''}<button class="page-btn" onclick="goPage(${totalPages})">${totalPages}</button>`;
+    html += `<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage>=totalPages?'disabled':''}><i class="fas fa-chevron-right"></i></button>`;
     el.innerHTML = html;
 }
-
-function goPage(p) {
-    currentPage = p;
-    loadGroups();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-// ── UTILS ──────────────────────────────────────────────────────────────────
+function goPage(p) { currentPage = p; loadGroups(); window.scrollTo({top:0,behavior:'smooth'}); }
 </script>
 {% endblock %}

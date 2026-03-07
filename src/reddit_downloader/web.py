@@ -1648,10 +1648,15 @@ CREATE TABLE IF NOT EXISTS scan_info (
     total_files_scanned INTEGER, total_groups INTEGER, total_wasted_bytes INTEGER,
     threshold INTEGER, hash_size INTEGER, is_partial INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS folder_scan_info (
+    folder TEXT PRIMARY KEY, scanned_at TEXT, scan_duration_sec REAL,
+    total_files_scanned INTEGER, total_groups INTEGER, total_wasted_bytes INTEGER,
+    threshold INTEGER, hash_size INTEGER, is_partial INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS dup_groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, file_hash TEXT NOT NULL UNIQUE,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, file_hash TEXT NOT NULL,
     file_count INTEGER NOT NULL, total_size INTEGER NOT NULL, wasted_size INTEGER NOT NULL,
-    min_distance INTEGER NOT NULL DEFAULT 0
+    min_distance INTEGER NOT NULL DEFAULT 0, folder TEXT
 );
 CREATE TABLE IF NOT EXISTS dup_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL,
@@ -1668,9 +1673,13 @@ CREATE INDEX IF NOT EXISTS idx_df_imgid   ON dup_files(image_id);
 
 _MEDIA_EXT = {'.jpg','.jpeg','.png','.gif','.bmp','.webp','.mp4','.webm','.mov','.avi','.mkv'}
 
-_scan_state: dict = {'running': False, 'message': '', 'progress': 0, 'total': 0, 'error': None, 'logs': [], 'partial': False}
+_scan_state: dict = {'running': False, 'folder': None, 'message': '', 'progress': 0, 'total': 0, 'error': None, 'logs': [], 'partial': False}
 _scan_lock = threading.Lock()
 _scan_proc = None  # subprocess.Popen reference for stop support
+
+_hash_state: dict = {'running': False, 'folder': None, 'message': '', 'progress': 0, 'total': 0, 'error': None, 'logs': []}
+_hash_lock = threading.Lock()
+_hash_proc = None
 
 
 def _get_dupes_db() -> sqlite3.Connection:
@@ -1678,6 +1687,27 @@ def _get_dupes_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(_DUPES_SCHEMA)
     conn.commit()
+    # Migrate dup_groups: add folder column and remove UNIQUE constraint
+    try:
+        cols = [row[1] for row in conn.execute('PRAGMA table_info(dup_groups)').fetchall()]
+        if 'folder' not in cols:
+            conn.executescript("""
+                BEGIN;
+                CREATE TABLE dup_groups_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, file_hash TEXT NOT NULL,
+                    file_count INTEGER NOT NULL, total_size INTEGER NOT NULL,
+                    wasted_size INTEGER NOT NULL, min_distance INTEGER NOT NULL DEFAULT 0,
+                    folder TEXT
+                );
+                INSERT INTO dup_groups_new
+                    SELECT id, file_hash, file_count, total_size, wasted_size, min_distance, NULL
+                    FROM dup_groups;
+                DROP TABLE dup_groups;
+                ALTER TABLE dup_groups_new RENAME TO dup_groups;
+                COMMIT;
+            """)
+    except Exception:
+        pass
     return conn
 
 
@@ -1698,43 +1728,26 @@ def _file_to_thumb(file_path: str) -> str | None:
     return ui_handler.make_thumb_path(file_path)
 
 
-def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
-    """Background thread: delegates to scan_duplicates.py via subprocess."""
+def _run_subprocess_with_state(cmd, state, lock, proc_ref_setter, on_complete_db_query=None):
+    """Shared helper: runs a subprocess, streams JSON progress into `state`."""
     import subprocess as _sp
     import json as _json
-    import sys as _sys
-    import time as _time
+    import threading as _threading
 
-    script = Path(__file__).parent.parent.parent / 'scan_duplicates.py'
-    if not script.exists():
-        script = Path.cwd() / 'scan_duplicates.py'
-
-    cmd = [
-        _sys.executable, str(script),
-        '--threshold', str(threshold),
-        '--hash-size', str(hash_size),
-        '--progress-json',
-    ]
-
-    global _scan_proc
     try:
-        with _scan_lock:
-            _scan_state['logs']    = []
-            _scan_state['partial'] = False
+        with lock:
+            state['logs'] = []
 
         proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
                          text=True, bufsize=1, cwd=str(Path.cwd()))
-        with _scan_lock:
-            _scan_proc = proc
-
-        import threading as _threading
+        proc_ref_setter(proc)
 
         def _drain_stderr():
             for line in proc.stderr:
                 line = line.rstrip()
                 if line:
-                    with _scan_lock:
-                        _scan_state['logs'].append('[stderr] ' + line)
+                    with lock:
+                        state['logs'].append('[stderr] ' + line)
 
         _threading.Thread(target=_drain_stderr, daemon=True).start()
 
@@ -1743,76 +1756,153 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
             line = line.strip()
             if not line:
                 continue
-            with _scan_lock:
-                _scan_state['logs'].append(line)
+            with lock:
+                state['logs'].append(line)
             try:
                 ev = _json.loads(line)
-                msg  = ev.get('message', last_msg)
-                cur  = ev.get('progress', 0)
-                tot  = ev.get('total', 0)
+                msg = ev.get('message', last_msg)
+                cur = ev.get('progress', 0)
+                tot = ev.get('total', 0)
                 last_msg = msg
-                with _scan_lock:
-                    _scan_state['message']  = msg
-                    _scan_state['progress'] = cur
-                    _scan_state['total']    = tot
+                with lock:
+                    state['message']  = msg
+                    state['progress'] = cur
+                    state['total']    = tot
             except _json.JSONDecodeError:
-                pass  # non-JSON output (warnings/tracebacks)
+                pass
 
         proc.wait()
+        proc_ref_setter(None)
+
+        if proc.returncode not in (0, -15):
+            with lock:
+                state['error'] = f'Process exited with code {proc.returncode} — check logs'
+            return False
+
+        if on_complete_db_query:
+            on_complete_db_query(state, lock)
+
+        return True
+
+    except Exception as exc:
+        with lock:
+            state['error'] = str(exc)
+        proc_ref_setter(None)
+        return False
+    finally:
+        with lock:
+            state['running'] = False
+        proc_ref_setter(None)
+
+
+def _run_hash_computation(folder_name: str):
+    """Background thread: compute hashes for one folder via compute_hashes.py."""
+    import sys as _sys
+
+    script = Path(__file__).parent.parent.parent / 'compute_hashes.py'
+    if not script.exists():
+        script = Path.cwd() / 'compute_hashes.py'
+
+    folder_path = str(Path.cwd() / 'reddit_downloads' / folder_name)
+
+    cmd = [_sys.executable, str(script),
+           '--folder', folder_path,
+           '--progress-json']
+
+    global _hash_proc
+
+    def _set_proc(p):
+        global _hash_proc
+        with _hash_lock:
+            _hash_proc = p
+
+    def _on_complete(state, lock):
+        with lock:
+            logs = state['logs']
+            # Extract final "Done. N hashes computed" message
+            for l in reversed(logs):
+                if 'Done.' in l or 'up to date' in l:
+                    state['message'] = l
+                    break
+
+    with _hash_lock:
+        _hash_state['logs'] = []
+
+    _run_subprocess_with_state(cmd, _hash_state, _hash_lock, _set_proc, _on_complete)
+
+
+def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8, folder_name: str = None):
+    """Background thread: delegates to scan_duplicates.py via subprocess."""
+    import sys as _sys
+
+    script = Path(__file__).parent.parent.parent / 'scan_duplicates.py'
+    if not script.exists():
+        script = Path.cwd() / 'scan_duplicates.py'
+
+    cmd = [_sys.executable, str(script),
+           '--threshold', str(threshold),
+           '--hash-size', str(hash_size),
+           '--progress-json']
+
+    if folder_name:
+        folder_path = str(Path.cwd() / 'reddit_downloads' / folder_name)
+        cmd += ['--folder', folder_path, '--use-cache-only']
+
+    global _scan_proc
+
+    def _set_proc(p):
+        global _scan_proc
         with _scan_lock:
-            _scan_proc = None
+            _scan_proc = p
 
-        # rc=0 → complete or partial-stop (scan writes results before exiting)
-        # rc!=0 → crash
-        if proc.returncode not in (0, -15):  # -15 = SIGTERM on Unix
-            with _scan_lock:
-                _scan_state['error'] = (
-                    f'scan_duplicates.py exited with code {proc.returncode} — '
-                    'check logs for details'
-                )
-            return
-
-        # Read final stats from duplicates.db
+    def _on_complete(state, lock):
         try:
             sdb = _get_dupes_db()
-            row = sdb.execute('SELECT * FROM scan_info WHERE id = 1').fetchone()
+            if folder_name:
+                row = sdb.execute(
+                    'SELECT * FROM folder_scan_info WHERE folder = ?', (folder_name,)
+                ).fetchone()
+            else:
+                row = sdb.execute('SELECT * FROM scan_info WHERE id = 1').fetchone()
             sdb.close()
             if row:
                 wasted  = row['total_wasted_bytes'] or 0
                 groups  = row['total_groups'] or 0
                 elapsed = row['scan_duration_sec'] or 0
-                with _scan_lock:
-                    _scan_state['message']  = (
+                with lock:
+                    state['message']  = (
                         f'Done in {elapsed:.1f}s — {groups:,} groups, '
                         f'{_format_bytes(wasted)} wasted'
                     )
-                    _scan_state['progress'] = row['total_files_scanned'] or 0
-                    _scan_state['total']    = row['total_files_scanned'] or 0
+                    state['progress'] = row['total_files_scanned'] or 0
+                    state['total']    = row['total_files_scanned'] or 0
         except Exception:
             pass
 
-        # Detect partial scan from last progress log line; persist to DB
-        with _scan_lock:
-            logs = _scan_state['logs']
+        with lock:
+            logs  = state['logs']
             is_partial = any('partial' in l.lower() for l in logs[-5:])
-            _scan_state['partial'] = is_partial
+            state['partial'] = is_partial
         if is_partial:
             try:
                 sdb2 = _get_dupes_db()
-                sdb2.execute('UPDATE scan_info SET is_partial=1 WHERE id=1')
+                if folder_name:
+                    sdb2.execute(
+                        'UPDATE folder_scan_info SET is_partial=1 WHERE folder=?', (folder_name,)
+                    )
+                else:
+                    sdb2.execute('UPDATE scan_info SET is_partial=1 WHERE id=1')
                 sdb2.commit()
                 sdb2.close()
             except Exception:
                 pass
 
-    except Exception as exc:
-        with _scan_lock:
-            _scan_state['error'] = str(exc)
-            _scan_proc = None
-    finally:
-        with _scan_lock:
-            _scan_state['running'] = False
-            _scan_proc = None
+    with _scan_lock:
+        _scan_state['logs']    = []
+        _scan_state['partial'] = False
+        _scan_state['folder']  = folder_name
+
+    _run_subprocess_with_state(cmd, _scan_state, _scan_lock, _set_proc, _on_complete)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -1825,15 +1915,18 @@ def duplicates_page():
 
 @app.route('/api/duplicates/scan', methods=['POST'])
 def api_start_duplicate_scan():
-    data      = request.get_json() or {}
-    threshold = int(data.get('threshold', 10))
-    hash_size = int(data.get('hash_size', 8))
+    data        = request.get_json() or {}
+    threshold   = int(data.get('threshold', 10))
+    hash_size   = int(data.get('hash_size', 8))
+    folder_name = data.get('folder') or None
     with _scan_lock:
         if _scan_state['running']:
             return jsonify({'success': False, 'error': 'Scan already running'})
-        _scan_state.update({'running': True, 'message': 'Starting…', 'progress': 0,
+        _scan_state.update({'running': True, 'folder': folder_name,
+                            'message': 'Starting…', 'progress': 0,
                             'total': 0, 'error': None, 'logs': [], 'partial': False})
-    threading.Thread(target=_run_duplicate_scan, args=(threshold, hash_size),
+    threading.Thread(target=_run_duplicate_scan,
+                     args=(threshold, hash_size, folder_name),
                      daemon=True).start()
     return jsonify({'success': True})
 
@@ -1842,7 +1935,7 @@ def api_start_duplicate_scan():
 def api_duplicate_scan_status():
     with _scan_lock:
         state = dict(_scan_state)
-        state.pop('logs', None)  # logs fetched separately
+        state.pop('logs', None)
         return jsonify(state)
 
 
@@ -1855,7 +1948,7 @@ def api_stop_duplicate_scan():
         proc = _scan_proc
     if proc:
         try:
-            proc.terminate()  # SIGTERM → graceful partial-result save
+            proc.terminate()
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)})
     return jsonify({'success': True})
@@ -1867,6 +1960,133 @@ def api_duplicate_scan_logs():
     with _scan_lock:
         logs = _scan_state['logs']
         return jsonify({'lines': logs[offset:], 'total': len(logs)})
+
+
+# ── Hash computation endpoints ─────────────────────────────────────────────
+
+@app.route('/api/duplicates/hash', methods=['POST'])
+def api_start_hash_computation():
+    data        = request.get_json() or {}
+    folder_name = data.get('folder')
+    if not folder_name:
+        return jsonify({'success': False, 'error': 'folder is required'}), 400
+    folder_path = Path.cwd() / 'reddit_downloads' / folder_name
+    if not folder_path.exists():
+        return jsonify({'success': False, 'error': f'Folder not found: {folder_name}'}), 404
+    with _hash_lock:
+        if _hash_state['running']:
+            return jsonify({'success': False, 'error': 'Hash computation already running'})
+        _hash_state.update({'running': True, 'folder': folder_name,
+                            'message': 'Starting…', 'progress': 0,
+                            'total': 0, 'error': None, 'logs': []})
+    threading.Thread(target=_run_hash_computation, args=(folder_name,), daemon=True).start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/duplicates/hash/status')
+def api_hash_status():
+    with _hash_lock:
+        state = dict(_hash_state)
+        state.pop('logs', None)
+        return jsonify(state)
+
+
+@app.route('/api/duplicates/hash/stop', methods=['POST'])
+def api_hash_stop():
+    global _hash_proc
+    with _hash_lock:
+        if not _hash_state['running']:
+            return jsonify({'success': False, 'error': 'No hash computation running'})
+        proc = _hash_proc
+    if proc:
+        try:
+            proc.terminate()
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)})
+    return jsonify({'success': True})
+
+
+@app.route('/api/duplicates/hash/logs')
+def api_hash_logs():
+    offset = int(request.args.get('offset', 0))
+    with _hash_lock:
+        logs = _hash_state['logs']
+        return jsonify({'lines': logs[offset:], 'total': len(logs)})
+
+
+# ── Folder listing ─────────────────────────────────────────────────────────
+
+@app.route('/api/duplicates/folders')
+def api_duplicate_folders():
+    import os as _os
+    dl_dir = Path.cwd() / 'reddit_downloads'
+    if not dl_dir.exists():
+        return jsonify({'success': False, 'error': 'reddit_downloads not found'}), 404
+    try:
+        folder_dirs = sorted(
+            [f for f in dl_dir.iterdir() if f.is_dir()],
+            key=lambda x: x.name.lower()
+        )
+        sdb = _get_dupes_db()
+        result = []
+        for folder in folder_dirs:
+            folder_prefix = str(folder.resolve()) + _os.sep
+            prefix_len    = len(folder_prefix)
+            row = sdb.execute(
+                'SELECT COUNT(*) AS total, '
+                'SUM(CASE WHEN phash IS NOT NULL THEN 1 ELSE 0 END) AS hashed '
+                'FROM phash_cache WHERE substr(path, 1, ?) = ?',
+                (prefix_len, folder_prefix),
+            ).fetchone()
+            total_in_cache = row['total'] or 0
+            hashed_count   = row['hashed'] or 0
+
+            scan_row = sdb.execute(
+                'SELECT * FROM folder_scan_info WHERE folder = ?', (folder.name,)
+            ).fetchone()
+
+            result.append({
+                'name':           folder.name,
+                'cached_count':   hashed_count,
+                'total_in_cache': total_in_cache,
+                'dup_groups':     scan_row['total_groups']      if scan_row else 0,
+                'wasted_fmt':     _format_bytes(scan_row['total_wasted_bytes'] or 0) if scan_row else None,
+                'scanned_at':     scan_row['scanned_at']        if scan_row else None,
+                'threshold':      scan_row['threshold']         if scan_row else None,
+            })
+        sdb.close()
+        return jsonify({'success': True, 'folders': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/duplicates/folder_stats')
+def api_folder_stats():
+    folder_name = request.args.get('folder')
+    if not folder_name:
+        return jsonify({'success': False, 'error': 'folder param required'}), 400
+    if not _DUPES_DB.exists():
+        return jsonify({'success': True, 'has_data': False})
+    try:
+        sdb = _get_dupes_db()
+        row = sdb.execute(
+            'SELECT * FROM folder_scan_info WHERE folder = ?', (folder_name,)
+        ).fetchone()
+        sdb.close()
+        if not row:
+            return jsonify({'success': True, 'has_data': False})
+        return jsonify({
+            'success': True, 'has_data': True,
+            'scanned_at':          row['scanned_at'],
+            'total_files_scanned': row['total_files_scanned'],
+            'total_groups':        row['total_groups'],
+            'total_wasted_bytes':  row['total_wasted_bytes'],
+            'total_wasted_fmt':    _format_bytes(row['total_wasted_bytes'] or 0),
+            'threshold':           row['threshold'],
+            'partial':             bool(row['is_partial']),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/duplicates/stats')
@@ -1900,22 +2120,34 @@ def api_duplicate_groups():
     if not _DUPES_DB.exists():
         return jsonify({'success': True, 'groups': [], 'total': 0})
     try:
-        sort  = request.args.get('sort', 'wasted_size')
-        page  = max(1, int(request.args.get('page', 1)))
-        per_p = min(50, max(5, int(request.args.get('per_page', 20))))
+        sort        = request.args.get('sort', 'wasted_size')
+        page        = max(1, int(request.args.get('page', 1)))
+        per_p       = min(50, max(5, int(request.args.get('per_page', 20))))
+        folder_name = request.args.get('folder') or None
 
-        order = 'wasted_size DESC' if sort == 'wasted_size' else 'file_count DESC'
+        order  = 'wasted_size DESC' if sort == 'wasted_size' else 'file_count DESC'
         offset = (page - 1) * per_p
 
         sdb = _get_dupes_db()
-        total_row = sdb.execute(
-            'SELECT COUNT(*) FROM dup_groups WHERE file_count > 1'
-        ).fetchone()[0]
 
-        groups_raw = sdb.execute(
-            f'SELECT * FROM dup_groups WHERE file_count > 1 ORDER BY {order} LIMIT ? OFFSET ?',
-            (per_p, offset),
-        ).fetchall()
+        if folder_name:
+            total_row = sdb.execute(
+                'SELECT COUNT(*) FROM dup_groups WHERE file_count > 1 AND folder = ?',
+                (folder_name,),
+            ).fetchone()[0]
+            groups_raw = sdb.execute(
+                f'SELECT * FROM dup_groups WHERE file_count > 1 AND folder = ? '
+                f'ORDER BY {order} LIMIT ? OFFSET ?',
+                (folder_name, per_p, offset),
+            ).fetchall()
+        else:
+            total_row = sdb.execute(
+                'SELECT COUNT(*) FROM dup_groups WHERE file_count > 1'
+            ).fetchone()[0]
+            groups_raw = sdb.execute(
+                f'SELECT * FROM dup_groups WHERE file_count > 1 ORDER BY {order} LIMIT ? OFFSET ?',
+                (per_p, offset),
+            ).fetchall()
 
         groups = []
         for g in groups_raw:
