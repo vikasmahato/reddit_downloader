@@ -48,10 +48,9 @@ signal.signal(signal.SIGINT,  _handle_sigterm)
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
-MEDIA_EXTENSIONS = {
-    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',
-    '.mp4', '.webm', '.mov', '.avi', '.mkv',
-}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+VIDEO_EXTENSIONS = {'.mp4', '.webm', '.mov', '.avi', '.mkv'}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS  # legacy reference
 
 DUPES_DB      = Path('duplicates.db')
 DOWNLOADS_DIR = Path('reddit_downloads')
@@ -73,13 +72,16 @@ def compute_phash(path: Path, hash_size: int = DEFAULT_HASH_SIZE) -> Optional[in
     img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
 
     if img is None:
-        # Fall back to VideoCapture (handles mp4, webm, gif, etc.)
-        cap = cv2.VideoCapture(str(path))
-        ret, frame = cap.read()
-        cap.release()
-        if not ret:
+        # GIF fallback via VideoCapture (first frame only)
+        if path.suffix.lower() == '.gif':
+            cap = cv2.VideoCapture(str(path))
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return None
+            img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
             return None
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     dct_size = hash_size * 4
     small    = cv2.resize(img, (dct_size, dct_size), interpolation=cv2.INTER_AREA)
@@ -253,6 +255,28 @@ def init_db(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     conn.commit()
+
+    # Migrate phash_cache if it still has NOT NULL on phash (old schema)
+    try:
+        conn.execute("INSERT INTO phash_cache (path,mtime,size,phash) VALUES ('__chk__',0,0,NULL)")
+        conn.execute("DELETE FROM phash_cache WHERE path='__chk__'")
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # Old schema — recreate table keeping existing data
+        conn.executescript("""
+            BEGIN;
+            CREATE TABLE phash_cache_new (
+                path  TEXT    PRIMARY KEY,
+                mtime REAL    NOT NULL,
+                size  INTEGER NOT NULL,
+                phash TEXT
+            );
+            INSERT INTO phash_cache_new SELECT path, mtime, size, phash FROM phash_cache;
+            DROP TABLE phash_cache;
+            ALTER TABLE phash_cache_new RENAME TO phash_cache;
+            COMMIT;
+        """)
+
     return conn
 
 
@@ -334,6 +358,7 @@ def run_scan(
     mysql_cfg: Optional[dict],
     threshold: int = DEFAULT_THRESHOLD,
     hash_size: int = DEFAULT_HASH_SIZE,
+    images_only: bool = True,
     progress_cb: Callable[[str, int, int], None] = None,
 ) -> dict:
     """
@@ -367,11 +392,12 @@ def run_scan(
             pass
     progress(f'Loaded {len(phash_cache):,} cached hashes.', 0, 0)
 
-    # 1. List all media files
-    progress('Listing files…', 0, 0)
+    # 1. List files (images only by default; videos are skipped)
+    scan_exts = IMAGE_EXTENSIONS if images_only else MEDIA_EXTENSIONS
+    progress(f'Listing {"image" if images_only else "media"} files…', 0, 0)
     all_paths = [
         p for p in dl_dir.rglob('*')
-        if p.is_file() and p.suffix.lower() in MEDIA_EXTENSIONS
+        if p.is_file() and p.suffix.lower() in scan_exts
     ]
     total   = len(all_paths)
     skipped = 0
@@ -582,6 +608,8 @@ Hamming distance guide (out of 64 bits):
                     metavar='N', help=f'Hash dimension NxN (default: {DEFAULT_HASH_SIZE} → 64-bit)')
     ap.add_argument('--no-db', action='store_true',
                     help='Skip MySQL lookup (no post metadata, faster)')
+    ap.add_argument('--include-videos', action='store_true',
+                    help='Also scan video files (mp4, webm, etc.) — slow, not recommended')
     ap.add_argument('--downloads-dir', default=str(DOWNLOADS_DIR),
                     help='Path to reddit_downloads folder')
     ap.add_argument('--progress-json', action='store_true',
@@ -607,6 +635,7 @@ Hamming distance guide (out of 64 bits):
         mysql_cfg     = mysql_cfg,
         threshold     = args.threshold,
         hash_size     = args.hash_size,
+        images_only   = not args.include_videos,
         progress_cb   = cb,
     )
 
