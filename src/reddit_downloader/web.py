@@ -1689,8 +1689,9 @@ _hash_proc = None
 
 
 def _get_dupes_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(_DUPES_DB))
+    conn = sqlite3.connect(str(_DUPES_DB), timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')   # allow concurrent reads during writes
     conn.executescript(_DUPES_SCHEMA)
     conn.commit()
     # Migrate dup_groups: add folder column and remove UNIQUE constraint
@@ -2033,34 +2034,52 @@ def api_duplicate_folders():
             [f for f in dl_dir.iterdir() if f.is_dir()],
             key=lambda x: x.name.lower()
         )
+
         sdb = _get_dupes_db()
+
+        # ── Single bulk query: group phash_cache rows by immediate subfolder name.
+        # Extract the subfolder name by stripping the downloads prefix and taking
+        # the first path component.  Works on both Linux ('/') and Windows ('\\').
+        dl_prefix = str(dl_dir.resolve()) + _os.sep
+        dl_prefix_len = len(dl_prefix)
+        sep = _os.sep
+
+        hash_rows = sdb.execute("""
+            SELECT
+                CASE
+                    WHEN instr(substr(path, :skip), :sep) > 0
+                    THEN substr(path, :skip, instr(substr(path, :skip), :sep) - 1)
+                    ELSE substr(path, :skip)
+                END AS folder_name,
+                COUNT(*) AS total,
+                SUM(CASE WHEN phash IS NOT NULL THEN 1 ELSE 0 END) AS hashed
+            FROM phash_cache
+            WHERE substr(path, 1, :plen) = :prefix
+            GROUP BY folder_name
+        """, {'skip': dl_prefix_len + 1, 'sep': sep,
+              'plen': dl_prefix_len, 'prefix': dl_prefix}).fetchall()
+        hash_by_folder = {r['folder_name']: r for r in hash_rows}
+
+        # ── Single query for all folder scan results.
+        scan_rows = sdb.execute('SELECT * FROM folder_scan_info').fetchall()
+        scan_by_folder = {r['folder']: r for r in scan_rows}
+
+        sdb.close()
+
         result = []
         for folder in folder_dirs:
-            folder_prefix = str(folder.resolve()) + _os.sep
-            prefix_len    = len(folder_prefix)
-            row = sdb.execute(
-                'SELECT COUNT(*) AS total, '
-                'SUM(CASE WHEN phash IS NOT NULL THEN 1 ELSE 0 END) AS hashed '
-                'FROM phash_cache WHERE substr(path, 1, ?) = ?',
-                (prefix_len, folder_prefix),
-            ).fetchone()
-            total_in_cache = row['total'] or 0
-            hashed_count   = row['hashed'] or 0
-
-            scan_row = sdb.execute(
-                'SELECT * FROM folder_scan_info WHERE folder = ?', (folder.name,)
-            ).fetchone()
-
+            hr = hash_by_folder.get(folder.name)
+            sr = scan_by_folder.get(folder.name)
             result.append({
                 'name':           folder.name,
-                'cached_count':   hashed_count,
-                'total_in_cache': total_in_cache,
-                'dup_groups':     scan_row['total_groups']      if scan_row else 0,
-                'wasted_fmt':     _format_bytes(scan_row['total_wasted_bytes'] or 0) if scan_row else None,
-                'scanned_at':     scan_row['scanned_at']        if scan_row else None,
-                'threshold':      scan_row['threshold']         if scan_row else None,
+                'cached_count':   hr['hashed'] if hr else 0,
+                'total_in_cache': hr['total']  if hr else 0,
+                'dup_groups':     sr['total_groups']      if sr else 0,
+                'wasted_fmt':     _format_bytes(sr['total_wasted_bytes'] or 0) if sr else None,
+                'scanned_at':     sr['scanned_at']        if sr else None,
+                'threshold':      sr['threshold']         if sr else None,
             })
-        sdb.close()
+
         return jsonify({'success': True, 'folders': result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
