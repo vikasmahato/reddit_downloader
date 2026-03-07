@@ -134,20 +134,14 @@
     margin-left: auto;
 }
 
-/* ── MASONRY GRID ───────────────────────────── */
+/* ── GRID (row-first, left→right) ───────────── */
 .masonry-grid {
-    columns: 6 160px;
-    column-gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px;
 }
 
-@media (max-width: 1600px) { .masonry-grid { columns: 5; } }
-@media (max-width: 1200px) { .masonry-grid { columns: 4; } }
-@media (max-width: 900px)  { .masonry-grid { columns: 3; } }
-@media (max-width: 576px)  { .masonry-grid { columns: 2; } }
-
 .masonry-item {
-    break-inside: avoid;
-    margin-bottom: 6px;
     position: relative;
     overflow: hidden;
     cursor: pointer;
@@ -681,8 +675,6 @@ function deleteSelectedPosts() {
     const postIds = Array.from(checked).map(cb => parseInt(cb.dataset.postId));
     const count = postIds.length;
 
-    if (!confirm(`Delete ${count} post(s)? This cannot be undone.`)) return;
-
     const btn = document.getElementById('deleteSelectedBtn');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -722,8 +714,6 @@ function deleteSelectedPosts() {
 
 function deleteAllUserPosts(username) {
     if (!username) { alert('Username required'); return; }
-    if (!confirm(`Delete ALL posts by "${username}"? This cannot be undone.`)) return;
-
     const btn = event.target.closest('button');
     const orig = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
@@ -749,8 +739,6 @@ function deleteAllUserPosts(username) {
 }
 
 function deletePost(postId, title) {
-    if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
-
     fetch(`/api/delete-post/${postId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
