@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS phash_cache (
     path  TEXT    PRIMARY KEY,
     mtime REAL    NOT NULL,
     size  INTEGER NOT NULL,
-    phash TEXT    NOT NULL
+    phash TEXT             -- NULL means previously attempted and failed
 );
 """
 
@@ -358,10 +358,11 @@ def run_scan(
     sdb = init_db(db_path)
     sc  = sdb.cursor()
     cache_rows = sc.execute('SELECT path, mtime, size, phash FROM phash_cache').fetchall()
-    phash_cache: dict[str, tuple[float, int, int]] = {}  # path → (mtime, size, phash_int)
+    phash_cache: dict[str, tuple[float, int, int | None]] = {}  # path → (mtime, size, phash_int or None=failed)
     for row in cache_rows:
         try:
-            phash_cache[row['path']] = (row['mtime'], row['size'], int(row['phash'], 16))
+            ph = int(row['phash'], 16) if row['phash'] else None
+            phash_cache[row['path']] = (row['mtime'], row['size'], ph)
         except Exception:
             pass
     progress(f'Loaded {len(phash_cache):,} cached hashes.', 0, 0)
@@ -398,13 +399,17 @@ def run_scan(
 
         cached = phash_cache.get(sp)
         if cached and abs(cached[0] - mtime) < 1.0 and cached[1] == size:
-            file_hashes.append((fp, cached[2]))
+            if cached[2] is not None:
+                file_hashes.append((fp, cached[2]))
+            else:
+                skipped += 1  # previously failed, skip
             cache_hits += 1
             continue
 
         h = compute_phash(fp, hash_size)
         if h is None:
             skipped += 1
+            new_cache_entries.append((sp, mtime, size, None))  # cache the failure
         else:
             file_hashes.append((fp, h))
             new_cache_entries.append((sp, mtime, size, hex(h)))
@@ -416,14 +421,16 @@ def run_scan(
         min(i + 1, total), total,
     )
 
-    # Save new cache entries
+    # Save new cache entries (including failures with phash=NULL)
     if new_cache_entries:
         sc.executemany(
             'INSERT OR REPLACE INTO phash_cache (path, mtime, size, phash) VALUES (?,?,?,?)',
             new_cache_entries,
         )
         sdb.commit()
-        progress(f'Saved {len(new_cache_entries):,} new hashes to cache.', 0, 0)
+        n_new_hashes = sum(1 for e in new_cache_entries if e[3] is not None)
+        n_new_fails  = len(new_cache_entries) - n_new_hashes
+        progress(f'Cached {n_new_hashes:,} new hashes + {n_new_fails:,} failures.', 0, 0)
 
     # 3. Build BK-tree
     tree = BKTree()
