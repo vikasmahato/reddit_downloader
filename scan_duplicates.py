@@ -25,6 +25,8 @@ import argparse
 import configparser
 import hashlib
 import json
+import multiprocessing as mp
+import os
 import signal
 import sqlite3
 import sys
@@ -97,6 +99,13 @@ def compute_phash(path: Path, hash_size: int = DEFAULT_HASH_SIZE) -> Optional[in
         bits = np.append(bits, np.zeros(8 - rem, dtype=np.uint8))
 
     return int.from_bytes(np.packbits(bits).tobytes(), 'big')
+
+
+def _phash_worker(args: tuple) -> tuple:
+    """Top-level worker for multiprocessing Pool: (path_str, mtime, size, hash_size) → (path_str, mtime, size, phash_int_or_None)"""
+    path_str, mtime, size, hash_size = args
+    h = compute_phash(Path(path_str), hash_size)
+    return (path_str, mtime, size, h)
 
 
 def hamming(a: int, b: int) -> int:
@@ -404,17 +413,12 @@ def run_scan(
     cache_hits = 0
     progress(f'Computing pHash for {total:,} files…', 0, total)
 
-    # 2. Compute pHash (with cache)
+    # 2. Separate cached from uncached
     file_hashes: list[tuple[Path, int]] = []
-    new_cache_entries: list[tuple[str, float, int, str]] = []  # (path, mtime, size, phash_hex)
+    new_cache_entries: list[tuple[str, float, int, str | None]] = []
+    to_hash: list[tuple[str, float, int, int]] = []  # (path_str, mtime, size, hash_size)
 
-    for i, fp in enumerate(all_paths):
-        if _stop_requested:
-            progress(f'Stop requested after {i:,}/{total:,} files — saving partial results…', i, total)
-            break
-        if i % 200 == 0 and i > 0:
-            progress(f'Hashing… {i:,}/{total:,} ({cache_hits} cached, {len(new_cache_entries)} new)', i, total)
-
+    for fp in all_paths:
         sp = str(fp)
         try:
             stat = fp.stat()
@@ -422,29 +426,49 @@ def run_scan(
         except Exception:
             skipped += 1
             continue
-
         cached = phash_cache.get(sp)
         if cached and abs(cached[0] - mtime) < 1.0 and cached[1] == size:
+            cache_hits += 1
             if cached[2] is not None:
                 file_hashes.append((fp, cached[2]))
             else:
-                skipped += 1  # previously failed, skip
-            cache_hits += 1
-            continue
-
-        h = compute_phash(fp, hash_size)
-        if h is None:
-            skipped += 1
-            new_cache_entries.append((sp, mtime, size, None))  # cache the failure
+                skipped += 1  # previously failed, skip instantly
         else:
-            file_hashes.append((fp, h))
-            new_cache_entries.append((sp, mtime, size, hex(h)))
+            to_hash.append((sp, mtime, size, hash_size))
+
+    progress(f'{cache_hits:,} cache hits, {len(to_hash):,} to hash, {skipped:,} skipped.', cache_hits, total)
+
+    # 3. Hash uncached files in parallel
+    done = 0
+    n_workers = max(1, min(os.cpu_count() or 1, 4))
+    chunk = max(50, len(to_hash) // (n_workers * 20))
+    done = 0
+
+    if to_hash and not _stop_requested:
+        with mp.Pool(processes=n_workers, maxtasksperchild=200) as pool:
+            for result in pool.imap_unordered(_phash_worker, to_hash, chunksize=chunk):
+                if _stop_requested:
+                    pool.terminate()
+                    progress(f'Stop requested after hashing {done:,}/{len(to_hash):,} — saving partial results…',
+                             cache_hits + done, total)
+                    break
+                sp, mtime, size, h = result
+                done += 1
+                if h is not None:
+                    file_hashes.append((Path(sp), h))
+                    new_cache_entries.append((sp, mtime, size, hex(h)))
+                else:
+                    skipped += 1
+                    new_cache_entries.append((sp, mtime, size, None))
+                if done % 500 == 0:
+                    progress(f'Hashing… {done:,}/{len(to_hash):,} new ({n_workers} workers)',
+                             cache_hits + done, total)
 
     hashed_count = len(file_hashes)
     progress(
-        f'Hashed {hashed_count:,} files ({cache_hits} from cache, {skipped} skipped). '
+        f'Hashed {hashed_count:,} files ({cache_hits:,} from cache, {skipped:,} skipped). '
         f'Building BK-tree…',
-        min(i + 1, total), total,
+        cache_hits + done, total,
     )
 
     # Save new cache entries (including failures with phash=NULL)
