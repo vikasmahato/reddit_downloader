@@ -304,6 +304,171 @@
     font-size: 0.75rem;
 }
 .dup-empty i { font-size: 2.5rem; margin-bottom: 1rem; color: var(--border-2); display: block; }
+
+/* ── SCAN ERROR BANNER ──────────────────────────────── */
+#scan-error-banner {
+    display: none;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: var(--r);
+    padding: 0.6rem 1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.7rem;
+    color: #f87171;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+#scan-error-banner i { flex-shrink: 0; }
+#scan-error-banner .err-msg { flex: 1; }
+#scan-error-banner .err-logs-link {
+    font-size: 0.62rem;
+    color: #f87171;
+    text-decoration: underline;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* ── LOG PANEL ──────────────────────────────────────── */
+#log-panel {
+    display: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+.log-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.9rem;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+}
+.log-panel-title {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.log-panel-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0 4px;
+    line-height: 1;
+}
+.log-panel-close:hover { color: var(--text); }
+#log-output {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    line-height: 1.6;
+    color: var(--text-dim);
+    padding: 0.75rem 1rem;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+#log-output .log-err  { color: #f87171; }
+#log-output .log-warn { color: #fb923c; }
+#log-output .log-ok   { color: #4ade80; }
+
+/* ── TOAST ──────────────────────────────────────────── */
+#toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+}
+.toast-item {
+    pointer-events: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--r);
+    padding: 0.55rem 0.9rem;
+    font-size: 0.68rem;
+    color: var(--text);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    max-width: 340px;
+    animation: toastIn 0.2s ease;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+.toast-item.toast-error  { border-left-color: #ef4444; }
+.toast-item.toast-warn   { border-left-color: #f59e0b; }
+.toast-item.toast-ok     { border-left-color: #22c55e; }
+.toast-item i { margin-top: 1px; flex-shrink: 0; }
+.toast-item.toast-error i { color: #ef4444; }
+.toast-item.toast-warn  i { color: #f59e0b; }
+.toast-item.toast-ok    i { color: #22c55e; }
+.toast-fade { animation: toastOut 0.3s ease forwards; }
+@keyframes toastIn  { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; transform:translateY(8px); } }
+
+/* ── CONFIRM DIALOG ─────────────────────────────────── */
+#confirm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 9998;
+    align-items: center;
+    justify-content: center;
+}
+#confirm-overlay.open { display: flex; }
+#confirm-box {
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r-lg);
+    padding: 1.5rem 1.75rem;
+    max-width: 380px;
+    width: 90%;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.confirm-icon {
+    font-size: 1.5rem;
+    color: var(--danger);
+    margin-bottom: 0.75rem;
+}
+.confirm-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.4rem;
+}
+.confirm-body {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+}
+.confirm-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+.confirm-cancel {
+    font-size: 0.65rem; padding: 0.3rem 0.9rem;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-muted); border-radius: var(--r); cursor: pointer;
+    font-family: var(--font-mono);
+}
+.confirm-cancel:hover { border-color: var(--border-2); color: var(--text); }
+.confirm-ok {
+    font-size: 0.65rem; padding: 0.3rem 0.9rem;
+    border: 1px solid rgba(239,68,68,0.5); background: rgba(239,68,68,0.12);
+    color: #f87171; border-radius: var(--r); cursor: pointer;
+    font-family: var(--font-mono);
+}
+.confirm-ok:hover { background: rgba(239,68,68,0.22); border-color: #ef4444; color: #fca5a5; }
 </style>
 
 <!-- Header -->
@@ -351,12 +516,49 @@
     </div>
 </div>
 
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Confirm dialog -->
+<div id="confirm-overlay">
+    <div id="confirm-box">
+        <div class="confirm-icon"><i class="fas fa-exclamation-triangle"></i></div>
+        <div class="confirm-title" id="confirm-title">Are you sure?</div>
+        <div class="confirm-body"  id="confirm-body"></div>
+        <div class="confirm-actions">
+            <button class="confirm-cancel" id="confirm-cancel-btn">Cancel</button>
+            <button class="confirm-ok"     id="confirm-ok-btn">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- Scan error banner -->
+<div id="scan-error-banner" style="display:none;">
+    <i class="fas fa-times-circle"></i>
+    <span class="err-msg" id="scan-error-msg"></span>
+    <span class="err-logs-link" onclick="toggleLogPanel()"><i class="fas fa-terminal me-1"></i>View logs</span>
+</div>
+
 <!-- Scan progress -->
 <div id="scan-progress-bar">
-    <span id="scan-msg">Starting…</span>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;">
+        <span id="scan-msg">Starting…</span>
+        <button class="dup-btn" onclick="toggleLogPanel()" title="Toggle log output" style="padding:0.1rem 0.45rem;">
+            <i class="fas fa-terminal"></i>
+        </button>
+    </div>
     <div class="progress-track">
         <div class="progress-fill" id="scan-fill" style="width:0%"></div>
     </div>
+</div>
+
+<!-- Log panel -->
+<div id="log-panel">
+    <div class="log-panel-head">
+        <span class="log-panel-title"><i class="fas fa-terminal me-2"></i>Scan Logs</span>
+        <button class="log-panel-close" onclick="toggleLogPanel()" title="Close"><i class="fas fa-times"></i></button>
+    </div>
+    <div id="log-output"><span style="color:var(--text-muted);">No logs yet — run a scan.</span></div>
 </div>
 
 <!-- Controls -->
@@ -374,11 +576,20 @@
 <div class="dup-pagination" id="pagination"></div>
 
 <script>
-let currentSort = 'wasted_size';
-let currentPage = 1;
-let totalGroups = 0;
-let perPage     = 20;
+let currentSort   = 'wasted_size';
+let currentPage   = 1;
+let totalGroups   = 0;
+let perPage       = 20;
 let scanPollTimer = null;
+let logPanelOpen  = false;
+let logOffset     = 0;
+let logPollTimer  = null;
+let _confirmResolve = null;
+
+function escHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 // ── INIT ──────────────────────────────────────────────────────────────────
 (async function init() {
@@ -410,13 +621,84 @@ async function loadStats() {
     } catch(_) {}
 }
 
+// ── TOAST ──────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'error') {
+    const icons = { error: 'fa-times-circle', warn: 'fa-exclamation-triangle', ok: 'fa-check-circle' };
+    const el = document.createElement('div');
+    el.className = `toast-item toast-${type}`;
+    el.innerHTML = `<i class="fas ${icons[type] || icons.error}"></i><span>${escHtml(msg)}</span>`;
+    document.getElementById('toast-container').appendChild(el);
+    setTimeout(() => {
+        el.classList.add('toast-fade');
+        el.addEventListener('animationend', () => el.remove());
+    }, 4000);
+}
+
+// ── CONFIRM DIALOG ─────────────────────────────────────────────────────────
+function showConfirm(title, body) {
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-body').textContent  = body;
+    document.getElementById('confirm-overlay').classList.add('open');
+    return new Promise(resolve => {
+        _confirmResolve = resolve;
+        document.getElementById('confirm-ok-btn').onclick     = () => { _confirmResolve = null; document.getElementById('confirm-overlay').classList.remove('open'); resolve(true);  };
+        document.getElementById('confirm-cancel-btn').onclick = () => { _confirmResolve = null; document.getElementById('confirm-overlay').classList.remove('open'); resolve(false); };
+    });
+}
+document.getElementById('confirm-overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('confirm-overlay')) {
+        document.getElementById('confirm-overlay').classList.remove('open');
+        if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+    }
+});
+
+// ── LOG PANEL ──────────────────────────────────────────────────────────────
+function toggleLogPanel() {
+    logPanelOpen = !logPanelOpen;
+    document.getElementById('log-panel').style.display = logPanelOpen ? 'block' : 'none';
+    if (logPanelOpen) fetchLogs();
+}
+
+async function fetchLogs() {
+    try {
+        const data = await fetch(`/api/duplicates/scan/logs?offset=0`).then(r => r.json());
+        const out = document.getElementById('log-output');
+        if (!data.lines.length) {
+            out.innerHTML = '<span style="color:var(--text-muted);">No logs yet — run a scan.</span>';
+            return;
+        }
+        out.innerHTML = data.lines.map(l => {
+            const cls = l.startsWith('[stderr]') || /error|traceback|exception/i.test(l) ? 'log-err'
+                      : /warning/i.test(l) ? 'log-warn'
+                      : /done|complete|found/i.test(l) ? 'log-ok' : '';
+            return `<span class="${cls}">${escHtml(l)}</span>`;
+        }).join('\n');
+        out.scrollTop = out.scrollHeight;
+    } catch(_) {}
+}
+
+function startLogPolling() {
+    if (logPollTimer) return;
+    logPollTimer = setInterval(() => { if (logPanelOpen) fetchLogs(); }, 1000);
+}
+function stopLogPolling() {
+    clearInterval(logPollTimer);
+    logPollTimer = null;
+    if (logPanelOpen) fetchLogs(); // final fetch
+}
+
 // ── SCAN ──────────────────────────────────────────────────────────────────
 async function startScan() {
     const btn = document.getElementById('scan-btn');
     const threshold = parseInt(document.getElementById('threshold-sel').value);
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning…';
+    document.getElementById('scan-error-banner').style.display = 'none';
     document.getElementById('scan-progress-bar').style.display = 'block';
+
+    // Reset log panel
+    logOffset = 0;
+    document.getElementById('log-output').innerHTML = '<span style="color:var(--text-muted);">Starting scan…</span>';
 
     try {
         const res = await fetch('/api/duplicates/scan', {
@@ -425,13 +707,21 @@ async function startScan() {
             body: JSON.stringify({ threshold }),
         }).then(r => r.json());
         if (!res.success && res.error !== 'Scan already running') {
-            alert('Error: ' + res.error);
+            showToast(res.error, 'error');
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
+            document.getElementById('scan-progress-bar').style.display = 'none';
             return;
         }
-    } catch(_) {}
+    } catch(e) {
+        showToast('Failed to start scan: ' + e, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
+        document.getElementById('scan-progress-bar').style.display = 'none';
+        return;
+    }
 
+    startLogPolling();
     scanPollTimer = setInterval(pollScanStatus, 1500);
 }
 
@@ -445,11 +735,23 @@ async function pollScanStatus() {
         if (!s.running) {
             clearInterval(scanPollTimer);
             scanPollTimer = null;
+            stopLogPolling();
             document.getElementById('scan-progress-bar').style.display = 'none';
             const btn = document.getElementById('scan-btn');
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
-            if (s.error) { alert('Scan error: ' + s.error); return; }
+
+            if (s.error) {
+                const banner = document.getElementById('scan-error-banner');
+                document.getElementById('scan-error-msg').textContent = s.error;
+                banner.style.display = 'flex';
+                showToast(s.error, 'error');
+                // Auto-open log panel on error
+                if (!logPanelOpen) toggleLogPanel();
+                return;
+            }
+
+            showToast('Scan complete!', 'ok');
             currentPage = 1;
             await loadStats();
             await loadGroups();
@@ -611,8 +913,12 @@ async function keepLargest(groupId) {
 }
 
 async function deleteAll(groupId) {
-    if (!confirm('Delete ALL copies in this group from disk and database?')) return;
     const rows = document.querySelectorAll(`#group-${groupId} .dup-file-row:not(.is-deleted)`);
+    const ok = await showConfirm(
+        'Delete all copies',
+        `This will permanently delete all ${rows.length} copies in this group from disk and the database.`
+    );
+    if (!ok) return;
     const ids = Array.from(rows).map(r => parseInt(r.id.replace('file-row-', '')));
     await deleteBatch(ids);
     refreshGroup(groupId);
@@ -633,10 +939,10 @@ async function deleteBatch(fileIds) {
             body: JSON.stringify({ file_ids: fileIds }),
         }).then(r => r.json());
 
-        if (!res.success) { alert('Error: ' + res.error); return; }
-        if (res.errors?.length) console.warn('Partial errors:', res.errors);
+        if (!res.success) { showToast('Delete failed: ' + res.error, 'error'); return; }
+        if (res.errors?.length) showToast(`${res.errors.length} file(s) had errors`, 'warn');
     } catch(e) {
-        alert('Request failed: ' + e);
+        showToast('Request failed: ' + e, 'error');
     }
 }
 
@@ -688,9 +994,5 @@ function goPage(p) {
 }
 
 // ── UTILS ──────────────────────────────────────────────────────────────────
-function escHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
 </script>
 {% endblock %}

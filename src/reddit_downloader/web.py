@@ -1668,7 +1668,7 @@ CREATE INDEX IF NOT EXISTS idx_df_imgid   ON dup_files(image_id);
 
 _MEDIA_EXT = {'.jpg','.jpeg','.png','.gif','.bmp','.webp','.mp4','.webm','.mov','.avi','.mkv'}
 
-_scan_state: dict = {'running': False, 'message': '', 'progress': 0, 'total': 0, 'error': None}
+_scan_state: dict = {'running': False, 'message': '', 'progress': 0, 'total': 0, 'error': None, 'logs': []}
 _scan_lock = threading.Lock()
 
 
@@ -1716,13 +1716,30 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
     ]
 
     try:
-        proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.STDOUT,
+        with _scan_lock:
+            _scan_state['logs'] = []
+
+        proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
                          text=True, bufsize=1, cwd=str(Path.cwd()))
+
+        import threading as _threading
+
+        def _drain_stderr():
+            for line in proc.stderr:
+                line = line.rstrip()
+                if line:
+                    with _scan_lock:
+                        _scan_state['logs'].append('[stderr] ' + line)
+
+        _threading.Thread(target=_drain_stderr, daemon=True).start()
+
         last_msg = 'Starting…'
         for line in proc.stdout:
             line = line.strip()
             if not line:
                 continue
+            with _scan_lock:
+                _scan_state['logs'].append(line)
             try:
                 ev = _json.loads(line)
                 msg  = ev.get('message', last_msg)
@@ -1734,12 +1751,15 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
                     _scan_state['progress'] = cur
                     _scan_state['total']    = tot
             except _json.JSONDecodeError:
-                pass  # non-JSON output (warnings etc.)
+                pass  # non-JSON output (warnings/tracebacks)
 
         proc.wait()
         if proc.returncode != 0:
             with _scan_lock:
-                _scan_state['error'] = f'scan_duplicates.py exited with code {proc.returncode}'
+                _scan_state['error'] = (
+                    f'scan_duplicates.py exited with code {proc.returncode} — '
+                    'check logs for details'
+                )
             return
 
         # Read final stats from duplicates.db
@@ -1786,7 +1806,7 @@ def api_start_duplicate_scan():
         if _scan_state['running']:
             return jsonify({'success': False, 'error': 'Scan already running'})
         _scan_state.update({'running': True, 'message': 'Starting…', 'progress': 0,
-                            'total': 0, 'error': None})
+                            'total': 0, 'error': None, 'logs': []})
     threading.Thread(target=_run_duplicate_scan, args=(threshold, hash_size),
                      daemon=True).start()
     return jsonify({'success': True})
@@ -1795,7 +1815,17 @@ def api_start_duplicate_scan():
 @app.route('/api/duplicates/scan/status')
 def api_duplicate_scan_status():
     with _scan_lock:
-        return jsonify(dict(_scan_state))
+        state = dict(_scan_state)
+        state.pop('logs', None)  # logs fetched separately
+        return jsonify(state)
+
+
+@app.route('/api/duplicates/scan/logs')
+def api_duplicate_scan_logs():
+    offset = int(request.args.get('offset', 0))
+    with _scan_lock:
+        logs = _scan_state['logs']
+        return jsonify({'lines': logs[offset:], 'total': len(logs)})
 
 
 @app.route('/api/duplicates/stats')
