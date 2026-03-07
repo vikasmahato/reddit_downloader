@@ -46,6 +46,28 @@ _related_subreddits_cache: dict = _load_related_cache()
 
 _MAP_HEADERS = {'User-Agent': 'subreddit-map-viewer/1.0'}
 
+# ── Anvaka map-of-reddit position cache ───────────────────────────────────
+# Stores pre-computed x/y from anvaka's graph.svg (community-overlap layout).
+# None value means the sub was looked up but not found in anvaka's dataset.
+_ANVAKA_CACHE_FILE = Path.cwd() / 'subreddit_anvaka_cache.json'
+_anvaka_cache_lock = threading.Lock()
+
+def _load_anvaka_cache() -> dict:
+    try:
+        if _ANVAKA_CACHE_FILE.exists():
+            return json.loads(_ANVAKA_CACHE_FILE.read_text(encoding='utf-8'))
+    except Exception:
+        pass
+    return {}
+
+def _save_anvaka_cache(cache: dict) -> None:
+    try:
+        _ANVAKA_CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False), encoding='utf-8')
+    except Exception:
+        pass
+
+_anvaka_position_cache: dict = _load_anvaka_cache()
+
 def _fetch_related_sub(name: str) -> tuple:
     """Fetch related subreddits for one sub. Returns (name, rel_names, was_new_fetch).
     Checks the in-memory cache first; only hits Reddit API on a miss."""
@@ -1332,6 +1354,98 @@ def api_subreddit_map_data():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/subreddit-anvaka-positions')
+def api_subreddit_anvaka_positions():
+    """
+    Return x/y positions for subreddits from anvaka's pre-computed Reddit map layout.
+    Positions are based on Jaccard similarity of user overlap (community geography).
+    Streams graph.svg from anvaka's CDN and caches results locally.
+    """
+    import re as _re
+
+    names_param = request.args.get('names', '')
+    names = [n.strip() for n in names_param.split(',') if n.strip()]
+    if not names:
+        return jsonify({'success': True, 'positions': {}, 'viewBox': None})
+
+    result = {}
+    needed_lower: dict = {}  # lower -> original name
+
+    with _anvaka_cache_lock:
+        for name in names:
+            nl = name.lower()
+            if nl in _anvaka_position_cache:
+                result[name] = _anvaka_position_cache[nl]
+            else:
+                needed_lower[nl] = name
+
+    viewBox = None
+
+    if needed_lower:
+        SVG_URL = 'https://anvaka.github.io/map-of-reddit-data/v3/graph.svg'
+        # Circles: <circle id="_name" cx="x" cy="y" r="r"/>  (id has _ prefix in SVG)
+        circle_re = _re.compile(r'<circle\b([^>]*?)/?>', _re.IGNORECASE | _re.DOTALL)
+        attr_re   = _re.compile(r'\b(id|cx|cy)\s*=\s*"([^"]*)"')
+        vbox_re   = _re.compile(r'<svg\b[^>]*\bviewBox="([^"]+)"', _re.IGNORECASE)
+
+        buffer = ''
+        found_count = 0
+        try:
+            resp = http_requests.get(SVG_URL, headers=_MAP_HEADERS, stream=True, timeout=60)
+            for raw in resp.iter_content(chunk_size=65536):
+                chunk = raw.decode('utf-8', errors='ignore')
+                buffer += chunk
+
+                if viewBox is None:
+                    vm = vbox_re.search(buffer)
+                    if vm:
+                        viewBox = vm.group(1)
+
+                for cm in circle_re.finditer(buffer):
+                    attrs = dict(attr_re.findall(cm.group(1)))
+                    raw_id = attrs.get('id', '')
+                    sub_id = raw_id.lstrip('_').lower()
+                    if sub_id not in needed_lower:
+                        continue
+                    try:
+                        pos = {'x': float(attrs['cx']), 'y': float(attrs['cy'])}
+                    except (KeyError, ValueError):
+                        continue
+                    orig = needed_lower[sub_id]
+                    result[orig] = pos
+                    with _anvaka_cache_lock:
+                        _anvaka_position_cache[sub_id] = pos
+                    found_count += 1
+                    if found_count >= len(needed_lower):
+                        resp.close()
+                        break
+
+                if found_count >= len(needed_lower):
+                    break
+
+                # Keep only the tail so we don't miss tags split across chunks
+                last_lt = buffer.rfind('<')
+                if last_lt > 8192:
+                    buffer = buffer[last_lt:]
+
+            try:
+                resp.close()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        # Mark not-found subs to avoid re-querying
+        with _anvaka_cache_lock:
+            for nl, orig in needed_lower.items():
+                if nl not in _anvaka_position_cache:
+                    _anvaka_position_cache[nl] = None
+                    result[orig] = None
+            _save_anvaka_cache(_anvaka_position_cache)
+
+    return jsonify({'success': True, 'positions': result, 'viewBox': viewBox})
+
+
 @app.route('/api/scrape-lists/by-name/<name>', methods=['POST'])
 def api_add_scrape_list_by_name(name):
     """Add a subreddit to the scrape list by name."""
@@ -1521,6 +1635,348 @@ def delete_posts_by_user(username):
 def main():
     """Main entry point for the web UI."""
     app.run(debug=True, host='0.0.0.0', port=4000)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DUPLICATES
+# ═══════════════════════════════════════════════════════════════════════════
+
+_DUPES_DB = Path.cwd() / 'duplicates.db'
+
+_DUPES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS scan_info (
+    id INTEGER PRIMARY KEY, scanned_at TEXT, scan_duration_sec REAL,
+    total_files_scanned INTEGER, total_groups INTEGER, total_wasted_bytes INTEGER,
+    threshold INTEGER, hash_size INTEGER
+);
+CREATE TABLE IF NOT EXISTS dup_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, file_hash TEXT NOT NULL UNIQUE,
+    file_count INTEGER NOT NULL, total_size INTEGER NOT NULL, wasted_size INTEGER NOT NULL,
+    min_distance INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS dup_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL, file_size INTEGER NOT NULL,
+    phash TEXT,
+    image_id INTEGER, post_id INTEGER, reddit_id TEXT, post_title TEXT,
+    subreddit TEXT, permalink TEXT, score INTEGER, is_deleted INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (group_id) REFERENCES dup_groups(id)
+);
+CREATE INDEX IF NOT EXISTS idx_df_group   ON dup_files(group_id);
+CREATE INDEX IF NOT EXISTS idx_df_deleted ON dup_files(group_id, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_df_imgid   ON dup_files(image_id);
+"""
+
+_MEDIA_EXT = {'.jpg','.jpeg','.png','.gif','.bmp','.webp','.mp4','.webm','.mov','.avi','.mkv'}
+
+_scan_state: dict = {'running': False, 'message': '', 'progress': 0, 'total': 0, 'error': None}
+_scan_lock = threading.Lock()
+
+
+def _get_dupes_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(_DUPES_DB))
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_DUPES_SCHEMA)
+    conn.commit()
+    return conn
+
+
+def _format_bytes(n: int) -> str:
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if n < 1024:
+            return f'{n:.1f} {unit}'
+        n /= 1024
+    return f'{n:.1f} TB'
+
+
+def _file_to_url(file_path: str) -> str | None:
+    """Convert an absolute file path to a web-accessible URL path."""
+    return ui_handler.make_web_path(file_path)
+
+
+def _file_to_thumb(file_path: str) -> str | None:
+    return ui_handler.make_thumb_path(file_path)
+
+
+def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
+    """Background thread: delegates to scan_duplicates.py via subprocess."""
+    import subprocess as _sp
+    import json as _json
+    import sys as _sys
+    import time as _time
+
+    script = Path(__file__).parent.parent.parent / 'scan_duplicates.py'
+    if not script.exists():
+        script = Path.cwd() / 'scan_duplicates.py'
+
+    cmd = [
+        _sys.executable, str(script),
+        '--threshold', str(threshold),
+        '--hash-size', str(hash_size),
+        '--progress-json',
+    ]
+
+    try:
+        proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.STDOUT,
+                         text=True, bufsize=1, cwd=str(Path.cwd()))
+        last_msg = 'Starting…'
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = _json.loads(line)
+                msg  = ev.get('message', last_msg)
+                cur  = ev.get('progress', 0)
+                tot  = ev.get('total', 0)
+                last_msg = msg
+                with _scan_lock:
+                    _scan_state['message']  = msg
+                    _scan_state['progress'] = cur
+                    _scan_state['total']    = tot
+            except _json.JSONDecodeError:
+                pass  # non-JSON output (warnings etc.)
+
+        proc.wait()
+        if proc.returncode != 0:
+            with _scan_lock:
+                _scan_state['error'] = f'scan_duplicates.py exited with code {proc.returncode}'
+            return
+
+        # Read final stats from duplicates.db
+        try:
+            sdb = _get_dupes_db()
+            row = sdb.execute('SELECT * FROM scan_info WHERE id = 1').fetchone()
+            sdb.close()
+            if row:
+                wasted = row['total_wasted_bytes'] or 0
+                groups = row['total_groups'] or 0
+                elapsed = row['scan_duration_sec'] or 0
+                with _scan_lock:
+                    _scan_state['message'] = (
+                        f'Done in {elapsed:.1f}s — {groups:,} groups, '
+                        f'{_format_bytes(wasted)} wasted'
+                    )
+                    _scan_state['progress'] = row['total_files_scanned'] or 0
+                    _scan_state['total']    = row['total_files_scanned'] or 0
+        except Exception:
+            pass
+
+    except Exception as exc:
+        with _scan_lock:
+            _scan_state['error'] = str(exc)
+    finally:
+        with _scan_lock:
+            _scan_state['running'] = False
+
+
+# ── Routes ────────────────────────────────────────────────────────────────
+
+@app.route('/duplicates')
+def duplicates_page():
+    stats = ui_handler.get_stats()
+    return render_template('duplicates.html', stats=stats)
+
+
+@app.route('/api/duplicates/scan', methods=['POST'])
+def api_start_duplicate_scan():
+    data      = request.get_json() or {}
+    threshold = int(data.get('threshold', 10))
+    hash_size = int(data.get('hash_size', 8))
+    with _scan_lock:
+        if _scan_state['running']:
+            return jsonify({'success': False, 'error': 'Scan already running'})
+        _scan_state.update({'running': True, 'message': 'Starting…', 'progress': 0,
+                            'total': 0, 'error': None})
+    threading.Thread(target=_run_duplicate_scan, args=(threshold, hash_size),
+                     daemon=True).start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/duplicates/scan/status')
+def api_duplicate_scan_status():
+    with _scan_lock:
+        return jsonify(dict(_scan_state))
+
+
+@app.route('/api/duplicates/stats')
+def api_duplicate_stats():
+    if not _DUPES_DB.exists():
+        return jsonify({'success': True, 'has_data': False})
+    try:
+        sdb = _get_dupes_db()
+        row = sdb.execute('SELECT * FROM scan_info WHERE id = 1').fetchone()
+        sdb.close()
+        if not row:
+            return jsonify({'success': True, 'has_data': False})
+        return jsonify({
+            'success': True, 'has_data': True,
+            'scanned_at':          row['scanned_at'],
+            'scan_duration_sec':   row['scan_duration_sec'],
+            'total_files_scanned': row['total_files_scanned'],
+            'total_groups':        row['total_groups'],
+            'total_wasted_bytes':  row['total_wasted_bytes'],
+            'total_wasted_fmt':    _format_bytes(row['total_wasted_bytes'] or 0),
+            'threshold':           row['threshold'],
+            'hash_size':           row['hash_size'],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/duplicates/groups')
+def api_duplicate_groups():
+    if not _DUPES_DB.exists():
+        return jsonify({'success': True, 'groups': [], 'total': 0})
+    try:
+        sort  = request.args.get('sort', 'wasted_size')
+        page  = max(1, int(request.args.get('page', 1)))
+        per_p = min(50, max(5, int(request.args.get('per_page', 20))))
+
+        order = 'wasted_size DESC' if sort == 'wasted_size' else 'file_count DESC'
+        offset = (page - 1) * per_p
+
+        sdb = _get_dupes_db()
+        total_row = sdb.execute(
+            'SELECT COUNT(*) FROM dup_groups WHERE file_count > 1'
+        ).fetchone()[0]
+
+        groups_raw = sdb.execute(
+            f'SELECT * FROM dup_groups WHERE file_count > 1 ORDER BY {order} LIMIT ? OFFSET ?',
+            (per_p, offset),
+        ).fetchall()
+
+        groups = []
+        for g in groups_raw:
+            files_raw = sdb.execute(
+                'SELECT * FROM dup_files WHERE group_id = ? AND is_deleted = 0 ORDER BY file_size DESC',
+                (g['id'],),
+            ).fetchall()
+            files = []
+            for f in files_raw:
+                fp = f['file_path']
+                files.append({
+                    'id':         f['id'],
+                    'file_path':  fp,
+                    'file_size':  f['file_size'],
+                    'file_size_fmt': _format_bytes(f['file_size']),
+                    'filename':   Path(fp).name,
+                    'phash':      f['phash'],
+                    'image_id':   f['image_id'],
+                    'post_id':    f['post_id'],
+                    'reddit_id':  f['reddit_id'],
+                    'post_title': f['post_title'],
+                    'subreddit':  f['subreddit'],
+                    'permalink':  f['permalink'],
+                    'score':      f['score'],
+                    'web_url':    _file_to_url(fp),
+                    'thumb_url':  _file_to_thumb(fp),
+                })
+            groups.append({
+                'id':           g['id'],
+                'file_hash':    g['file_hash'],
+                'file_count':   g['file_count'],
+                'total_size':   g['total_size'],
+                'wasted_size':  g['wasted_size'],
+                'total_size_fmt':  _format_bytes(g['total_size']),
+                'wasted_size_fmt': _format_bytes(g['wasted_size']),
+                'min_distance': g['min_distance'],
+                'files':        files,
+            })
+        sdb.close()
+        return jsonify({'success': True, 'groups': groups, 'total': total_row,
+                        'page': page, 'per_page': per_p})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/duplicates/delete', methods=['POST'])
+def api_delete_duplicates():
+    data     = request.get_json() or {}
+    file_ids = [int(x) for x in data.get('file_ids', [])]
+    if not file_ids:
+        return jsonify({'success': False, 'error': 'No file IDs provided'}), 400
+
+    deleted, errors = 0, []
+    sdb = _get_dupes_db()
+    ph  = ','.join(['?'] * len(file_ids))
+    files = sdb.execute(
+        f'SELECT * FROM dup_files WHERE id IN ({ph}) AND is_deleted = 0', file_ids
+    ).fetchall()
+
+    my_conn = _get_db_connection()
+    my_cur  = my_conn.cursor()
+
+    for f in files:
+        try:
+            fp = Path(f['file_path'])
+
+            # 1. Delete from filesystem
+            if fp.exists():
+                fp.unlink()
+
+            # 2. Mark deleted in SQLite
+            sdb.execute('UPDATE dup_files SET is_deleted = 1 WHERE id = ?', (f['id'],))
+
+            # 3. Prod DB: only delete the images row when this is the last surviving
+            #    copy in the group (all remaining active files share the same image_id
+            #    because file_hash is UNIQUE in the images table).
+            if f['image_id']:
+                remaining = sdb.execute(
+                    'SELECT COUNT(*) FROM dup_files '
+                    'WHERE group_id = ? AND image_id = ? AND is_deleted = 0 AND id != ?',
+                    (f['group_id'], f['image_id'], f['id']),
+                ).fetchone()[0]
+
+                if remaining == 0:
+                    # Collect post_ids before cascade removes post_images
+                    my_cur.execute(
+                        'SELECT post_id FROM post_images WHERE image_id = %s', (f['image_id'],)
+                    )
+                    post_ids = [r[0] for r in my_cur.fetchall()]
+
+                    my_cur.execute('DELETE FROM images WHERE id = %s', (f['image_id'],))
+
+                    # Delete orphaned posts (no remaining images)
+                    for pid in post_ids:
+                        if pid is None:
+                            continue
+                        my_cur.execute(
+                            'SELECT COUNT(*) FROM post_images WHERE post_id = %s', (pid,)
+                        )
+                        if my_cur.fetchone()[0] == 0:
+                            my_cur.execute('DELETE FROM posts WHERE id = %s', (pid,))
+
+                    my_conn.commit()
+
+            deleted += 1
+        except Exception as exc:
+            errors.append(f'{Path(f["file_path"]).name}: {exc}')
+
+    # 4. Refresh group counters in SQLite
+    group_ids = list({f['group_id'] for f in files})
+    for gid in group_ids:
+        row = sdb.execute(
+            'SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size),0) AS ts, '
+            'COALESCE(MIN(file_size),0) AS ms '
+            'FROM dup_files WHERE group_id = ? AND is_deleted = 0', (gid,)
+        ).fetchone()
+        cnt, ts, ms = row['cnt'], row['ts'], row['ms']
+        if cnt <= 1:
+            sdb.execute('DELETE FROM dup_groups WHERE id = ?', (gid,))
+            sdb.execute('DELETE FROM dup_files WHERE group_id = ?', (gid,))
+        else:
+            sdb.execute(
+                'UPDATE dup_groups SET file_count=?, total_size=?, wasted_size=? WHERE id=?',
+                (cnt, ts, ts - ms, gid),
+            )
+
+    sdb.commit()
+    sdb.close()
+    my_cur.close()
+    my_conn.close()
+
+    return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
+
 
 if __name__ == '__main__':
     main()

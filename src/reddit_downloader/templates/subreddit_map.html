@@ -137,6 +137,29 @@
     padding: 0.25rem 0.6rem !important;
     height: 28px;
 }
+
+/* ── REDDIT MAP MODE ────────────────────────── */
+#anvakaBtn.anvaka-active {
+    background: rgba(255, 69, 0, 0.18);
+    border-color: var(--accent);
+    color: var(--accent-hi);
+}
+#anvaka-banner {
+    display: none;
+    position: absolute;
+    bottom: 36px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    border: 1px solid rgba(255,69,0,0.3);
+    border-radius: var(--r);
+    padding: 4px 10px;
+    font-size: 0.58rem;
+    color: var(--text-muted);
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+    max-width: 340px;
+    line-height: 1.4;
+}
 </style>
 
 <!-- Header -->
@@ -153,6 +176,9 @@
         <button class="btn btn-sm btn-outline-secondary" onclick="resetView()" title="Fit to screen"><i class="fas fa-compress-arrows-alt"></i></button>
         <button class="btn btn-sm btn-outline-secondary" onclick="loadData()" title="Refresh (use cached data)"><i class="fas fa-sync"></i> Refresh</button>
         <button class="btn btn-sm btn-outline-secondary" onclick="clearCacheAndReload()" title="Delete cache file and re-fetch from Reddit"><i class="fas fa-broom"></i> Clear Cache</button>
+        <button class="btn btn-sm btn-outline-secondary" id="anvakaBtn" onclick="toggleAnvakaMap()" title="Toggle Reddit community map (positions from anvaka's map-of-reddit)">
+            <i class="fas fa-globe"></i> Reddit Map
+        </button>
         <button class="btn btn-sm btn-outline-secondary" id="fullscreenBtn" onclick="toggleFullscreen()" title="Fullscreen">
             <i class="fas fa-expand"></i>
         </button>
@@ -178,6 +204,12 @@
     </div>
     <svg id="graph-svg"></svg>
     <div id="map-stats"></div>
+    <div id="anvaka-banner">
+        <i class="fas fa-globe me-1" style="color:var(--accent);"></i>
+        <strong style="color:var(--accent);">Reddit Map Mode</strong> &mdash;
+        Node positions from <em>anvaka's map-of-reddit</em> (community user-overlap similarity).
+        Nearby nodes share frequent commenters. Nodes not in dataset float freely.
+    </div>
 </div>
 
 <!-- Node action popup -->
@@ -197,6 +229,10 @@ let nodeSelection, linkSelection;
 let currentNodes = [], currentLinks = [];
 let currentScale = 1;
 
+// ── ANVAKA MAP STATE ─────────────────────────────────────────────────────
+let anvakaActive = false;
+let anvakaPositions = {};   // name -> {x, y} from cache (session-level)
+
 // ── DATA LOADING ─────────────────────────────────────────────────────────
 function loadData() {
     document.getElementById('map-loading').style.display = 'flex';
@@ -209,6 +245,12 @@ function loadData() {
             if (data.success) {
                 currentNodes = data.nodes;
                 currentLinks = data.links;
+                // Reset anvaka mode on data reload so stale fx/fy don't carry over
+                if (anvakaActive) {
+                    anvakaActive = false;
+                    document.getElementById('anvakaBtn').classList.remove('anvaka-active');
+                    document.getElementById('anvaka-banner').style.display = 'none';
+                }
                 renderGraph(data.nodes, data.links);
             } else {
                 document.getElementById('map-loading').innerHTML =
@@ -302,7 +344,7 @@ function renderGraph(nodes, links) {
 
     linkSelection = gRoot.append('g').attr('class', 'links')
         .selectAll('line')
-        .data(links)
+        .data(allLinks.filter(d => !d._co))
         .enter().append('line')
         .attr('stroke', d => {
             const src = nodeById[(typeof d.source === 'object' ? d.source.id : d.source).toLowerCase()];
@@ -343,37 +385,62 @@ function renderGraph(nodes, links) {
         .attr('pointer-events', 'none')
         .attr('opacity', 0); // start hidden; updateLabelOpacity reveals them
 
-    // ── Radial initial positions for tracked subs ─────────────────────
-    const tracked = nodes.filter(d => d.in_list);
-    const r0 = Math.min(W, H) * 0.12;
-    tracked.forEach((d, i) => {
-        const angle = (2 * Math.PI * i) / Math.max(tracked.length, 1);
-        d.x = W / 2 + r0 * Math.cos(angle);
-        d.y = H / 2 + r0 * Math.sin(angle);
+    // ── Scatter initial positions randomly to avoid ring artifacts ────
+    nodes.forEach(d => {
+        const angle = Math.random() * 2 * Math.PI;
+        const r = 30 + Math.random() * Math.min(W, H) * 0.25;
+        d.x = W / 2 + r * Math.cos(angle);
+        d.y = H / 2 + r * Math.sin(angle);
     });
+
+    // ── Add co-occurrence links between tracked subs that share related subs ──
+    // This prevents tracked nodes from drifting into a ring with no connections
+    const trackedNodes = nodes.filter(d => d.in_list);
+    const coLinks = [];
+    const coLinkSet = new Set();
+    trackedNodes.forEach((a, i) => {
+        trackedNodes.slice(i + 1).forEach(b => {
+            const key = [a.id, b.id].sort().join('|');
+            if (!coLinkSet.has(key)) {
+                coLinkSet.add(key);
+                coLinks.push({ source: a.id, target: b.id, _co: true });
+            }
+        });
+    });
+    const allLinks = links.concat(coLinks);
 
     // ── Force simulation ──────────────────────────────────────────────
     simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links)
+        .force('link', d3.forceLink(allLinks)
             .id(d => d.id)
             .distance(d => {
+                if (d._co) return 180;   // tracked–tracked: stay moderately close
                 const s = typeof d.source === 'object' ? d.source : nodeById[d.source?.toLowerCase()];
                 const t = typeof d.target === 'object' ? d.target : nodeById[d.target?.toLowerCase()];
-                if (s?.in_list && t?.in_list) return 100;
-                if (s?.in_list || t?.in_list) return 120;
-                return 80;
+                if (s?.in_list || t?.in_list) return 160;
+                return 100;
             })
-            .strength(0.25)
+            .strength(d => {
+                if (d._co) return 0.05;  // very weak: just prevents pure ring
+                const s = typeof d.source === 'object' ? d.source : nodeById[d.source?.toLowerCase()];
+                const t = typeof d.target === 'object' ? d.target : nodeById[d.target?.toLowerCase()];
+                const maxDepth = Math.max(s?.depth ?? 0, t?.depth ?? 0);
+                return maxDepth >= 2 ? 0.1 : 0.4;
+            })
         )
-        .force('charge', d3.forceManyBody().strength(d => {
-            if (d.in_list)  return -600;
-            if (d.depth === 1) return -140;
-            return -50;
-        }))
-        .force('center', d3.forceCenter(W / 2, H / 2).strength(0.04))
-        .force('collision', d3.forceCollide().radius(d => radiusOf(d) + (d.in_list ? 12 : 6)))
-        .alphaDecay(0.012)
-        .velocityDecay(0.35)
+        .force('charge', d3.forceManyBody()
+            .strength(d => {
+                if (d.in_list)     return -400;
+                if (d.depth === 1) return -120;
+                return -40;
+            })
+            .distanceMax(500)
+        )
+        .force('x', d3.forceX(W / 2).strength(d => d.in_list ? 0.04 : 0.06))
+        .force('y', d3.forceY(H / 2).strength(d => d.in_list ? 0.04 : 0.06))
+        .force('collision', d3.forceCollide().radius(d => radiusOf(d) + (d.in_list ? 14 : 6)))
+        .alphaDecay(0.008)
+        .velocityDecay(0.3)
         .on('tick', () => {
             linkSelection
                 .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
@@ -459,7 +526,8 @@ function handleFullscreenChange() {
         if (!simulation) return;
         const svg = document.getElementById('graph-svg');
         const W = svg.clientWidth, H = svg.clientHeight;
-        simulation.force('center', d3.forceCenter(W / 2, H / 2).strength(0.04));
+        simulation.force('x', d3.forceX(W / 2).strength(d => d.in_list ? 0.04 : 0.06));
+        simulation.force('y', d3.forceY(H / 2).strength(d => d.in_list ? 0.04 : 0.06));
         simulation.alpha(0.3).restart();
     }, 150);
 }
@@ -569,6 +637,113 @@ function removeSub(name) {
                 closePopup();
             } else { alert('Error: ' + data.error); }
         });
+}
+
+// ── ANVAKA MAP MODE ───────────────────────────────────────────────────────
+async function toggleAnvakaMap() {
+    anvakaActive = !anvakaActive;
+    const btn = document.getElementById('anvakaBtn');
+    btn.classList.toggle('anvaka-active', anvakaActive);
+    document.getElementById('anvaka-banner').style.display = anvakaActive ? 'block' : 'none';
+
+    if (anvakaActive) {
+        const icon = btn.querySelector('i');
+        icon.className = 'fas fa-spinner fa-spin';
+        try {
+            await applyAnvakaPositions();
+        } finally {
+            icon.className = 'fas fa-globe';
+        }
+    } else {
+        releaseAnvakaPositions();
+    }
+}
+
+async function applyAnvakaPositions() {
+    if (!currentNodes.length) return;
+
+    // Collect names we don't yet have positions for (session cache)
+    const toFetch = currentNodes
+        .filter(d => !(d.name in anvakaPositions))
+        .map(d => d.name);
+
+    if (toFetch.length) {
+        // Fetch in batches of 200 to keep URL lengths reasonable
+        const BATCH = 200;
+        for (let i = 0; i < toFetch.length; i += BATCH) {
+            const batch = toFetch.slice(i, i + BATCH);
+            try {
+                const res = await fetch(
+                    '/api/subreddit-anvaka-positions?names=' +
+                    encodeURIComponent(batch.join(','))
+                ).then(r => r.json());
+                if (res.success) {
+                    Object.assign(anvakaPositions, res.positions);
+                }
+            } catch (_) {}
+        }
+    }
+
+    // Collect found positions and compute bounding box
+    const found = [];
+    currentNodes.forEach(d => {
+        const p = anvakaPositions[d.name];
+        if (p) found.push(p);
+    });
+
+    if (!found.length) {
+        alert('None of the current subreddits were found in anvaka\'s dataset. They may be too new or were removed from Reddit before 2021.');
+        anvakaActive = false;
+        document.getElementById('anvakaBtn').classList.remove('anvaka-active');
+        document.getElementById('anvaka-banner').style.display = 'none';
+        return;
+    }
+
+    // Fit bounding box of found positions into viewport with padding
+    const container = document.getElementById('graph-svg');
+    const W = container.clientWidth || 1200;
+    const H = container.clientHeight || 700;
+    const PAD = 60;
+
+    const xs = found.map(p => p.x), ys = found.map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const dataW = maxX - minX || 1, dataH = maxY - minY || 1;
+    const scale = Math.min((W - PAD * 2) / dataW, (H - PAD * 2) / dataH);
+    const ox = PAD + (W - PAD * 2 - dataW * scale) / 2 - minX * scale;
+    const oy = PAD + (H - PAD * 2 - dataH * scale) / 2 - minY * scale;
+
+    // Fix nodes with known positions; leave unknowns floating
+    currentNodes.forEach(d => {
+        const p = anvakaPositions[d.name];
+        if (p) {
+            d.fx = p.x * scale + ox;
+            d.fy = p.y * scale + oy;
+        }
+        // Nodes without positions keep fx=null → force simulation handles them
+    });
+
+    // Run simulation briefly so fixed nodes register and tick runs
+    if (simulation) {
+        simulation.alpha(0.15).restart();
+    }
+
+    // Reset zoom to identity so the positioned graph fills the view
+    svgEl.transition().duration(600).call(
+        zoomBehavior.transform,
+        d3.zoomIdentity
+    );
+}
+
+function releaseAnvakaPositions() {
+    currentNodes.forEach(d => {
+        // Start force layout from current (anvaka) positions
+        if (d.fx !== null && d.fx !== undefined) {
+            d.x = d.fx; d.y = d.fy;
+        }
+        d.fx = null; d.fy = null;
+    });
+    if (simulation) simulation.alpha(0.5).restart();
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────
