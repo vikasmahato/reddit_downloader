@@ -1646,7 +1646,7 @@ _DUPES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS scan_info (
     id INTEGER PRIMARY KEY, scanned_at TEXT, scan_duration_sec REAL,
     total_files_scanned INTEGER, total_groups INTEGER, total_wasted_bytes INTEGER,
-    threshold INTEGER, hash_size INTEGER
+    threshold INTEGER, hash_size INTEGER, is_partial INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS dup_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT, file_hash TEXT NOT NULL UNIQUE,
@@ -1668,8 +1668,9 @@ CREATE INDEX IF NOT EXISTS idx_df_imgid   ON dup_files(image_id);
 
 _MEDIA_EXT = {'.jpg','.jpeg','.png','.gif','.bmp','.webp','.mp4','.webm','.mov','.avi','.mkv'}
 
-_scan_state: dict = {'running': False, 'message': '', 'progress': 0, 'total': 0, 'error': None, 'logs': []}
+_scan_state: dict = {'running': False, 'message': '', 'progress': 0, 'total': 0, 'error': None, 'logs': [], 'partial': False}
 _scan_lock = threading.Lock()
+_scan_proc = None  # subprocess.Popen reference for stop support
 
 
 def _get_dupes_db() -> sqlite3.Connection:
@@ -1715,12 +1716,16 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
         '--progress-json',
     ]
 
+    global _scan_proc
     try:
         with _scan_lock:
-            _scan_state['logs'] = []
+            _scan_state['logs']    = []
+            _scan_state['partial'] = False
 
         proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
                          text=True, bufsize=1, cwd=str(Path.cwd()))
+        with _scan_lock:
+            _scan_proc = proc
 
         import threading as _threading
 
@@ -1754,7 +1759,12 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
                 pass  # non-JSON output (warnings/tracebacks)
 
         proc.wait()
-        if proc.returncode != 0:
+        with _scan_lock:
+            _scan_proc = None
+
+        # rc=0 → complete or partial-stop (scan writes results before exiting)
+        # rc!=0 → crash
+        if proc.returncode not in (0, -15):  # -15 = SIGTERM on Unix
             with _scan_lock:
                 _scan_state['error'] = (
                     f'scan_duplicates.py exited with code {proc.returncode} — '
@@ -1768,11 +1778,11 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
             row = sdb.execute('SELECT * FROM scan_info WHERE id = 1').fetchone()
             sdb.close()
             if row:
-                wasted = row['total_wasted_bytes'] or 0
-                groups = row['total_groups'] or 0
+                wasted  = row['total_wasted_bytes'] or 0
+                groups  = row['total_groups'] or 0
                 elapsed = row['scan_duration_sec'] or 0
                 with _scan_lock:
-                    _scan_state['message'] = (
+                    _scan_state['message']  = (
                         f'Done in {elapsed:.1f}s — {groups:,} groups, '
                         f'{_format_bytes(wasted)} wasted'
                     )
@@ -1781,12 +1791,28 @@ def _run_duplicate_scan(threshold: int = 10, hash_size: int = 8):
         except Exception:
             pass
 
+        # Detect partial scan from last progress log line; persist to DB
+        with _scan_lock:
+            logs = _scan_state['logs']
+            is_partial = any('partial' in l.lower() for l in logs[-5:])
+            _scan_state['partial'] = is_partial
+        if is_partial:
+            try:
+                sdb2 = _get_dupes_db()
+                sdb2.execute('UPDATE scan_info SET is_partial=1 WHERE id=1')
+                sdb2.commit()
+                sdb2.close()
+            except Exception:
+                pass
+
     except Exception as exc:
         with _scan_lock:
             _scan_state['error'] = str(exc)
+            _scan_proc = None
     finally:
         with _scan_lock:
             _scan_state['running'] = False
+            _scan_proc = None
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -1806,7 +1832,7 @@ def api_start_duplicate_scan():
         if _scan_state['running']:
             return jsonify({'success': False, 'error': 'Scan already running'})
         _scan_state.update({'running': True, 'message': 'Starting…', 'progress': 0,
-                            'total': 0, 'error': None, 'logs': []})
+                            'total': 0, 'error': None, 'logs': [], 'partial': False})
     threading.Thread(target=_run_duplicate_scan, args=(threshold, hash_size),
                      daemon=True).start()
     return jsonify({'success': True})
@@ -1818,6 +1844,21 @@ def api_duplicate_scan_status():
         state = dict(_scan_state)
         state.pop('logs', None)  # logs fetched separately
         return jsonify(state)
+
+
+@app.route('/api/duplicates/scan/stop', methods=['POST'])
+def api_stop_duplicate_scan():
+    global _scan_proc
+    with _scan_lock:
+        if not _scan_state['running']:
+            return jsonify({'success': False, 'error': 'No scan running'})
+        proc = _scan_proc
+    if proc:
+        try:
+            proc.terminate()  # SIGTERM → graceful partial-result save
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)})
+    return jsonify({'success': True})
 
 
 @app.route('/api/duplicates/scan/logs')
@@ -1848,6 +1889,7 @@ def api_duplicate_stats():
             'total_wasted_fmt':    _format_bytes(row['total_wasted_bytes'] or 0),
             'threshold':           row['threshold'],
             'hash_size':           row['hash_size'],
+            'partial':             bool(row['is_partial']),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

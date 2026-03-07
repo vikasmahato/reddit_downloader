@@ -25,6 +25,7 @@ import argparse
 import configparser
 import hashlib
 import json
+import signal
 import sqlite3
 import sys
 import time
@@ -34,6 +35,16 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 import mysql.connector
+
+# ── Stop flag (set by SIGTERM handler) ───────────────────────────────────
+_stop_requested = False
+
+def _handle_sigterm(signum, frame):
+    global _stop_requested
+    _stop_requested = True
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
+signal.signal(signal.SIGINT,  _handle_sigterm)
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
@@ -198,7 +209,8 @@ CREATE TABLE IF NOT EXISTS scan_info (
     total_groups        INTEGER,
     total_wasted_bytes  INTEGER,
     threshold           INTEGER,
-    hash_size           INTEGER
+    hash_size           INTEGER,
+    is_partial          INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS dup_groups (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,6 +239,12 @@ CREATE TABLE IF NOT EXISTS dup_files (
 CREATE INDEX IF NOT EXISTS idx_df_group   ON dup_files(group_id);
 CREATE INDEX IF NOT EXISTS idx_df_deleted ON dup_files(group_id, is_deleted);
 CREATE INDEX IF NOT EXISTS idx_df_imgid   ON dup_files(image_id);
+CREATE TABLE IF NOT EXISTS phash_cache (
+    path  TEXT    PRIMARY KEY,
+    mtime REAL    NOT NULL,
+    size  INTEGER NOT NULL,
+    phash TEXT    NOT NULL
+);
 """
 
 
@@ -253,6 +271,63 @@ def compute_md5(path: Path, chunk: int = 65536) -> Optional[str]:
 
 # ── Core scan ─────────────────────────────────────────────────────────────
 
+def _write_results(
+    sc, sdb,
+    raw_groups: dict,
+    pair_min_d: dict,
+    path_to_phash: dict,
+    path_to_md5: dict,
+    md5_to_db: dict,
+) -> int:
+    """Write groups to SQLite. Returns total wasted bytes."""
+    total_wasted = 0
+    for root, members in raw_groups.items():
+        sizes = []
+        for sp in members:
+            try:
+                sizes.append(Path(sp).stat().st_size)
+            except Exception:
+                sizes.append(0)
+
+        total_size  = sum(sizes)
+        wasted_size = total_size - (min(sizes) if sizes else 0)
+        total_wasted += wasted_size
+
+        min_dist = min(
+            (d for (a, b), d in pair_min_d.items()
+             if a in members and b in members),
+            default=0,
+        )
+
+        rep_hash = hex(path_to_phash.get(root, 0))
+        sc.execute(
+            'INSERT OR REPLACE INTO dup_groups '
+            '(file_hash, file_count, total_size, wasted_size, min_distance) '
+            'VALUES (?,?,?,?,?)',
+            (rep_hash, len(members), total_size, wasted_size, min_dist),
+        )
+        gid = sc.lastrowid
+
+        for sp, size in zip(members, sizes):
+            ph_hex = hex(path_to_phash.get(sp, 0))
+            md5    = path_to_md5.get(sp)
+            db_row = md5_to_db.get(md5, {}) if md5 else {}
+            sc.execute(
+                'INSERT INTO dup_files '
+                '(group_id, file_path, file_size, phash, '
+                'image_id, post_id, reddit_id, post_title, subreddit, permalink, score) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                (
+                    gid, sp, size, ph_hex,
+                    db_row.get('image_id'), db_row.get('post_id'),
+                    db_row.get('reddit_id'), db_row.get('post_title'),
+                    db_row.get('subreddit'), db_row.get('permalink'), db_row.get('score'),
+                ),
+            )
+    sdb.commit()
+    return total_wasted
+
+
 def run_scan(
     downloads_dir: Path,
     db_path: Path,
@@ -264,7 +339,11 @@ def run_scan(
     """
     Full pipeline.  Returns a stats dict.
     progress_cb(message, current, total) is called periodically.
+    Handles SIGTERM gracefully: saves partial results and exits cleanly.
+    pHash cache: already-computed hashes are reused across scans.
     """
+    global _stop_requested
+    _stop_requested = False
 
     def progress(msg: str, cur: int = 0, tot: int = 0):
         if progress_cb:
@@ -275,6 +354,18 @@ def run_scan(
     start  = time.time()
     dl_dir = Path(downloads_dir).resolve()
 
+    # Open DB and load pHash cache
+    sdb = init_db(db_path)
+    sc  = sdb.cursor()
+    cache_rows = sc.execute('SELECT path, mtime, size, phash FROM phash_cache').fetchall()
+    phash_cache: dict[str, tuple[float, int, int]] = {}  # path → (mtime, size, phash_int)
+    for row in cache_rows:
+        try:
+            phash_cache[row['path']] = (row['mtime'], row['size'], int(row['phash'], 16))
+        except Exception:
+            pass
+    progress(f'Loaded {len(phash_cache):,} cached hashes.', 0, 0)
+
     # 1. List all media files
     progress('Listing files…', 0, 0)
     all_paths = [
@@ -283,24 +374,56 @@ def run_scan(
     ]
     total   = len(all_paths)
     skipped = 0
+    cache_hits = 0
     progress(f'Computing pHash for {total:,} files…', 0, total)
 
-    # 2. Compute pHash
+    # 2. Compute pHash (with cache)
     file_hashes: list[tuple[Path, int]] = []
+    new_cache_entries: list[tuple[str, float, int, str]] = []  # (path, mtime, size, phash_hex)
+
     for i, fp in enumerate(all_paths):
-        if i % 200 == 0:
-            progress(f'Hashing… {i:,}/{total:,}', i, total)
+        if _stop_requested:
+            progress(f'Stop requested after {i:,}/{total:,} files — saving partial results…', i, total)
+            break
+        if i % 200 == 0 and i > 0:
+            progress(f'Hashing… {i:,}/{total:,} ({cache_hits} cached, {len(new_cache_entries)} new)', i, total)
+
+        sp = str(fp)
+        try:
+            stat = fp.stat()
+            mtime, size = stat.st_mtime, stat.st_size
+        except Exception:
+            skipped += 1
+            continue
+
+        cached = phash_cache.get(sp)
+        if cached and abs(cached[0] - mtime) < 1.0 and cached[1] == size:
+            file_hashes.append((fp, cached[2]))
+            cache_hits += 1
+            continue
+
         h = compute_phash(fp, hash_size)
         if h is None:
             skipped += 1
         else:
             file_hashes.append((fp, h))
+            new_cache_entries.append((sp, mtime, size, hex(h)))
 
+    hashed_count = len(file_hashes)
     progress(
-        f'Hashed {len(file_hashes):,} files ({skipped} skipped). '
-        f'Building BK-tree (threshold={threshold})…',
-        total, total,
+        f'Hashed {hashed_count:,} files ({cache_hits} from cache, {skipped} skipped). '
+        f'Building BK-tree…',
+        min(i + 1, total), total,
     )
+
+    # Save new cache entries
+    if new_cache_entries:
+        sc.executemany(
+            'INSERT OR REPLACE INTO phash_cache (path, mtime, size, phash) VALUES (?,?,?,?)',
+            new_cache_entries,
+        )
+        sdb.commit()
+        progress(f'Saved {len(new_cache_entries):,} new hashes to cache.', 0, 0)
 
     # 3. Build BK-tree
     tree = BKTree()
@@ -309,7 +432,7 @@ def run_scan(
 
     # 4. BK-tree search + union-find
     uf         = UnionFind()
-    pair_min_d: dict[tuple[str, str], int] = {}   # (a,b) sorted → min dist
+    pair_min_d: dict[tuple[str, str], int] = {}
 
     for fp, h in file_hashes:
         sp      = str(fp)
@@ -369,86 +492,46 @@ def run_scan(
         except Exception as e:
             progress(f'Warning: DB query failed ({e})')
 
-    # 7. Write SQLite
-    progress('Writing duplicates.db…', 0, 0)
-    sdb = init_db(db_path)
-    sc  = sdb.cursor()
+    # 7. Write SQLite (clear old results first)
+    is_partial = _stop_requested
+    status_label = 'partial' if is_partial else 'complete'
+    progress(f'Writing duplicates.db ({status_label})…', 0, 0)
+
     sc.execute('DELETE FROM dup_files')
     sc.execute('DELETE FROM dup_groups')
     sc.execute('DELETE FROM scan_info')
     sdb.commit()
 
     path_to_phash = {str(fp): h for fp, h in file_hashes}
-    total_wasted  = 0
-
-    for root, members in raw_groups.items():
-        sizes = []
-        for sp in members:
-            try:
-                sizes.append(Path(sp).stat().st_size)
-            except Exception:
-                sizes.append(0)
-
-        total_size  = sum(sizes)
-        wasted_size = total_size - (min(sizes) if sizes else 0)
-        total_wasted += wasted_size
-
-        # Min Hamming distance within this group
-        min_dist = min(
-            (d for (a, b), d in pair_min_d.items()
-             if a in members and b in members),
-            default=0,
-        )
-
-        rep_hash = hex(path_to_phash.get(root, 0))
-        sc.execute(
-            'INSERT INTO dup_groups '
-            '(file_hash, file_count, total_size, wasted_size, min_distance) '
-            'VALUES (?,?,?,?,?)',
-            (rep_hash, len(members), total_size, wasted_size, min_dist),
-        )
-        gid = sc.lastrowid
-
-        for sp, size in zip(members, sizes):
-            ph_hex = hex(path_to_phash.get(sp, 0))
-            md5    = path_to_md5.get(sp)
-            db     = md5_to_db.get(md5, {}) if md5 else {}
-            sc.execute(
-                'INSERT INTO dup_files '
-                '(group_id, file_path, file_size, phash, '
-                'image_id, post_id, reddit_id, post_title, subreddit, permalink, score) '
-                'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                (
-                    gid, sp, size, ph_hex,
-                    db.get('image_id'), db.get('post_id'),
-                    db.get('reddit_id'), db.get('post_title'),
-                    db.get('subreddit'), db.get('permalink'), db.get('score'),
-                ),
-            )
+    total_wasted  = _write_results(sc, sdb, raw_groups, pair_min_d,
+                                   path_to_phash, path_to_md5, md5_to_db)
 
     elapsed = time.time() - start
     sc.execute(
         "INSERT INTO scan_info "
         "(id, scanned_at, scan_duration_sec, total_files_scanned, "
-        "total_groups, total_wasted_bytes, threshold, hash_size) "
-        "VALUES (1, datetime('now','localtime'), ?, ?, ?, ?, ?, ?)",
-        (elapsed, total, len(raw_groups), total_wasted, threshold, hash_size),
+        "total_groups, total_wasted_bytes, threshold, hash_size, is_partial) "
+        "VALUES (1, datetime('now','localtime'), ?, ?, ?, ?, ?, ?, ?)",
+        (elapsed, hashed_count, len(raw_groups), total_wasted, threshold, hash_size,
+         1 if is_partial else 0),
     )
     sdb.commit()
     sdb.close()
 
     stats = {
-        'total_files':        total,
+        'total_files':        hashed_count,
         'total_groups':       len(raw_groups),
         'total_wasted_bytes': total_wasted,
         'duration_sec':       round(elapsed, 1),
         'threshold':          threshold,
+        'partial':            is_partial,
     }
-    progress(
-        f'Done in {elapsed:.1f}s — {len(raw_groups):,} groups, '
-        f'{total_wasted // 1024 // 1024:,} MB wasted.',
-        total, total,
+    done_msg = (
+        f'{"Partial results saved" if is_partial else "Done"} in {elapsed:.1f}s — '
+        f'{len(raw_groups):,} groups, {total_wasted // 1024 // 1024:,} MB wasted'
+        + (f' (scanned {hashed_count:,}/{total:,} files)' if is_partial else '')
     )
+    progress(done_msg, hashed_count, total)
     return stats
 
 

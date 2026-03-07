@@ -498,6 +498,9 @@
         <span class="dup-stat-label">last scan</span>
     </div>
     <div class="dup-stats-actions">
+        <span id="partial-badge" style="display:none;font-size:0.6rem;color:#fb923c;font-family:var(--font-mono);border:1px solid rgba(251,146,60,0.4);border-radius:4px;padding:2px 8px;" title="Scan was stopped early — results are incomplete">
+            <i class="fas fa-exclamation-triangle me-1"></i>Partial
+        </span>
         <label style="font-size:0.6rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin:0;">
             Threshold
         </label>
@@ -512,6 +515,9 @@
         </select>
         <button class="btn btn-sm btn-outline-secondary" onclick="startScan()" id="scan-btn">
             <i class="fas fa-search"></i> Scan Now
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="stopScan()" id="stop-btn" style="display:none;">
+            <i class="fas fa-stop"></i> Stop
         </button>
     </div>
 </div>
@@ -606,6 +612,7 @@ async function loadStats() {
             document.getElementById('stat-wasted').textContent  = data.total_wasted_fmt;
             document.getElementById('stat-files').textContent   = data.total_files_scanned.toLocaleString();
             document.getElementById('stat-scanned').textContent = data.scanned_at;
+            document.getElementById('partial-badge').style.display = data.partial ? 'inline-flex' : 'none';
             // Restore threshold selector to match last scan
             if (data.threshold != null) {
                 const sel = document.getElementById('threshold-sel');
@@ -695,6 +702,8 @@ async function startScan() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning…';
     document.getElementById('scan-error-banner').style.display = 'none';
     document.getElementById('scan-progress-bar').style.display = 'block';
+    document.getElementById('stop-btn').style.display  = 'inline-flex';
+    document.getElementById('partial-badge').style.display = 'none';
 
     // Reset log panel
     logOffset = 0;
@@ -737,26 +746,47 @@ async function pollScanStatus() {
             scanPollTimer = null;
             stopLogPolling();
             document.getElementById('scan-progress-bar').style.display = 'none';
+            document.getElementById('stop-btn').style.display = 'none';
             const btn = document.getElementById('scan-btn');
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-search"></i> Scan Now';
 
             if (s.error) {
-                const banner = document.getElementById('scan-error-banner');
                 document.getElementById('scan-error-msg').textContent = s.error;
-                banner.style.display = 'flex';
+                document.getElementById('scan-error-banner').style.display = 'flex';
                 showToast(s.error, 'error');
-                // Auto-open log panel on error
                 if (!logPanelOpen) toggleLogPanel();
+                // Still reload in case partial results were written
+                currentPage = 1;
+                await loadStats();
+                await loadGroups();
                 return;
             }
 
-            showToast('Scan complete!', 'ok');
+            if (s.partial) {
+                showToast('Scan stopped — partial results saved.', 'warn');
+            } else {
+                showToast('Scan complete!', 'ok');
+            }
             currentPage = 1;
             await loadStats();
             await loadGroups();
         }
     } catch(_) {}
+}
+
+async function stopScan() {
+    const btn = document.getElementById('stop-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    try {
+        await fetch('/api/duplicates/scan/stop', { method: 'POST' });
+        // pollScanStatus will detect running=false and finalize
+    } catch(e) {
+        showToast('Stop request failed: ' + e, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-stop"></i> Stop';
+    }
 }
 
 // ── SORT ──────────────────────────────────────────────────────────────────
