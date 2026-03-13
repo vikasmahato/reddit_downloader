@@ -2206,7 +2206,8 @@ def api_flair_posts():
 
         result = []
         for row in rows:
-            thumb = ui_handler.make_thumb_path(row.get('file_path')) if row.get('file_path') else None
+            fp = row.get('file_path') or ''
+            thumb = ui_handler.make_thumb_path(fp) if fp else None
             result.append({
                 'post_id':     row['post_id'],
                 'title':       row.get('title') or '',
@@ -2218,6 +2219,7 @@ def api_flair_posts():
                 'permalink':   row.get('permalink') or '',
                 'image_count': row.get('image_count') or 0,
                 'thumb':       thumb,
+                'file_path':   fp,
             })
         return jsonify({'success': True, 'posts': result, 'total': total, 'page': page, 'per_page': per_page})
     except Exception as e:

@@ -318,8 +318,9 @@ function renderPosts(posts) {
         card.className = 'post-card' + (_selected.has(p.post_id) ? ' selected' : '');
         card.dataset.postId = p.post_id;
 
-        const imgHtml = p.thumb
-            ? `<img src="/thumbs/${escHtml(p.thumb)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-image\\'></i></div>'">`
+        const thumbUrl = buildThumbUrl(p);
+        const imgHtml = thumbUrl
+            ? `<img src="${thumbUrl}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-image\\'></i></div>'">`
             : `<div class="post-card-no-thumb"><i class="fas fa-image"></i></div>`;
 
         const date = p.created_utc ? p.created_utc.slice(0,10) : '';
@@ -467,6 +468,18 @@ function batchDelete(ids, reloadFlairs = false) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+function buildThumbUrl(p) {
+    if (p.thumb) return '/thumbs/' + p.thumb;
+    if (!p.file_path) return null;
+    const norm = p.file_path.replace(/\\/g, '/');
+    const marker = 'reddit_downloads/';
+    const idx = norm.indexOf(marker);
+    if (idx === -1) return null;
+    const rel = norm.slice(idx + marker.length);
+    const withoutExt = rel.replace(/\.[^.]+$/, '');
+    return '/thumbs/' + withoutExt + '.jpg';
+}
+
 function escHtml(s) {
     return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
