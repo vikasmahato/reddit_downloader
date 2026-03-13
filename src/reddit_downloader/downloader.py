@@ -11,6 +11,7 @@ import sys
 import json
 import argparse
 import requests
+import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 from datetime import datetime
@@ -84,6 +85,10 @@ class RedditImageDownloader:
         
         self._setup_reddit_auth()
 
+        # In-memory phash cache: list of (abs_path_str, phash_int).
+        # Loaded lazily on first duplicate check; new downloads append to it.
+        self._phash_mem_cache: Optional[list] = None
+
         # Initialize MySQL connection pool (if mysql_config is available). Use a small default pool size.
         self.db_pool = None
         try:
@@ -122,6 +127,123 @@ class RedditImageDownloader:
             return blocked
         except Exception:
             return set()
+
+    # ── Perceptual-hash deduplication ────────────────────────────────────
+
+    _PHASH_IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+
+    def _compute_phash(self, filepath: Path) -> Optional[int]:
+        """Compute DCT-based perceptual hash (same algorithm as compute_hashes.py).
+        Returns an integer or None if the file can't be read."""
+        if filepath.suffix.lower() not in self._PHASH_IMAGE_EXT:
+            return None
+        try:
+            import cv2
+            import numpy as np
+            hash_size = 8
+            img = cv2.imread(str(filepath), cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                if filepath.suffix.lower() == '.gif':
+                    cap = cv2.VideoCapture(str(filepath))
+                    ret, frame = cap.read()
+                    cap.release()
+                    if not ret:
+                        return None
+                    img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                else:
+                    return None
+            dct_size = hash_size * 4
+            small = cv2.resize(img, (dct_size, dct_size), interpolation=cv2.INTER_AREA)
+            dct = cv2.dct(np.float32(small))
+            low = dct[:hash_size, :hash_size]
+            mean = (low.sum() - low[0, 0]) / (hash_size * hash_size - 1)
+            bits = (low.flatten() > mean).astype(np.uint8)
+            rem = len(bits) % 8
+            if rem:
+                bits = np.append(bits, np.zeros(8 - rem, dtype=np.uint8))
+            return int.from_bytes(np.packbits(bits).tobytes(), 'big')
+        except Exception as e:
+            logger.debug(f"pHash computation failed for {filepath}: {e}")
+            return None
+
+    def _phash_db_path(self) -> Path:
+        return Path('duplicates.db')
+
+    def _load_phash_cache(self) -> list:
+        """Load all (path, phash_int) entries from phash_cache into memory."""
+        db = self._phash_db_path()
+        if not db.exists():
+            return []
+        try:
+            conn = sqlite3.connect(str(db), timeout=10)
+            rows = conn.execute(
+                'SELECT path, phash FROM phash_cache WHERE phash IS NOT NULL'
+            ).fetchall()
+            conn.close()
+            result = []
+            for path, phash_hex in rows:
+                try:
+                    result.append((path, int(phash_hex, 16)))
+                except (ValueError, TypeError):
+                    pass
+            return result
+        except Exception as e:
+            logger.debug(f"Failed to load phash cache: {e}")
+            return []
+
+    def _find_phash_duplicate(self, filepath: Path) -> Optional[str]:
+        """Check if a newly downloaded file is a near-duplicate of any cached image.
+        Returns the path of the existing duplicate, or None."""
+        new_phash = self._compute_phash(filepath)
+        if new_phash is None:
+            return None
+
+        # Lazy-load the cache on first use
+        if self._phash_mem_cache is None:
+            self._phash_mem_cache = self._load_phash_cache()
+            logger.debug(f"Loaded {len(self._phash_mem_cache):,} phash entries into memory")
+
+        threshold = self._get_config_int('general', 'phash_threshold', fallback=10)
+        new_path_str = str(filepath.resolve())
+
+        for path, existing_phash in self._phash_mem_cache:
+            if path == new_path_str:
+                continue
+            distance = bin(new_phash ^ existing_phash).count('1')
+            if distance <= threshold:
+                if Path(path).exists():
+                    logger.debug(f"pHash match (distance={distance}): {path}")
+                    return path
+
+        return None
+
+    def _cache_phash(self, filepath: Path) -> None:
+        """Compute and store the phash for a newly downloaded file."""
+        phash = self._compute_phash(filepath)
+        db = self._phash_db_path()
+        try:
+            conn = sqlite3.connect(str(db), timeout=10)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS phash_cache (
+                    path TEXT PRIMARY KEY,
+                    mtime REAL NOT NULL,
+                    size INTEGER NOT NULL,
+                    phash TEXT
+                )
+            """)
+            stat = filepath.stat()
+            phash_hex = hex(phash) if phash is not None else None
+            conn.execute(
+                'INSERT OR REPLACE INTO phash_cache (path, mtime, size, phash) VALUES (?, ?, ?, ?)',
+                (str(filepath.resolve()), stat.st_mtime, stat.st_size, phash_hex)
+            )
+            conn.commit()
+            conn.close()
+            # Also update the in-memory cache if it has been initialised
+            if self._phash_mem_cache is not None and phash is not None:
+                self._phash_mem_cache.append((str(filepath.resolve()), phash))
+        except Exception as e:
+            logger.debug(f"Failed to cache phash for {filepath}: {e}")
 
     def _parse_config_file(self, config_file: str):
         """Parse config file handling list sections properly."""
@@ -395,40 +517,31 @@ class RedditImageDownloader:
                     logger.error(f"GIF to MP4 conversion failed: {conv_err}")
             else:
                 # Save metadata for non-GIF files
-                
-                # Deduplication Check
-                existing_image = self._get_image_by_hash(file_hash.hexdigest())
-                if existing_image:
-                    # Use existing file details
-                    existing_filepath = Path(existing_image['file_path'])
-                    # Resolve the path - handle both absolute and relative paths
-                    if not existing_filepath.is_absolute():
-                        # Try relative to download folder
-                        existing_filepath = self.download_folder / existing_filepath
-                    
-                    # Check if existing file actually exists
-                    if existing_filepath.exists():
-                        logger.info(f"♻️  Duplicate file found (Hash: {file_hash.hexdigest()}). Using existing file.")
-                        # Delete the newly downloaded file
+
+                # ── Perceptual-hash deduplication ────────────────────────
+                # Check for near-duplicates using pHash (same algorithm as the
+                # Duplicates page).  Falls back gracefully if cv2 is unavailable
+                # or the file type isn't supported (videos, etc.).
+                duplicate_path = self._find_phash_duplicate(filepath)
+                if duplicate_path:
+                    existing_image = self._get_image_by_filepath(duplicate_path)
+                    if existing_image:
+                        logger.info(f"♻️  Near-duplicate found via pHash: {Path(duplicate_path).name}. Using existing file.")
                         try:
                             os.remove(filepath)
                         except OSError:
                             pass
-                        # Use existing file details
-                        filepath = existing_filepath
-                        filename = existing_image['filename']
-                        downloaded = existing_image['file_size']
+                        filepath = Path(duplicate_path)
+                        filename = filepath.name
+                        downloaded = existing_image['file_size'] or downloaded
                     else:
-                        # Existing file doesn't exist, but hash matches - file was moved/deleted
-                        # Keep the new file and update the database with the new path
-                        logger.warning(f"⚠️  Duplicate hash found but existing file missing at {existing_image['file_path']}")
-                        logger.info(f"📥 Re-saving file to database with new path: {filepath}")
-                        # filepath, filename, downloaded already set above - keep the newly downloaded file
-                        # Verify the new file exists before proceeding
-                        if not filepath.exists():
-                            logger.error(f"✗ Newly downloaded file also missing at {filepath}")
-                            return False
-                    
+                        # In phash cache but missing from DB (e.g. deleted) — keep new file
+                        logger.warning(f"⚠️  pHash duplicate found but not in DB ({duplicate_path}); keeping new file.")
+                        self._cache_phash(filepath)
+                else:
+                    # No near-duplicate — cache the new file's phash for future comparisons
+                    self._cache_phash(filepath)
+
                 self._save_image_metadata(url, filename, subreddit, post_data, filepath, file_hash.hexdigest(), downloaded)
             
             # Generate thumbnail only if file exists (filepath should point to the actual file location)
@@ -496,6 +609,18 @@ class RedditImageDownloader:
         result = cursor.fetchone()
         conn.close()
         return result
+
+    def _get_image_by_filepath(self, file_path: str) -> Optional[Dict]:
+        """Get image record by file path."""
+        try:
+            conn = self._get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute('SELECT * FROM images WHERE file_path = %s', (file_path,))
+            result = cursor.fetchone()
+            conn.close()
+            return result
+        except Exception:
+            return None
 
     def _is_post_downloaded(self, permalink: str) -> bool:
         """Check if a post is already downloaded by checking its permalink in the permalinks table."""

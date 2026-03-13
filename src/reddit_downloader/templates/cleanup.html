@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}Cleanup Orphans — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+.tool-header {
+    display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem;
+}
+.tool-title {
+    font-family: var(--font-head); font-size: 1.1rem; font-weight: 800;
+    letter-spacing: 0.08em; text-transform: uppercase; color: #efefef; margin: 0;
+}
+.config-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 1rem 1.25rem; margin-bottom: 1rem;
+}
+.phase-pills {
+    display: flex; gap: 0.5rem; margin-bottom: 0.75rem;
+}
+.phase-pill {
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.1em;
+    padding: 2px 10px; border-radius: 2px; font-family: var(--font-head);
+    border: 1px solid var(--border); color: var(--text-muted);
+    background: var(--surface-2);
+}
+.phase-pill.active { border-color: var(--accent); color: var(--accent); }
+.phase-pill.done   { border-color: rgba(34,197,94,0.4); color: var(--success); }
+.stat-row  { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.stat-chip {
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 0.4rem 0.85rem;
+}
+.stat-chip-val  { font-family: var(--font-head); font-size: 1.2rem; font-weight: 800; color: #f0f0f0; line-height: 1; }
+.stat-chip-label{ font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+.stat-chip.danger .stat-chip-val { color: var(--danger); }
+.stat-chip.warn   .stat-chip-val { color: var(--warn); }
+.stat-chip.ok     .stat-chip-val { color: var(--success); }
+.progress-bar-wrap { background: var(--surface-2); border-radius: 2px; height: 6px; overflow: hidden; margin: 0.5rem 0; }
+.progress-bar-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; width: 0%; }
+.log-box {
+    background: #060606; border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0.75rem 1rem; height: 320px; overflow-y: auto;
+    font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-dim);
+    white-space: pre-wrap; word-break: break-all;
+}
+.log-ok   { color: #86efac; }
+.log-warn { color: var(--warn); }
+.log-done { color: var(--accent); font-weight: 600; }
+.log-miss { color: var(--danger); }
+.log-skip { color: var(--text-muted); }
+.what-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0.85rem 1.1rem; margin-bottom: 1rem; font-size: 0.72rem; color: var(--text-dim);
+    line-height: 1.7;
+}
+.what-box strong { color: var(--text); }
+.cron-box {
+    background: #060606; border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0.75rem 1rem; font-family: var(--font-mono); font-size: 0.7rem;
+    color: var(--text-dim); white-space: pre; overflow-x: auto; margin-top: 1.5rem;
+}
+</style>
+
+<div class="tool-header">
+    <h1 class="tool-title">
+        <i class="fas fa-broom" style="color:var(--warn);margin-right:8px;"></i>Cleanup Orphans
+    </h1>
+    <span id="statusBadge" style="font-size:0.7rem;padding:2px 10px;border-radius:var(--r);background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">Idle</span>
+</div>
+
+<!-- What it does -->
+<div class="what-box">
+    <strong>Phase 1 — DB orphans:</strong> checks every <code>images</code> row; removes records, orphaned posts, and their thumbnails when the file is missing from disk.<br>
+    <strong>Phase 2 — Thumbnail orphans:</strong> scans the entire thumbs folder; deletes any <code>.jpg</code> thumbnail whose source image no longer exists in any known extension.<br>
+    Use <strong>Dry Run</strong> first to preview what would be removed.
+</div>
+
+<!-- Config -->
+<div class="config-card">
+    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+        <label class="filter-check-wrap" style="font-size:0.72rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="dryRunCheck" style="width:14px;height:14px;accent-color:var(--accent);cursor:pointer;">
+            <span>Dry run (preview only — no changes made)</span>
+        </label>
+        <div style="margin-left:auto;display:flex;gap:0.5rem;">
+            <button class="btn btn-sm btn-primary" id="startBtn" onclick="startCleanup()">
+                <i class="fas fa-play"></i> Start
+            </button>
+            <button class="btn btn-sm btn-outline-danger" id="stopBtn" onclick="stopCleanup()" disabled>
+                <i class="fas fa-stop"></i> Stop
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Phase indicator -->
+<div class="phase-pills" id="phasePills" style="display:none;">
+    <span class="phase-pill" id="pill1">Phase 1: DB orphans</span>
+    <span class="phase-pill" id="pill2">Phase 2: Thumb orphans</span>
+</div>
+
+<!-- Stats -->
+<div class="stat-row" id="statsRow" style="display:none;">
+    <div class="stat-chip danger">
+        <span class="stat-chip-val" id="statMissing">0</span>
+        <span class="stat-chip-label">Missing files</span>
+    </div>
+    <div class="stat-chip warn">
+        <span class="stat-chip-val" id="statImgDel">0</span>
+        <span class="stat-chip-label">DB records removed</span>
+    </div>
+    <div class="stat-chip warn">
+        <span class="stat-chip-val" id="statPostDel">0</span>
+        <span class="stat-chip-label">Posts removed</span>
+    </div>
+    <div class="stat-chip ok">
+        <span class="stat-chip-val" id="statThumbDel">0</span>
+        <span class="stat-chip-label">Thumbnails deleted</span>
+    </div>
+    <div class="stat-chip">
+        <span class="stat-chip-val" id="statProgress">0</span>
+        <span class="stat-chip-label">Checked</span>
+    </div>
+</div>
+
+<div class="progress-bar-wrap" id="progressWrap" style="display:none;">
+    <div class="progress-bar-fill" id="progressFill"></div>
+</div>
+
+<!-- Log -->
+<div class="log-box" id="logBox"><span style="color:var(--text-muted);">Waiting to start…</span></div>
+
+<!-- Cron reference -->
+<div class="cron-box"># Weekly Sunday 4 AM
+0 4 * * 0  cd /path/to/reddit_downloader &amp;&amp; .venv/bin/python cleanup_orphans.py >> logs/cleanup.log 2>&amp;1</div>
+
+<script>
+let _pollTimer  = null;
+let _logOffset  = 0;
+let _running    = false;
+
+// Parse summary counters from the "Done in…" line
+const _reMissing  = /(\d[\d,]*) missing/;
+const _reImgDel   = /(\d[\d,]*) DB record/;
+const _rePostDel  = /(\d[\d,]*) post/;
+const _reThumbDel = /(\d[\d,]*) deleted/;
+
+function classForLine(text) {
+    if (/done in/i.test(text))              return 'log-done';
+    if (/missing:/i.test(text))             return 'log-miss';
+    if (/orphan:/i.test(text))              return 'log-warn';
+    if (/deleted|removed/i.test(text))      return 'log-ok';
+    if (/dry.run|would/i.test(text))        return 'log-warn';
+    if (/skipping|up to date|cached/i.test(text)) return 'log-skip';
+    return '';
+}
+
+function appendLogs(lines) {
+    const box = document.getElementById('logBox');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+    lines.forEach(raw => {
+        let text = raw;
+        try { const ev = JSON.parse(raw); text = ev.message || raw; } catch(e) {}
+        const div = document.createElement('div');
+        const cls = classForLine(text);
+        if (cls) div.className = cls;
+        div.textContent = text;
+        box.appendChild(div);
+
+        // Try to extract final summary numbers
+        if (/done in/i.test(text)) {
+            const m1 = text.match(_reMissing);
+            const m2 = text.match(_reImgDel);
+            const m3 = text.match(_rePostDel);
+            if (m1) document.getElementById('statMissing').textContent  = m1[1];
+            if (m2) document.getElementById('statImgDel').textContent   = m2[1];
+            if (m3) document.getElementById('statPostDel').textContent  = m3[1];
+        }
+    });
+    if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function updateStatus(state) {
+    const badge = document.getElementById('statusBadge');
+    if (state.running) {
+        badge.textContent = state.phase === 'thumbs' ? 'Phase 2…' : 'Phase 1…';
+        badge.style.color = 'var(--warn)';
+        badge.style.borderColor = 'rgba(245,158,11,0.4)';
+    } else if (state.error) {
+        badge.textContent = 'Error';
+        badge.style.color = 'var(--danger)';
+        badge.style.borderColor = 'rgba(239,68,68,0.4)';
+    } else {
+        badge.textContent = 'Idle';
+        badge.style.color = 'var(--text-muted)';
+        badge.style.borderColor = 'var(--border)';
+    }
+
+    // Phase pills
+    document.getElementById('phasePills').style.display = 'flex';
+    const p1 = document.getElementById('pill1');
+    const p2 = document.getElementById('pill2');
+    if (state.phase === 'db') {
+        p1.className = 'phase-pill active'; p2.className = 'phase-pill';
+    } else if (state.phase === 'thumbs') {
+        p1.className = 'phase-pill done'; p2.className = 'phase-pill active';
+    } else if (!state.running) {
+        p1.className = 'phase-pill done'; p2.className = 'phase-pill done';
+    }
+
+    const prog = state.progress || 0;
+    const tot  = state.total || 0;
+    document.getElementById('statProgress').textContent = prog.toLocaleString();
+    const pct = tot > 0 ? Math.round(prog / tot * 100) : 0;
+    document.getElementById('progressFill').style.width = pct + '%';
+
+    document.getElementById('statsRow').style.display    = 'flex';
+    document.getElementById('progressWrap').style.display = 'block';
+}
+
+function poll() {
+    Promise.all([
+        fetch('/api/cleanup/status').then(r => r.json()),
+        fetch(`/api/cleanup/logs?offset=${_logOffset}`).then(r => r.json()),
+    ]).then(([state, logData]) => {
+        updateStatus(state);
+        if (logData.logs.length) {
+            appendLogs(logData.logs);
+            _logOffset = logData.offset;
+            // Count thumb deletions from log lines
+            let td = 0;
+            logData.logs.forEach(raw => {
+                let text = raw;
+                try { text = JSON.parse(raw).message || raw; } catch(e) {}
+                if (/deleted \d+ orphaned/i.test(text)) {
+                    const m = text.match(/deleted (\d[\d,]*)/i);
+                    if (m) td = parseInt(m[1].replace(/,/g, ''));
+                }
+            });
+            if (td) document.getElementById('statThumbDel').textContent = td.toLocaleString();
+        }
+
+        if (!state.running && _running) {
+            _running = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled  = true;
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+        }
+    }).catch(() => {});
+}
+
+function startCleanup() {
+    const dryRun = document.getElementById('dryRunCheck').checked;
+    _logOffset = 0;
+    _running   = true;
+    document.getElementById('logBox').innerHTML = '';
+    document.getElementById('statMissing').textContent  = '0';
+    document.getElementById('statImgDel').textContent   = '0';
+    document.getElementById('statPostDel').textContent  = '0';
+    document.getElementById('statThumbDel').textContent = '0';
+    document.getElementById('statProgress').textContent = '0';
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled  = false;
+
+    fetch('/api/cleanup/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: dryRun }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Failed to start'));
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled  = true;
+            _running = false;
+            return;
+        }
+        _pollTimer = setInterval(poll, 800);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled  = true;
+        _running = false;
+    });
+}
+
+function stopCleanup() {
+    fetch('/api/cleanup/stop', { method: 'POST' }).catch(() => {});
+    document.getElementById('stopBtn').disabled = true;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetch('/api/cleanup/status').then(r => r.json()).then(state => {
+        if (state.running) {
+            _running = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled  = false;
+            updateStatus(state);
+            _pollTimer = setInterval(poll, 800);
+        }
+    }).catch(() => {});
+});
+</script>
+{% endblock %}
