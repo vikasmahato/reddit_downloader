@@ -403,6 +403,12 @@
         <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ filter_user }}')">
             <i class="fas fa-trash-alt"></i> Delete All
         </button>
+        <button type="button" class="btn btn-sm btn-outline-warning" onclick="blockAndDeleteUser('{{ filter_user }}')">
+            <i class="fas fa-user-slash"></i> Block &amp; Delete
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-warning" onclick="blockUser('{{ filter_user }}')">
+            <i class="fas fa-ban"></i> Block Only
+        </button>
         {% endif %}
         <span class="stat-compact" id="selectedBadge" style="display:none;">
             <strong id="selectedCount">0</strong> selected
@@ -497,6 +503,7 @@
             <a href="/details/{{ image.post_id }}" class="m-btn">Details</a>
             {% if image.author %}
             <a href="?user={{ image.author }}" class="m-btn">u/{{ image.author }}</a>
+            <button class="m-btn" style="background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.35);color:#fcd34d;" onclick="event.stopPropagation();blockUser('{{ image.author }}')">Block</button>
             {% endif %}
             <button class="m-btn m-btn-del" onclick="event.stopPropagation();deletePost({{ image.post_id }},'{{ (image.title or image.filename or '')|replace("'","\\'")|truncate(40) }}')">Del</button>
             {% endif %}
@@ -563,6 +570,7 @@
         <button class="btn btn-sm btn-outline-danger" onclick="deletePost({{ image.post_id }},'{{ (image.title or image.filename or '')|replace("'","\\'")|truncate(40) }}')" title="Delete"><i class="fas fa-trash"></i></button>
         {% if image.author %}
         <button class="btn btn-sm btn-outline-danger" onclick="deleteAllUserPosts('{{ image.author }}')" title="Delete all by user"><i class="fas fa-user-times"></i></button>
+        <button class="btn btn-sm btn-outline-warning" onclick="blockUser('{{ image.author }}')" title="Block user"><i class="fas fa-ban"></i></button>
         {% endif %}
         {% endif %}
     </div>
@@ -752,6 +760,42 @@ function deletePost(postId, title) {
                 if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }
             });
             showToast('Post deleted');
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function blockUser(username) {
+    fetch(`/api/block-user/${encodeURIComponent(username)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_posts: false })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`u/${username} blocked — posts hidden from gallery`);
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function blockAndDeleteUser(username) {
+    fetch(`/api/block-user/${encodeURIComponent(username)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_posts: true })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`u/${username} blocked and ${data.deleted_count} post(s) deleted`);
+            setTimeout(() => window.location.reload(), 1500);
         } else {
             alert('Error: ' + (data.error || 'Failed'));
         }

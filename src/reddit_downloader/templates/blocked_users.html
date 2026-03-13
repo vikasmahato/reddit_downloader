@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}Blocked Users — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+.blocked-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.blocked-title {
+    font-family: var(--font-head);
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #efefef;
+    margin: 0;
+}
+.blocked-count {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+}
+.blocked-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+}
+.blocked-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.blocked-table th {
+    padding: 0.55rem 1rem;
+    text-align: left;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-head);
+    font-weight: 600;
+}
+.blocked-table td {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+    vertical-align: middle;
+}
+.blocked-table tr:last-child td { border-bottom: none; }
+.blocked-table tr:hover td { background: var(--surface-2); }
+.user-link { color: var(--accent); text-decoration: none; }
+.user-link:hover { color: var(--accent-hi); }
+.add-block-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    align-items: center;
+}
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+.empty-state i { font-size: 2rem; display: block; margin-bottom: 0.75rem; }
+</style>
+
+<div class="blocked-header">
+    <h1 class="blocked-title"><i class="fas fa-user-slash" style="color:var(--warn);margin-right:8px;"></i>Blocked Users</h1>
+    <span class="blocked-count">{{ blocked|length }} blocked</span>
+</div>
+
+<div class="add-block-form">
+    <input type="text" id="blockInput" class="form-control" style="max-width:260px;" placeholder="username to block…">
+    <button class="btn btn-sm btn-outline-warning" onclick="addBlock(false)">
+        <i class="fas fa-ban"></i> Block Only
+    </button>
+    <button class="btn btn-sm btn-outline-danger" onclick="addBlock(true)">
+        <i class="fas fa-user-slash"></i> Block &amp; Delete Posts
+    </button>
+</div>
+
+<div class="blocked-table-wrap">
+{% if blocked %}
+<table class="blocked-table">
+    <thead>
+        <tr>
+            <th>Username</th>
+            <th>Remaining Posts</th>
+            <th>Blocked At</th>
+            <th style="width:160px;">Actions</th>
+        </tr>
+    </thead>
+    <tbody id="blockedTableBody">
+    {% for row in blocked %}
+    <tr id="row-{{ row.username }}">
+        <td>
+            <a href="/?user={{ row.username }}" class="user-link">u/{{ row.username }}</a>
+        </td>
+        <td>
+            {% if row.post_count and row.post_count > 0 %}
+            <span style="color:var(--warn);">{{ row.post_count }} posts</span>
+            {% else %}
+            <span style="color:var(--text-muted);">none</span>
+            {% endif %}
+        </td>
+        <td style="color:var(--text-dim);">{{ row.blocked_at or '—' }}</td>
+        <td>
+            <div style="display:flex;gap:4px;">
+                {% if row.post_count and row.post_count > 0 %}
+                <button class="btn btn-sm btn-outline-danger" onclick="deletePosts('{{ row.username }}')" title="Delete remaining posts">
+                    <i class="fas fa-trash"></i> Delete Posts
+                </button>
+                {% endif %}
+                <button class="btn btn-sm btn-outline-secondary" onclick="unblockUser('{{ row.username }}')" title="Unblock">
+                    <i class="fas fa-unlock"></i> Unblock
+                </button>
+            </div>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <i class="fas fa-user-check"></i>
+    No users are blocked yet.<br>
+    <span style="font-size:0.7rem;color:var(--text-muted);">Block users from the gallery view or use the form above.</span>
+</div>
+{% endif %}
+</div>
+
+<script>
+function showToast(msg, color) {
+    const t = document.createElement('div');
+    t.style.cssText = `position:fixed;top:1rem;left:50%;transform:translateX(-50%);z-index:9999;background:var(--surface);border:1px solid ${color||'var(--border-2)'};color:var(--text);padding:8px 18px;border-radius:var(--r);font-size:0.75rem;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,0.5);`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+function addBlock(deletePostsToo) {
+    const username = document.getElementById('blockInput').value.trim();
+    if (!username) { alert('Enter a username'); return; }
+    fetch(`/api/block-user/${encodeURIComponent(username)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_posts: deletePostsToo })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'rgba(245,158,11,0.4)');
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function unblockUser(username) {
+    fetch(`/api/unblock-user/${encodeURIComponent(username)}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById(`row-${username}`);
+            if (row) { row.style.opacity = '0'; row.style.transition = 'opacity 0.3s'; setTimeout(() => row.remove(), 300); }
+            showToast(`u/${username} unblocked`, 'rgba(34,197,94,0.4)');
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function deletePosts(username) {
+    fetch(`/api/delete-posts-by-user/${encodeURIComponent(username)}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`${data.deleted_count} post(s) deleted for u/${username}`, 'rgba(239,68,68,0.4)');
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+</script>
+{% endblock %}

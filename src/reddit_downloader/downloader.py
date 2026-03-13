@@ -111,6 +111,18 @@ class RedditImageDownloader:
             # Final fallback - attempt direct connect (may raise)
             return mysql.connector.connect(**mysql_config)
 
+    def _get_blocked_users(self) -> set:
+        """Return set of blocked usernames from the blocked_users table."""
+        try:
+            conn = self._get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT username FROM blocked_users")
+            blocked = {row[0].lower() for row in cursor.fetchall() if row[0]}
+            conn.close()
+            return blocked
+        except Exception:
+            return set()
+
     def _parse_config_file(self, config_file: str):
         """Parse config file handling list sections properly."""
         try:
@@ -1024,13 +1036,20 @@ class RedditImageDownloader:
             sub = self.reddit.subreddit(subreddit)
             posts = sub.new(limit=limit)
             image_posts = []
+            blocked_users = self._get_blocked_users()
             for post in posts:
                 if not post.is_self:
+                    # Skip posts from blocked users
+                    post_author = str(post.author).lower() if post.author else ''
+                    if post_author and post_author in blocked_users:
+                        logger.debug(f"⏭️  Skipping post from blocked user {post.author}")
+                        continue
+
                     # Check if post is already downloaded by checking the permalink of the post in the database
                     if self._is_post_downloaded(post.permalink):
                         logger.debug(f"⏭️  Post already downloaded (permalink: {post.permalink}), skipping...")
                         continue
-                    
+
                     # Handle gallery posts
                     all_urls = self._extract_gallery_urls(post)
                     if all_urls:
