@@ -152,6 +152,26 @@ def _get_db_connection():
         # Final fallback
         return mysql.connector.connect(**mysql_config)
 
+
+def _ensure_blocked_users_table():
+    """Create the blocked_users table if it doesn't exist."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS blocked_users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) NOT NULL UNIQUE,
+                blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Warning: Could not ensure blocked_users table: {e}")
+
+_ensure_blocked_users_table()
+
 # Add Python built-ins to template context
 @app.context_processor
 def inject_template_globals():
@@ -285,6 +305,7 @@ class RedditImageUI:
                 WHERE (%s IS NULL OR subreddit = %s)
                 AND (%s IS NULL OR author = %s)
                 AND (%s IS NULL OR title LIKE %s OR author LIKE %s)
+                AND (author IS NULL OR author NOT IN (SELECT username FROM blocked_users))
                 ORDER BY created_utc DESC
                 LIMIT %s OFFSET %s
             ) paged_posts
@@ -1631,6 +1652,244 @@ def delete_posts_by_user(username):
             conn.rollback()
             conn.close()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BLOCKED USERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/blocked-users')
+def blocked_users_page():
+    """Page for managing blocked users."""
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits()
+    users = ui_handler.get_users()
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT bu.username, bu.blocked_at,
+                   COUNT(DISTINCT p.id) as post_count
+            FROM blocked_users bu
+            LEFT JOIN posts p ON p.author = bu.username
+            GROUP BY bu.username, bu.blocked_at
+            ORDER BY bu.blocked_at DESC
+        """)
+        blocked = cursor.fetchall()
+        conn.close()
+        for row in blocked:
+            if row.get('blocked_at') and hasattr(row['blocked_at'], 'strftime'):
+                row['blocked_at'] = row['blocked_at'].strftime('%Y-%m-%d %H:%M:%S')
+    except Exception as e:
+        blocked = []
+    return render_template('blocked_users.html', blocked=blocked, stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/blocked-users', methods=['GET'])
+def api_get_blocked_users():
+    """Return list of blocked users."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT username, blocked_at FROM blocked_users ORDER BY blocked_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        for row in rows:
+            if row.get('blocked_at') and hasattr(row['blocked_at'], 'strftime'):
+                row['blocked_at'] = row['blocked_at'].strftime('%Y-%m-%d %H:%M:%S')
+        return jsonify({'success': True, 'blocked_users': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/block-user/<username>', methods=['POST'])
+def api_block_user(username):
+    """Block a user. Optionally delete their existing posts."""
+    if not username:
+        return jsonify({'success': False, 'error': 'Username required'}), 400
+    data = request.get_json() or {}
+    delete_posts = data.get('delete_posts', False)
+    conn = None
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                "INSERT INTO blocked_users (username) VALUES (%s)",
+                (username,)
+            )
+            conn.commit()
+        except mysql.connector.IntegrityError:
+            pass  # already blocked — that's fine
+
+        deleted_count = 0
+        if delete_posts:
+            # Reuse delete logic: get all post IDs for this user
+            cursor.execute("SELECT id FROM posts WHERE author = %s", (username,))
+            post_ids = [row['id'] for row in cursor.fetchall()]
+            for post_id in post_ids:
+                try:
+                    cursor.execute("SELECT image_id FROM post_images WHERE post_id = %s", (post_id,))
+                    image_ids = [r['image_id'] for r in cursor.fetchall() if r['image_id']]
+                    images_to_delete = []
+                    for image_id in image_ids:
+                        cursor.execute(
+                            "SELECT COUNT(*) as count FROM post_images WHERE image_id = %s AND post_id != %s",
+                            (image_id, post_id)
+                        )
+                        if cursor.fetchone()['count'] == 0:
+                            images_to_delete.append(image_id)
+                    cursor.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
+                    for image_id in images_to_delete:
+                        cursor.execute("SELECT file_path FROM images WHERE id = %s", (image_id,))
+                        img_result = cursor.fetchone()
+                        if img_result and img_result['file_path']:
+                            try:
+                                import shutil
+                                source_path = Path(img_result['file_path'])
+                                if source_path.exists():
+                                    deleted_folder = ui_handler.download_folder / 'deleted'
+                                    deleted_folder.mkdir(parents=True, exist_ok=True)
+                                    dest_path = deleted_folder / source_path.name
+                                    counter = 1
+                                    while dest_path.exists():
+                                        dest_path = deleted_folder / f"{source_path.stem}_{counter}{source_path.suffix}"
+                                        counter += 1
+                                    shutil.move(str(source_path), str(dest_path))
+                                    if source_path.suffix.lower() == '.gif':
+                                        mp4_path = source_path.with_suffix('.mp4')
+                                        if mp4_path.exists():
+                                            mp4_dest = deleted_folder / mp4_path.name
+                                            c2 = 1
+                                            while mp4_dest.exists():
+                                                mp4_dest = deleted_folder / f"{mp4_path.stem}_{c2}{mp4_path.suffix}"
+                                                c2 += 1
+                                            shutil.move(str(mp4_path), str(mp4_dest))
+                            except Exception as move_err:
+                                print(f"Error moving file: {move_err}")
+                        cursor.execute("DELETE FROM images WHERE id = %s", (image_id,))
+                    cursor.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+                    if cursor.rowcount > 0:
+                        deleted_count += 1
+                except Exception as pe:
+                    print(f"Error deleting post {post_id}: {pe}")
+            conn.commit()
+
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': f'User {username} blocked' + (f' and {deleted_count} post(s) deleted' if delete_posts else ''),
+            'deleted_count': deleted_count
+        })
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/unblock-user/<username>', methods=['DELETE'])
+def api_unblock_user(username):
+    """Unblock a user."""
+    if not username:
+        return jsonify({'success': False, 'error': 'Username required'}), 400
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM blocked_users WHERE username = %s", (username,))
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        if affected == 0:
+            return jsonify({'success': False, 'error': 'User not found in block list'}), 404
+        return jsonify({'success': True, 'message': f'User {username} unblocked'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DELETED FOLDER
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/deleted')
+def deleted_folder_page():
+    """Browse files in the deleted folder."""
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits()
+    users = ui_handler.get_users()
+    return render_template('deleted_folder.html', stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/deleted-files', methods=['GET'])
+def api_deleted_files():
+    """List files in the deleted folder with pagination."""
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 50))
+    deleted_folder = ui_handler.download_folder / 'deleted'
+    if not deleted_folder.exists():
+        return jsonify({'success': True, 'files': [], 'total': 0, 'page': page, 'per_page': per_page})
+    MEDIA_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp4', '.webm', '.mov', '.avi', '.mkv'}
+    try:
+        all_files = sorted(
+            [f for f in deleted_folder.iterdir() if f.is_file() and f.suffix.lower() in MEDIA_EXT],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True
+        )
+        total = len(all_files)
+        start = (page - 1) * per_page
+        page_files = all_files[start:start + per_page]
+        result = []
+        for f in page_files:
+            stat = f.stat()
+            rel = f.relative_to(ui_handler.download_folder)
+            web_path = str(rel).replace('\\', '/')
+            thumb_path = ui_handler.make_thumb_path(str(f))
+            result.append({
+                'filename': f.name,
+                'web_path': web_path,
+                'thumb_path': thumb_path,
+                'file_size': stat.st_size,
+                'mtime': stat.st_mtime,
+                'ext': f.suffix.lower()
+            })
+        return jsonify({'success': True, 'files': result, 'total': total, 'page': page, 'per_page': per_page})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/deleted-files/<path:filename>', methods=['DELETE'])
+def api_delete_file_permanently(filename):
+    """Permanently delete a specific file from the deleted folder."""
+    deleted_folder = ui_handler.download_folder / 'deleted'
+    # Security: ensure the resolved path stays inside deleted_folder
+    try:
+        target = (deleted_folder / filename).resolve()
+        if not str(target).startswith(str(deleted_folder.resolve())):
+            return jsonify({'success': False, 'error': 'Invalid path'}), 400
+        if not target.exists():
+            return jsonify({'success': False, 'error': 'File not found'}), 404
+        target.unlink()
+        return jsonify({'success': True, 'message': f'{filename} permanently deleted'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/deleted-files', methods=['DELETE'])
+def api_purge_deleted_folder():
+    """Permanently delete ALL files in the deleted folder."""
+    deleted_folder = ui_handler.download_folder / 'deleted'
+    if not deleted_folder.exists():
+        return jsonify({'success': True, 'deleted_count': 0})
+    MEDIA_EXT = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp4', '.webm', '.mov', '.avi', '.mkv'}
+    try:
+        count = 0
+        for f in list(deleted_folder.iterdir()):
+            if f.is_file() and f.suffix.lower() in MEDIA_EXT:
+                f.unlink()
+                count += 1
+        return jsonify({'success': True, 'deleted_count': count, 'message': f'{count} file(s) permanently deleted'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 def main():
     """Main entry point for the web UI."""

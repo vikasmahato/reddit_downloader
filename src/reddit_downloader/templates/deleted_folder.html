@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block title %}Deleted Files — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+.del-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.del-title {
+    font-family: var(--font-head);
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #efefef;
+    margin: 0;
+}
+.del-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.45rem 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+.del-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 6px;
+}
+.del-item {
+    position: relative;
+    background: var(--surface-2);
+    border-radius: var(--r);
+    overflow: hidden;
+    cursor: default;
+}
+.del-item img, .del-item video {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    display: block;
+}
+.del-item-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 60%);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 7px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.del-item:hover .del-item-overlay { opacity: 1; }
+.del-item-name {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.7);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 5px;
+    font-family: var(--font-mono);
+}
+.del-size {
+    font-size: 0.58rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+.empty-state {
+    text-align: center;
+    padding: 4rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+.empty-state i { font-size: 2rem; display: block; margin-bottom: 0.75rem; }
+.loading-state { text-align: center; padding: 3rem; color: var(--text-dim); }
+.pagination-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+</style>
+
+<div class="del-header">
+    <h1 class="del-title"><i class="fas fa-trash-alt" style="color:var(--danger);margin-right:8px;"></i>Deleted Files</h1>
+    <span id="totalBadge" style="font-size:0.7rem;color:var(--text-muted);padding:2px 8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);">Loading…</span>
+</div>
+
+<div class="del-bar">
+    <span style="font-size:0.62rem;color:var(--text-muted);">Files moved here when posts are deleted. They are NOT permanently removed until you purge them.</span>
+    <div style="margin-left:auto;display:flex;gap:0.4rem;">
+        <button class="btn btn-sm btn-outline-danger" id="purgeAllBtn" onclick="purgeAll()">
+            <i class="fas fa-fire"></i> Purge All
+        </button>
+    </div>
+</div>
+
+<div id="gridContainer">
+    <div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+</div>
+
+<div class="pagination-row" id="paginationRow" style="display:none;">
+    <button class="btn btn-sm btn-outline-secondary" id="prevBtn" onclick="loadPage(currentPage-1)">‹ Prev</button>
+    <span id="pageInfo" style="font-size:0.68rem;color:var(--text-dim);"></span>
+    <button class="btn btn-sm btn-outline-secondary" id="nextBtn" onclick="loadPage(currentPage+1)">Next ›</button>
+</div>
+
+<script>
+let currentPage = 1;
+const perPage = 60;
+let totalFiles = 0;
+
+function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+    if (bytes < 1024*1024*1024) return (bytes/1024/1024).toFixed(1) + ' MB';
+    return (bytes/1024/1024/1024).toFixed(2) + ' GB';
+}
+
+function showToast(msg, color) {
+    const t = document.createElement('div');
+    t.style.cssText = `position:fixed;top:1rem;left:50%;transform:translateX(-50%);z-index:9999;background:var(--surface);border:1px solid ${color||'var(--border-2)'};color:var(--text);padding:8px 18px;border-radius:var(--r);font-size:0.75rem;font-family:var(--font-mono);box-shadow:0 4px 20px rgba(0,0,0,0.5);`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+function loadPage(page) {
+    currentPage = page;
+    const container = document.getElementById('gridContainer');
+    container.innerHTML = '<div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+
+    fetch(`/api/deleted-files?page=${page}&per_page=${perPage}`)
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>${data.error}</div>`; return; }
+        totalFiles = data.total;
+        document.getElementById('totalBadge').textContent = `${totalFiles} file${totalFiles !== 1 ? 's' : ''}`;
+
+        if (data.files.length === 0) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-check-circle" style="color:var(--success)"></i>Deleted folder is empty.<br><span style="font-size:0.7rem;">Nothing to purge.</span></div>';
+            document.getElementById('paginationRow').style.display = 'none';
+            document.getElementById('purgeAllBtn').disabled = true;
+            return;
+        }
+
+        document.getElementById('purgeAllBtn').disabled = false;
+
+        const grid = document.createElement('div');
+        grid.className = 'del-grid';
+
+        data.files.forEach(f => {
+            const item = document.createElement('div');
+            item.className = 'del-item';
+            item.id = `file-${CSS.escape(f.filename)}`;
+
+            const isVideo = ['.mp4','.webm','.mov','.avi','.mkv'].includes(f.ext);
+            let mediaHtml = '';
+            if (f.thumb_path) {
+                mediaHtml = `<img src="/thumbs/${f.thumb_path}" alt="" loading="lazy" style="width:100%;height:140px;object-fit:cover;">`;
+            } else if (isVideo) {
+                mediaHtml = `<video style="width:100%;height:140px;object-fit:cover;"><source src="/reddit_downloads/${f.web_path}"></video>`;
+            } else {
+                mediaHtml = `<img src="/reddit_downloads/${f.web_path}" alt="" loading="lazy" style="width:100%;height:140px;object-fit:cover;">`;
+            }
+
+            item.innerHTML = `
+                ${mediaHtml}
+                <div class="del-item-overlay">
+                    <div class="del-item-name">${f.filename}</div>
+                    <div class="del-size">${formatBytes(f.file_size)}</div>
+                    <div style="display:flex;gap:4px;">
+                        <a href="/reddit_downloads/${f.web_path}" target="_blank" class="btn btn-sm btn-outline-secondary" style="padding:1px 7px;font-size:0.58rem;">
+                            <i class="fas fa-eye"></i> View
+                        </a>
+                        <button class="btn btn-sm btn-outline-danger" style="padding:1px 7px;font-size:0.58rem;" onclick="deleteFile('${f.filename.replace(/'/g,"\\'")}')">
+                            <i class="fas fa-times"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(item);
+        });
+
+        container.innerHTML = '';
+        container.appendChild(grid);
+
+        // Pagination
+        const totalPages = Math.ceil(totalFiles / perPage);
+        if (totalPages > 1) {
+            document.getElementById('paginationRow').style.display = 'flex';
+            document.getElementById('pageInfo').textContent = `Page ${page} of ${totalPages}`;
+            document.getElementById('prevBtn').disabled = page <= 1;
+            document.getElementById('nextBtn').disabled = page >= totalPages;
+        } else {
+            document.getElementById('paginationRow').style.display = 'none';
+        }
+    })
+    .catch(err => {
+        container.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i>Error loading files: ${err}</div>`;
+    });
+}
+
+function deleteFile(filename) {
+    fetch(`/api/deleted-files/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`${filename} permanently deleted`, 'rgba(239,68,68,0.4)');
+            totalFiles--;
+            document.getElementById('totalBadge').textContent = `${totalFiles} file${totalFiles !== 1 ? 's' : ''}`;
+            const item = document.querySelector(`[id="file-${CSS.escape(filename)}"]`);
+            if (item) { item.style.opacity = '0'; item.style.transition = 'opacity 0.3s'; setTimeout(() => item.remove(), 300); }
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function purgeAll() {
+    if (!confirm(`Permanently delete ALL ${totalFiles} file(s) in the deleted folder? This cannot be undone.`)) return;
+    const btn = document.getElementById('purgeAllBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    fetch('/api/deleted-files', { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'rgba(239,68,68,0.4)');
+            setTimeout(() => loadPage(1), 800);
+        } else {
+            alert('Error: ' + (data.error || 'Failed'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-fire"></i> Purge All';
+        }
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-fire"></i> Purge All';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => loadPage(1));
+</script>
+{% endblock %}
