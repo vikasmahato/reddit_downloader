@@ -1891,6 +1891,226 @@ def api_purge_deleted_folder():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# COMPRESS IMAGES
+# ═══════════════════════════════════════════════════════════════════════════
+
+_compress_state: dict = {
+    'running': False, 'message': '', 'progress': 0, 'total': 0,
+    'error': None, 'logs': [], 'saved_bytes': 0,
+}
+_compress_lock = threading.Lock()
+_compress_proc = None
+
+
+def _run_compression(folder_name: str, min_size_kb: int, quality: int):
+    """Background thread: run compress_images.py as a subprocess."""
+    import sys as _sys
+
+    script = Path(__file__).parent.parent.parent / 'compress_images.py'
+    if not script.exists():
+        script = Path.cwd() / 'compress_images.py'
+
+    if folder_name:
+        folder_path = str(Path.cwd() / 'reddit_downloads' / folder_name)
+    else:
+        folder_path = str(Path.cwd() / 'reddit_downloads')
+
+    cmd = [
+        _sys.executable, str(script),
+        '--folder', folder_path,
+        '--min-size-kb', str(min_size_kb),
+        '--quality', str(quality),
+        '--progress-json',
+    ]
+
+    global _compress_proc
+
+    def _set_proc(p):
+        global _compress_proc
+        with _compress_lock:
+            _compress_proc = p
+
+    def _on_complete(state, lock):
+        # Parse saved_bytes from the last JSON log line that has it
+        with lock:
+            for line in reversed(state['logs']):
+                try:
+                    ev = json.loads(line)
+                    if 'saved_bytes' in ev:
+                        state['saved_bytes'] = ev['saved_bytes']
+                        break
+                except Exception:
+                    pass
+
+    with _compress_lock:
+        _compress_state['logs'] = []
+        _compress_state['saved_bytes'] = 0
+
+    _run_subprocess_with_state(cmd, _compress_state, _compress_lock, _set_proc, _on_complete)
+
+
+@app.route('/compress')
+def compress_page():
+    """Image compression tool page."""
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits(only_enabled=False)
+    users = ui_handler.get_users()
+    return render_template('compress.html', stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/compress/start', methods=['POST'])
+def api_compress_start():
+    data = request.get_json() or {}
+    folder_name  = data.get('folder') or None
+    min_size_kb  = int(data.get('min_size_kb', 1024))
+    quality      = int(data.get('quality', 85))
+    with _compress_lock:
+        if _compress_state['running']:
+            return jsonify({'success': False, 'error': 'Compression already running'})
+        _compress_state.update({
+            'running': True, 'message': 'Starting…', 'progress': 0,
+            'total': 0, 'error': None, 'logs': [], 'saved_bytes': 0,
+        })
+    threading.Thread(
+        target=_run_compression,
+        args=(folder_name, min_size_kb, quality),
+        daemon=True,
+    ).start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/compress/status')
+def api_compress_status():
+    with _compress_lock:
+        state = dict(_compress_state)
+        state.pop('logs', None)
+    return jsonify(state)
+
+
+@app.route('/api/compress/logs')
+def api_compress_logs():
+    offset = int(request.args.get('offset', 0))
+    with _compress_lock:
+        logs = _compress_state['logs'][offset:]
+    return jsonify({'logs': logs, 'offset': offset + len(logs)})
+
+
+@app.route('/api/compress/stop', methods=['POST'])
+def api_compress_stop():
+    global _compress_proc
+    with _compress_lock:
+        proc = _compress_proc
+    if proc:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return jsonify({'success': True})
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CLEANUP ORPHANS
+# ═══════════════════════════════════════════════════════════════════════════
+
+_cleanup_state: dict = {
+    'running': False, 'message': '', 'progress': 0, 'total': 0,
+    'error': None, 'logs': [], 'phase': '',
+}
+_cleanup_lock = threading.Lock()
+_cleanup_proc = None
+
+
+def _run_cleanup_job(dry_run: bool):
+    """Background thread: run cleanup_orphans.py as a subprocess."""
+    import sys as _sys
+
+    script = Path(__file__).parent.parent.parent / 'cleanup_orphans.py'
+    if not script.exists():
+        script = Path.cwd() / 'cleanup_orphans.py'
+
+    cmd = [_sys.executable, str(script), '--progress-json']
+    if dry_run:
+        cmd.append('--dry-run')
+
+    global _cleanup_proc
+
+    def _set_proc(p):
+        global _cleanup_proc
+        with _cleanup_lock:
+            _cleanup_proc = p
+
+    def _on_complete(state, lock):
+        with lock:
+            for line in reversed(state['logs']):
+                try:
+                    ev = json.loads(line)
+                    if ev.get('message', '').startswith('Done in'):
+                        state['message'] = ev['message']
+                        break
+                except Exception:
+                    pass
+
+    with _cleanup_lock:
+        _cleanup_state['logs'] = []
+        _cleanup_state['phase'] = ''
+
+    _run_subprocess_with_state(cmd, _cleanup_state, _cleanup_lock, _set_proc, _on_complete)
+
+
+@app.route('/cleanup')
+def cleanup_page():
+    """Orphan cleanup tool page."""
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits(only_enabled=False)
+    users = ui_handler.get_users()
+    return render_template('cleanup.html', stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/cleanup/start', methods=['POST'])
+def api_cleanup_start():
+    data    = request.get_json() or {}
+    dry_run = bool(data.get('dry_run', False))
+    with _cleanup_lock:
+        if _cleanup_state['running']:
+            return jsonify({'success': False, 'error': 'Cleanup already running'})
+        _cleanup_state.update({
+            'running': True, 'message': 'Starting…', 'progress': 0,
+            'total': 0, 'error': None, 'logs': [], 'phase': '',
+        })
+    threading.Thread(target=_run_cleanup_job, args=(dry_run,), daemon=True).start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/cleanup/status')
+def api_cleanup_status():
+    with _cleanup_lock:
+        state = dict(_cleanup_state)
+        state.pop('logs', None)
+    return jsonify(state)
+
+
+@app.route('/api/cleanup/logs')
+def api_cleanup_logs():
+    offset = int(request.args.get('offset', 0))
+    with _cleanup_lock:
+        logs = _cleanup_state['logs'][offset:]
+    return jsonify({'logs': logs, 'offset': offset + len(logs)})
+
+
+@app.route('/api/cleanup/stop', methods=['POST'])
+def api_cleanup_stop():
+    global _cleanup_proc
+    with _cleanup_lock:
+        proc = _cleanup_proc
+    if proc:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return jsonify({'success': True})
+
+
 def main():
     """Main entry point for the web UI."""
     app.run(debug=True, host='0.0.0.0', port=4000)

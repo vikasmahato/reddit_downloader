@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+{% block title %}Compress Images — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+.tool-header {
+    display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem;
+}
+.tool-title {
+    font-family: var(--font-head); font-size: 1.1rem; font-weight: 800;
+    letter-spacing: 0.08em; text-transform: uppercase; color: #efefef; margin: 0;
+}
+.config-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 1.1rem 1.25rem; margin-bottom: 1rem;
+}
+.config-row {
+    display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap;
+}
+.config-field { display: flex; flex-direction: column; gap: 4px; }
+.config-label {
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); font-family: var(--font-head);
+}
+.config-hint { font-size: 0.58rem; color: var(--text-muted); margin-top: 2px; }
+.log-box {
+    background: #060606; border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0.75rem 1rem; height: 340px; overflow-y: auto;
+    font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-dim);
+    white-space: pre-wrap; word-break: break-all;
+}
+.log-box .log-ok   { color: #86efac; }
+.log-box .log-skip { color: var(--text-muted); }
+.log-box .log-warn { color: var(--warn); }
+.log-box .log-done { color: var(--accent); font-weight: 600; }
+.progress-bar-wrap {
+    background: var(--surface-2); border-radius: 2px;
+    height: 6px; overflow: hidden; margin: 0.6rem 0;
+}
+.progress-bar-fill {
+    height: 100%; background: var(--accent);
+    transition: width 0.4s ease; width: 0%;
+}
+.stat-row {
+    display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+}
+.stat-chip {
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 0.4rem 0.85rem;
+}
+.stat-chip-val {
+    font-family: var(--font-head); font-size: 1.2rem; font-weight: 800;
+    color: #f0f0f0; line-height: 1;
+}
+.stat-chip-label {
+    font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted);
+}
+.cron-box {
+    background: #060606; border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0.75rem 1rem; font-family: var(--font-mono); font-size: 0.7rem;
+    color: var(--text-dim); white-space: pre; overflow-x: auto;
+}
+</style>
+
+<div class="tool-header">
+    <h1 class="tool-title">
+        <i class="fas fa-compress-alt" style="color:var(--info);margin-right:8px;"></i>Compress Images
+    </h1>
+    <span id="statusBadge" style="font-size:0.7rem;padding:2px 10px;border-radius:var(--r);background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">Idle</span>
+</div>
+
+<!-- ── Config ── -->
+<div class="config-card">
+    <div class="config-row">
+        <div class="config-field">
+            <span class="config-label">Folder</span>
+            <select id="folderSelect" class="form-select form-select-sm" style="min-width:180px;">
+                <option value="">All subreddit folders</option>
+                {% for sr in subreddits %}
+                <option value="{{ sr }}">r/{{ sr }}</option>
+                {% endfor %}
+            </select>
+            <span class="config-hint">Limit to one subreddit folder</span>
+        </div>
+        <div class="config-field">
+            <span class="config-label">Min size (KB)</span>
+            <input type="number" id="minSizeKb" class="form-control form-control-sm"
+                   value="1024" min="100" max="51200" style="width:110px;">
+            <span class="config-hint">Only compress files larger than this</span>
+        </div>
+        <div class="config-field">
+            <span class="config-label">JPEG quality</span>
+            <input type="number" id="quality" class="form-control form-control-sm"
+                   value="85" min="50" max="95" style="width:90px;">
+            <span class="config-hint">1–95 · PNG uses lossless optimisation</span>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:0.5rem;align-items:flex-end;">
+            <button class="btn btn-sm btn-primary" id="startBtn" onclick="startCompress()">
+                <i class="fas fa-play"></i> Start
+            </button>
+            <button class="btn btn-sm btn-outline-danger" id="stopBtn" onclick="stopCompress()" disabled>
+                <i class="fas fa-stop"></i> Stop
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Stats ── -->
+<div class="stat-row" id="statsRow" style="display:none;">
+    <div class="stat-chip">
+        <span class="stat-chip-val" id="statProgress">0</span>
+        <span class="stat-chip-label">Processed</span>
+    </div>
+    <div class="stat-chip">
+        <span class="stat-chip-val" id="statTotal">0</span>
+        <span class="stat-chip-label">Total</span>
+    </div>
+    <div class="stat-chip">
+        <span class="stat-chip-val" id="statSaved">—</span>
+        <span class="stat-chip-label">Space saved</span>
+    </div>
+</div>
+
+<!-- ── Progress bar ── -->
+<div class="progress-bar-wrap" id="progressWrap" style="display:none;">
+    <div class="progress-bar-fill" id="progressFill"></div>
+</div>
+
+<!-- ── Log ── -->
+<div class="log-box" id="logBox"><span style="color:var(--text-muted);">Waiting to start…</span></div>
+
+<!-- ── Cron reference ── -->
+<div style="margin-top:1.5rem;">
+    <div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);margin-bottom:0.4rem;font-family:var(--font-head);">
+        Cron (daily at 3 AM)
+    </div>
+    <div class="cron-box">0 3 * * *  cd /path/to/reddit_downloader &amp;&amp; .venv/bin/python compress_images.py --min-size-kb 1024 --quality 85 >> logs/compress.log 2>&amp;1</div>
+</div>
+
+<script>
+let _pollTimer = null;
+let _logOffset = 0;
+let _running   = false;
+
+function fmtBytes(b) {
+    if (!b) return '0 B';
+    if (b < 1024)       return b + ' B';
+    if (b < 1048576)    return (b/1024).toFixed(1) + ' KB';
+    if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+    return (b/1073741824).toFixed(2) + ' GB';
+}
+
+function classForLine(line) {
+    if (/done in/i.test(line))             return 'log-done';
+    if (/near-duplicate|♻|skipped/i.test(line)) return 'log-skip';
+    if (/warn|error|✗/i.test(line))        return 'log-warn';
+    if (/−|compressed|→/i.test(line))      return 'log-ok';
+    return '';
+}
+
+function appendLogs(lines) {
+    const box = document.getElementById('logBox');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+    lines.forEach(raw => {
+        let text = raw;
+        try { const ev = JSON.parse(raw); text = ev.message || raw; } catch(e) {}
+        const span = document.createElement('div');
+        const cls = classForLine(text);
+        if (cls) span.className = cls;
+        span.textContent = text;
+        box.appendChild(span);
+    });
+    if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function updateStatus(state) {
+    const badge = document.getElementById('statusBadge');
+    if (state.running) {
+        badge.textContent = 'Running…';
+        badge.style.color = 'var(--warn)';
+        badge.style.borderColor = 'rgba(245,158,11,0.4)';
+    } else if (state.error) {
+        badge.textContent = 'Error';
+        badge.style.color = 'var(--danger)';
+        badge.style.borderColor = 'rgba(239,68,68,0.4)';
+    } else {
+        badge.textContent = 'Idle';
+        badge.style.color = 'var(--text-muted)';
+        badge.style.borderColor = 'var(--border)';
+    }
+
+    const prog = state.progress || 0;
+    const tot  = state.total || 0;
+    document.getElementById('statProgress').textContent = prog.toLocaleString();
+    document.getElementById('statTotal').textContent    = tot.toLocaleString();
+    document.getElementById('statSaved').textContent    = fmtBytes(state.saved_bytes || 0);
+
+    const pct = tot > 0 ? Math.round(prog / tot * 100) : 0;
+    document.getElementById('progressFill').style.width = pct + '%';
+
+    document.getElementById('statsRow').style.display    = 'flex';
+    document.getElementById('progressWrap').style.display = 'block';
+}
+
+function poll() {
+    Promise.all([
+        fetch('/api/compress/status').then(r => r.json()),
+        fetch(`/api/compress/logs?offset=${_logOffset}`).then(r => r.json()),
+    ]).then(([state, logData]) => {
+        updateStatus(state);
+        if (logData.logs.length) {
+            appendLogs(logData.logs);
+            _logOffset = logData.offset;
+        }
+
+        if (!state.running && _running) {
+            // Just finished
+            _running = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled  = true;
+            clearInterval(_pollTimer);
+            _pollTimer = null;
+        }
+    }).catch(() => {});
+}
+
+function startCompress() {
+    const folder     = document.getElementById('folderSelect').value;
+    const minSizeKb  = parseInt(document.getElementById('minSizeKb').value) || 1024;
+    const quality    = parseInt(document.getElementById('quality').value) || 85;
+
+    _logOffset = 0;
+    _running   = true;
+    document.getElementById('logBox').innerHTML = '';
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled  = false;
+
+    fetch('/api/compress/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: folder || null, min_size_kb: minSizeKb, quality }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Failed to start'));
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled  = true;
+            _running = false;
+            return;
+        }
+        _pollTimer = setInterval(poll, 800);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled  = true;
+        _running = false;
+    });
+}
+
+function stopCompress() {
+    fetch('/api/compress/stop', { method: 'POST' })
+    .then(() => {})
+    .catch(() => {});
+    document.getElementById('stopBtn').disabled = true;
+}
+
+// On page load: check if already running
+document.addEventListener('DOMContentLoaded', () => {
+    fetch('/api/compress/status').then(r => r.json()).then(state => {
+        if (state.running) {
+            _running = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled  = false;
+            updateStatus(state);
+            _pollTimer = setInterval(poll, 800);
+        }
+    }).catch(() => {});
+});
+</script>
+{% endblock %}
