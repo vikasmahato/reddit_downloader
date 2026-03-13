@@ -16,6 +16,7 @@ dependencies = [
     "moviepy>=1.0.0",
     "python-telegram-bot>=20.5,<21",
     "loguru>=0.7.0",
+    "nudenet>=3.4.2",
 ]
 
 [project.scripts]
