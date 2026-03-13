@@ -1,0 +1,445 @@
+{% extends "base.html" %}
+{% block title %}Explicit Content — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+.tool-header {
+    display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem;
+}
+.tool-title {
+    font-family: var(--font-head); font-size: 1.1rem; font-weight: 800;
+    letter-spacing: 0.08em; text-transform: uppercase; color: #efefef; margin: 0;
+}
+.config-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 1rem 1.25rem; margin-bottom: 1rem;
+}
+.log-box {
+    background: #060606; border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0.75rem 1rem; height: 200px; overflow-y: auto;
+    font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-dim);
+    white-space: pre-wrap; word-break: break-all;
+}
+.log-flag { color: var(--danger); }
+.log-done { color: var(--accent); font-weight: 600; }
+.log-skip { color: var(--text-muted); }
+.progress-bar-wrap { background: var(--surface-2); border-radius: 2px; height: 6px; overflow: hidden; margin: 0.5rem 0; }
+.progress-bar-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; width: 0%; }
+.stat-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.stat-chip {
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 0.4rem 0.85rem;
+}
+.stat-chip-val  { font-family: var(--font-head); font-size: 1.2rem; font-weight: 800; color: #f0f0f0; line-height: 1; }
+.stat-chip-label{ font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+.stat-chip.danger .stat-chip-val { color: var(--danger); }
+
+/* Review grid */
+.section-head {
+    font-family: var(--font-head); font-size: 0.65rem; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--text-muted); margin: 1.25rem 0 0.6rem;
+    display: flex; align-items: center; gap: 0.75rem;
+}
+.section-head hr { flex: 1; border: none; border-top: 1px solid var(--border); }
+.review-toolbar {
+    display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+}
+.review-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.6rem;
+}
+.review-card {
+    background: var(--surface); border: 2px solid var(--border);
+    border-radius: var(--r); overflow: hidden; cursor: pointer;
+    position: relative; transition: border-color 0.15s;
+}
+.review-card.selected { border-color: var(--danger); }
+.review-card img {
+    width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+}
+.review-card-info {
+    padding: 0.35rem 0.5rem; font-size: 0.6rem; color: var(--text-muted);
+    line-height: 1.4;
+}
+.review-card-info strong { color: var(--danger); display: block; font-size: 0.65rem; }
+.review-check {
+    position: absolute; top: 6px; right: 6px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(239,68,68,0.85); display: none;
+    align-items: center; justify-content: center;
+    color: #fff; font-size: 0.6rem;
+}
+.review-card.selected .review-check { display: flex; }
+.empty-state {
+    text-align: center; color: var(--text-muted); padding: 3rem 1rem;
+    font-size: 0.8rem;
+}
+</style>
+
+<div class="tool-header">
+    <h1 class="tool-title">
+        <i class="fas fa-eye-slash" style="color:var(--danger);margin-right:8px;"></i>Explicit Content
+    </h1>
+    <span id="statusBadge" style="font-size:0.7rem;padding:2px 10px;border-radius:var(--r);background:var(--surface-2);border:1px solid var(--border);color:var(--text-muted);">Idle</span>
+</div>
+
+<!-- Config -->
+<div class="config-card">
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);font-family:var(--font-head);">Folder</span>
+            <select id="folderSelect" class="form-select form-select-sm" style="min-width:180px;">
+                <option value="">All subreddit folders</option>
+                {% for sr in subreddits %}
+                <option value="{{ sr }}">r/{{ sr }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+            <span style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);font-family:var(--font-head);">Min confidence</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+                <input type="range" id="thresholdRange" min="30" max="95" value="50"
+                       style="width:110px;" oninput="document.getElementById('thresholdVal').textContent=this.value+'%'">
+                <span id="thresholdVal" style="font-size:0.72rem;color:var(--text-dim);min-width:36px;">50%</span>
+            </div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:0.5rem;align-items:flex-end;">
+            <button class="btn btn-sm btn-primary" id="startBtn" onclick="startScan()">
+                <i class="fas fa-search"></i> Scan
+            </button>
+            <button class="btn btn-sm btn-outline-danger" id="stopBtn" onclick="stopScan()" disabled>
+                <i class="fas fa-stop"></i> Stop
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="stat-row" id="statsRow" style="display:none;">
+    <div class="stat-chip">
+        <span class="stat-chip-val" id="statProgress">0</span>
+        <span class="stat-chip-label">Scanned</span>
+    </div>
+    <div class="stat-chip">
+        <span class="stat-chip-val" id="statTotal">0</span>
+        <span class="stat-chip-label">Total</span>
+    </div>
+    <div class="stat-chip danger">
+        <span class="stat-chip-val" id="statFlagged">0</span>
+        <span class="stat-chip-label">Flagged</span>
+    </div>
+</div>
+
+<div class="progress-bar-wrap" id="progressWrap" style="display:none;">
+    <div class="progress-bar-fill" id="progressFill"></div>
+</div>
+
+<!-- Log -->
+<div class="log-box" id="logBox"><span style="color:var(--text-muted);">Waiting to start…</span></div>
+
+<!-- Review section -->
+<div class="section-head">
+    <span>Flagged for review</span><hr>
+    <span id="flaggedCount" style="color:var(--danger);"></span>
+</div>
+
+<div class="review-toolbar" id="reviewToolbar" style="display:none;">
+    <button class="btn btn-sm btn-outline-secondary" onclick="selectAll()">Select All</button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="selectNone()">Deselect All</button>
+    <span id="selectedBadge" style="font-size:0.72rem;color:var(--text-muted);"></span>
+    <div style="margin-left:auto;display:flex;gap:0.5rem;">
+        <button class="btn btn-sm btn-outline-warning" id="dismissBtn" onclick="dismissSelected()" disabled>
+            <i class="fas fa-check"></i> Not Explicit
+        </button>
+        <button class="btn btn-sm btn-danger" id="deleteBtn" onclick="deleteSelected()" disabled>
+            <i class="fas fa-trash"></i> Delete Selected
+        </button>
+    </div>
+</div>
+
+<div id="reviewGrid" class="review-grid"></div>
+<div id="emptyState" class="empty-state" style="display:none;">
+    <i class="fas fa-check-circle" style="font-size:2rem;margin-bottom:0.5rem;color:var(--success);"></i><br>
+    No flagged images. Run a scan or all items have been reviewed.
+</div>
+
+<script>
+let _pollTimer  = null;
+let _logOffset  = 0;
+let _running    = false;
+let _flagged    = [];   // current flagged list from server
+let _selected   = new Set();
+
+// ── Bootstrap: load existing results ──────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    loadResults();
+    fetch('/api/explicit/status').then(r => r.json()).then(state => {
+        if (state.running) {
+            _running = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled  = false;
+            showScanUI();
+            _pollTimer = setInterval(poll, 1000);
+        }
+    }).catch(() => {});
+});
+
+// ── Scan controls ──────────────────────────────────────────────────────────
+function startScan() {
+    const folder    = document.getElementById('folderSelect').value;
+    const threshold = parseInt(document.getElementById('thresholdRange').value) / 100;
+    _logOffset = 0;
+    _running   = true;
+    document.getElementById('logBox').innerHTML = '';
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled  = false;
+    showScanUI();
+
+    fetch('/api/explicit/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: folder || null, threshold }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            alert('Error: ' + (data.error || 'Failed to start'));
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled  = true;
+            _running = false;
+            return;
+        }
+        _pollTimer = setInterval(poll, 1000);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled  = true;
+        _running = false;
+    });
+}
+
+function stopScan() {
+    fetch('/api/explicit/stop', { method: 'POST' }).catch(() => {});
+    document.getElementById('stopBtn').disabled = true;
+}
+
+function showScanUI() {
+    document.getElementById('statsRow').style.display    = 'flex';
+    document.getElementById('progressWrap').style.display = 'block';
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+function poll() {
+    Promise.all([
+        fetch('/api/explicit/status').then(r => r.json()),
+        fetch(`/api/explicit/logs?offset=${_logOffset}`).then(r => r.json()),
+    ]).then(([state, logData]) => {
+        updateStatus(state);
+        if (logData.logs.length) {
+            appendLogs(logData.logs);
+            _logOffset = logData.offset;
+        }
+        if (!state.running && _running) {
+            _running = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled  = true;
+            clearInterval(_pollTimer); _pollTimer = null;
+            // Reload results after scan finishes
+            loadResults();
+        }
+    }).catch(() => {});
+}
+
+function updateStatus(state) {
+    const badge = document.getElementById('statusBadge');
+    if (state.running) {
+        badge.textContent = 'Scanning…';
+        badge.style.color = 'var(--warn)';
+        badge.style.borderColor = 'rgba(245,158,11,0.4)';
+    } else {
+        badge.textContent = 'Idle';
+        badge.style.color = 'var(--text-muted)';
+        badge.style.borderColor = 'var(--border)';
+    }
+    const prog = state.progress || 0;
+    const tot  = state.total   || 0;
+    document.getElementById('statProgress').textContent = prog.toLocaleString();
+    document.getElementById('statTotal').textContent    = tot.toLocaleString();
+    document.getElementById('statFlagged').textContent  = (state.flagged_count || 0).toLocaleString();
+    const pct = tot > 0 ? Math.round(prog / tot * 100) : 0;
+    document.getElementById('progressFill').style.width = pct + '%';
+}
+
+function appendLogs(lines) {
+    const box = document.getElementById('logBox');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+    lines.forEach(raw => {
+        let text = raw;
+        try { const ev = JSON.parse(raw); text = ev.message || raw; } catch(e) {}
+        const div = document.createElement('div');
+        if (/FLAGGED/i.test(text))      div.className = 'log-flag';
+        else if (/done in/i.test(text)) div.className = 'log-done';
+        else if (/checked|found/i.test(text)) div.className = 'log-skip';
+        div.textContent = text;
+        box.appendChild(div);
+    });
+    if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+// ── Results grid ───────────────────────────────────────────────────────────
+function loadResults() {
+    fetch('/api/explicit/results')
+        .then(r => r.json())
+        .then(data => {
+            _flagged = data.flagged || [];
+            renderGrid();
+        })
+        .catch(() => {});
+}
+
+function renderGrid() {
+    const grid   = document.getElementById('reviewGrid');
+    const empty  = document.getElementById('emptyState');
+    const toolbar = document.getElementById('reviewToolbar');
+    const countEl = document.getElementById('flaggedCount');
+
+    _selected.clear();
+    updateSelectionUI();
+
+    if (_flagged.length === 0) {
+        grid.innerHTML = '';
+        empty.style.display   = 'block';
+        toolbar.style.display = 'none';
+        countEl.textContent   = '0 flagged';
+        return;
+    }
+
+    empty.style.display   = 'none';
+    toolbar.style.display = 'flex';
+    countEl.textContent   = `${_flagged.length} flagged`;
+
+    grid.innerHTML = '';
+    _flagged.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'review-card';
+        card.dataset.path = item.file_path;
+        card.dataset.idx  = idx;
+
+        // Build web path for thumbnail
+        const thumbPath = buildThumbPath(item.file_path);
+        const topClass = item.classes && item.classes.length ? item.classes[0].replace('EXPOSED_','').replace('_',' ') : 'explicit';
+        const score = item.max_score ? Math.round(item.max_score * 100) + '%' : '';
+
+        card.innerHTML = `
+            <img src="${thumbPath}" loading="lazy" onerror="this.src='/static/placeholder.png'">
+            <div class="review-check"><i class="fas fa-times"></i></div>
+            <div class="review-card-info">
+                <strong>${escHtml(topClass)} ${score}</strong>
+                ${escHtml(item.filename)}
+            </div>`;
+
+        card.addEventListener('click', () => toggleCard(card, item.file_path));
+        grid.appendChild(card);
+    });
+}
+
+function buildThumbPath(filePath) {
+    // Convert absolute file path to a web-accessible thumb URL
+    // Thumbs are served under /thumbs/<relative_path>.jpg
+    const normalized = filePath.replace(/\\/g, '/');
+    const marker = 'reddit_downloads/';
+    const idx = normalized.indexOf(marker);
+    if (idx === -1) return '';
+    const rel = normalized.slice(idx + marker.length);
+    const withoutExt = rel.replace(/\.[^.]+$/, '');
+    return `/thumbs/${withoutExt}.jpg`;
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toggleCard(card, path) {
+    if (_selected.has(path)) {
+        _selected.delete(path);
+        card.classList.remove('selected');
+    } else {
+        _selected.add(path);
+        card.classList.add('selected');
+    }
+    updateSelectionUI();
+}
+
+function updateSelectionUI() {
+    const n = _selected.size;
+    document.getElementById('selectedBadge').textContent = n > 0 ? `${n} selected` : '';
+    document.getElementById('deleteBtn').disabled  = n === 0;
+    document.getElementById('dismissBtn').disabled = n === 0;
+}
+
+function selectAll() {
+    document.querySelectorAll('.review-card').forEach(card => {
+        card.classList.add('selected');
+        _selected.add(card.dataset.path);
+    });
+    updateSelectionUI();
+}
+
+function selectNone() {
+    document.querySelectorAll('.review-card').forEach(card => card.classList.remove('selected'));
+    _selected.clear();
+    updateSelectionUI();
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+function deleteSelected() {
+    const paths = [..._selected];
+    if (!paths.length) return;
+    if (!confirm(`Move ${paths.length} file(s) to the deleted folder and remove from DB?`)) return;
+
+    fetch('/api/explicit/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { alert('Error: ' + (data.error || 'Failed')); return; }
+        showToast(`${data.moved} file(s) moved to deleted folder`);
+        loadResults();
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function dismissSelected() {
+    const paths = [..._selected];
+    if (!paths.length) return;
+
+    fetch('/api/explicit/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { alert('Error: ' + (data.error || 'Failed')); return; }
+        showToast(`${paths.length} item(s) marked as not explicit`);
+        loadResults();
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+function showToast(msg) {
+    const t = document.createElement('div');
+    t.className = 'position-fixed top-0 start-50 translate-middle-x mt-3';
+    t.style.cssText = 'z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:0.5rem 1.25rem;font-size:0.8rem;color:var(--text);box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2500);
+}
+</script>
+{% endblock %}

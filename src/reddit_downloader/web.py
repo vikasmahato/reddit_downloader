@@ -2111,6 +2111,346 @@ def api_cleanup_stop():
     return jsonify({'success': True})
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# FLAIR BROWSER
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/flairs')
+def flairs_page():
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits()
+    users = ui_handler.get_users()
+    return render_template('flairs.html', stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/flairs')
+def api_flairs():
+    """Return all distinct flairs with post/image counts, optionally filtered by subreddit."""
+    subreddit = request.args.get('subreddit', '').strip() or None
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        if subreddit:
+            cursor.execute("""
+                SELECT p.flair,
+                       COUNT(DISTINCT p.id)  AS post_count,
+                       COUNT(pi.image_id)    AS image_count
+                FROM posts p
+                LEFT JOIN post_images pi ON pi.post_id = p.id
+                WHERE p.flair IS NOT NULL AND p.flair != ''
+                  AND p.subreddit = %s
+                GROUP BY p.flair
+                ORDER BY post_count DESC
+            """, (subreddit,))
+        else:
+            cursor.execute("""
+                SELECT p.flair,
+                       COUNT(DISTINCT p.id)  AS post_count,
+                       COUNT(pi.image_id)    AS image_count
+                FROM posts p
+                LEFT JOIN post_images pi ON pi.post_id = p.id
+                WHERE p.flair IS NOT NULL AND p.flair != ''
+                GROUP BY p.flair
+                ORDER BY post_count DESC
+            """)
+        rows = cursor.fetchall()
+        conn.close()
+        return jsonify({'success': True, 'flairs': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/flairs/posts')
+def api_flair_posts():
+    """Return paginated posts for a given flair."""
+    flair   = request.args.get('flair', '').strip()
+    subreddit = request.args.get('subreddit', '').strip() or None
+    page    = max(1, int(request.args.get('page', 1)))
+    per_page = min(100, max(12, int(request.args.get('per_page', 48))))
+    if not flair:
+        return jsonify({'success': False, 'error': 'flair required'}), 400
+    offset = (page - 1) * per_page
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        params_count = [flair]
+        params_rows  = [flair]
+        sr_clause = ''
+        if subreddit:
+            sr_clause = ' AND p.subreddit = %s'
+            params_count.append(subreddit)
+            params_rows.append(subreddit)
+
+        cursor.execute(
+            f"SELECT COUNT(*) AS c FROM posts p WHERE p.flair = %s{sr_clause}",
+            params_count,
+        )
+        total = cursor.fetchone()['c']
+
+        params_rows += [per_page, offset]
+        cursor.execute(f"""
+            SELECT p.id AS post_id, p.title, p.author, p.subreddit, p.flair,
+                   p.score, p.created_utc, p.permalink,
+                   MIN(i.file_path) AS file_path,
+                   COUNT(pi2.image_id) AS image_count
+            FROM posts p
+            LEFT JOIN post_images pi2 ON pi2.post_id = p.id
+            LEFT JOIN images i ON i.id = pi2.image_id
+            WHERE p.flair = %s{sr_clause}
+            GROUP BY p.id, p.title, p.author, p.subreddit, p.flair, p.score, p.created_utc, p.permalink
+            ORDER BY p.created_utc DESC
+            LIMIT %s OFFSET %s
+        """, params_rows)
+        rows = cursor.fetchall()
+        conn.close()
+
+        result = []
+        for row in rows:
+            thumb = ui_handler.make_thumb_path(row.get('file_path')) if row.get('file_path') else None
+            result.append({
+                'post_id':     row['post_id'],
+                'title':       row.get('title') or '',
+                'author':      row.get('author') or '',
+                'subreddit':   row.get('subreddit') or '',
+                'flair':       row.get('flair') or '',
+                'score':       row.get('score') or 0,
+                'created_utc': row['created_utc'].isoformat() if row.get('created_utc') and hasattr(row['created_utc'], 'isoformat') else str(row.get('created_utc') or ''),
+                'permalink':   row.get('permalink') or '',
+                'image_count': row.get('image_count') or 0,
+                'thumb':       thumb,
+            })
+        return jsonify({'success': True, 'posts': result, 'total': total, 'page': page, 'per_page': per_page})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EXPLICIT CONTENT DETECTION
+# ═══════════════════════════════════════════════════════════════════════════
+
+_explicit_state: dict = {
+    'running': False, 'message': '', 'progress': 0, 'total': 0,
+    'error': None, 'logs': [], 'flagged_count': 0, 'done': False,
+}
+_explicit_lock = threading.Lock()
+_explicit_proc = None
+_EXPLICIT_FLAGGED_FILE = Path.cwd() / 'explicit_flagged.json'
+
+
+def _run_explicit_scan(folder_name: str, threshold: float):
+    """Background thread: run detect_explicit.py as a subprocess."""
+    import sys as _sys
+
+    script = Path(__file__).parent.parent.parent / 'detect_explicit.py'
+    if not script.exists():
+        script = Path.cwd() / 'detect_explicit.py'
+
+    cmd = [_sys.executable, str(script), '--progress-json',
+           '--threshold', str(threshold)]
+    if folder_name:
+        cmd += ['--folder', folder_name]
+
+    global _explicit_proc
+
+    def _set_proc(p):
+        global _explicit_proc
+        with _explicit_lock:
+            _explicit_proc = p
+
+    def _on_complete(state, lock):
+        with lock:
+            for line in reversed(state['logs']):
+                try:
+                    ev = json.loads(line)
+                    if ev.get('done'):
+                        state['flagged_count'] = ev.get('flagged_count', 0)
+                        break
+                except Exception:
+                    pass
+
+    with _explicit_lock:
+        _explicit_state['logs'] = []
+        _explicit_state['flagged_count'] = 0
+        _explicit_state['done'] = False
+
+    _run_subprocess_with_state(cmd, _explicit_state, _explicit_lock, _set_proc, _on_complete)
+
+
+@app.route('/explicit')
+def explicit_page():
+    flagged = []
+    if _EXPLICIT_FLAGGED_FILE.exists():
+        try:
+            flagged = json.loads(_EXPLICIT_FLAGGED_FILE.read_text())
+        except Exception:
+            flagged = []
+    stats = ui_handler.get_stats()
+    subreddits = ui_handler.get_subreddits()
+    users = ui_handler.get_users()
+    return render_template('explicit.html', flagged=flagged,
+                           stats=stats, subreddits=subreddits, users=users)
+
+
+@app.route('/api/explicit/start', methods=['POST'])
+def api_explicit_start():
+    with _explicit_lock:
+        if _explicit_state['running']:
+            return jsonify({'success': False, 'error': 'Already running'}), 409
+    data = request.get_json() or {}
+    folder = data.get('folder', '')
+    threshold = float(data.get('threshold', 0.5))
+    t = threading.Thread(target=_run_explicit_scan, args=(folder, threshold), daemon=True)
+    t.start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/explicit/status')
+def api_explicit_status():
+    with _explicit_lock:
+        state = dict(_explicit_state)
+    state.pop('logs', None)
+    return jsonify(state)
+
+
+@app.route('/api/explicit/logs')
+def api_explicit_logs():
+    offset = int(request.args.get('offset', 0))
+    with _explicit_lock:
+        logs = _explicit_state['logs'][offset:]
+        new_offset = len(_explicit_state['logs'])
+    return jsonify({'logs': logs, 'offset': new_offset})
+
+
+@app.route('/api/explicit/stop', methods=['POST'])
+def api_explicit_stop():
+    global _explicit_proc
+    with _explicit_lock:
+        proc = _explicit_proc
+    if proc:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return jsonify({'success': True})
+
+
+@app.route('/api/explicit/results')
+def api_explicit_results():
+    """Return the current flagged results file."""
+    if not _EXPLICIT_FLAGGED_FILE.exists():
+        return jsonify({'success': True, 'flagged': []})
+    try:
+        flagged = json.loads(_EXPLICIT_FLAGGED_FILE.read_text())
+        return jsonify({'success': True, 'flagged': flagged})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/explicit/delete', methods=['POST'])
+def api_explicit_delete():
+    """Move selected flagged files to the deleted folder."""
+    data = request.get_json() or {}
+    paths = data.get('paths', [])
+    if not paths:
+        return jsonify({'success': False, 'error': 'No paths provided'}), 400
+
+    import shutil
+    deleted_folder = ui_handler.download_folder / 'deleted'
+    deleted_folder.mkdir(parents=True, exist_ok=True)
+
+    moved = 0
+    errors = []
+    conn = None
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        for file_path_str in paths:
+            try:
+                source = Path(file_path_str)
+                if not source.exists():
+                    continue
+
+                # Move file to deleted folder
+                dest = deleted_folder / source.name
+                counter = 1
+                while dest.exists():
+                    dest = deleted_folder / f"{source.stem}_{counter}{source.suffix}"
+                    counter += 1
+                shutil.move(str(source), str(dest))
+                moved += 1
+
+                # Remove DB record
+                cursor.execute("SELECT id FROM images WHERE file_path = %s", (file_path_str,))
+                img_row = cursor.fetchone()
+                if img_row:
+                    image_id = img_row['id']
+                    cursor.execute(
+                        "SELECT post_id FROM post_images WHERE image_id = %s", (image_id,)
+                    )
+                    post_ids = [r['post_id'] for r in cursor.fetchall()]
+                    cursor.execute("DELETE FROM images WHERE id = %s", (image_id,))
+                    for pid in post_ids:
+                        cursor.execute(
+                            "SELECT COUNT(*) as c FROM post_images WHERE post_id = %s", (pid,)
+                        )
+                        if cursor.fetchone()['c'] == 0:
+                            cursor.execute("DELETE FROM posts WHERE id = %s", (pid,))
+
+                # Delete thumbnail
+                try:
+                    thumb = ui_handler.make_thumb_path(file_path_str)
+                    if thumb:
+                        tp = Path(thumb.lstrip('/'))
+                        if not tp.is_absolute():
+                            tp = Path.cwd() / tp
+                        if tp.exists():
+                            tp.unlink()
+                except Exception:
+                    pass
+
+            except Exception as e:
+                errors.append(f'{Path(file_path_str).name}: {e}')
+
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    # Remove deleted paths from the flagged file
+    if _EXPLICIT_FLAGGED_FILE.exists():
+        try:
+            flagged = json.loads(_EXPLICIT_FLAGGED_FILE.read_text())
+            paths_set = set(paths)
+            flagged = [f for f in flagged if f['file_path'] not in paths_set]
+            _EXPLICIT_FLAGGED_FILE.write_text(json.dumps(flagged, indent=2))
+        except Exception:
+            pass
+
+    return jsonify({'success': True, 'moved': moved, 'errors': errors})
+
+
+@app.route('/api/explicit/dismiss', methods=['POST'])
+def api_explicit_dismiss():
+    """Remove paths from the flagged list without deleting files (false positives)."""
+    data = request.get_json() or {}
+    paths = data.get('paths', [])
+    if not _EXPLICIT_FLAGGED_FILE.exists():
+        return jsonify({'success': True})
+    try:
+        flagged = json.loads(_EXPLICIT_FLAGGED_FILE.read_text())
+        paths_set = set(paths)
+        flagged = [f for f in flagged if f['file_path'] not in paths_set]
+        _EXPLICIT_FLAGGED_FILE.write_text(json.dumps(flagged, indent=2))
+        return jsonify({'success': True, 'remaining': len(flagged)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def main():
     """Main entry point for the web UI."""
     app.run(debug=True, host='0.0.0.0', port=4000)

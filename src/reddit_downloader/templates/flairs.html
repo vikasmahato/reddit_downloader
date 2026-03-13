@@ -1,0 +1,483 @@
+{% extends "base.html" %}
+{% block title %}Browse by Flair — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+.flair-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 1rem;
+    align-items: start;
+}
+@media (max-width: 700px) {
+    .flair-layout { grid-template-columns: 1fr; }
+    .flair-sidebar { max-height: 260px; }
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+.flair-sidebar {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r); overflow: hidden;
+    display: flex; flex-direction: column;
+    position: sticky; top: 1rem; max-height: calc(100vh - 6rem);
+}
+.sidebar-head {
+    padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+}
+.sidebar-head-title {
+    font-family: var(--font-head); font-size: 0.65rem; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--text-muted); flex: 1;
+}
+.flair-search {
+    padding: 0.5rem 0.85rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.flair-search input {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 0.3rem 0.6rem; font-size: 0.72rem;
+    color: var(--text); outline: none;
+}
+.flair-search input:focus { border-color: var(--accent); }
+.flair-list { overflow-y: auto; flex: 1; }
+.flair-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.45rem 0.85rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03);
+    transition: background 0.1s;
+}
+.flair-item:hover { background: var(--surface-2); }
+.flair-item.active { background: rgba(139,92,246,0.12); border-left: 2px solid var(--accent); }
+.flair-pill {
+    font-size: 0.6rem; padding: 1px 7px; border-radius: 2px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text-dim); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 150px; flex: 1;
+    font-family: var(--font-head); letter-spacing: 0.04em;
+}
+.flair-item.active .flair-pill { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }
+.flair-count {
+    font-size: 0.6rem; color: var(--text-muted); white-space: nowrap;
+    font-family: var(--font-head);
+}
+.no-flairs {
+    padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.75rem;
+}
+
+/* ── Main panel ──────────────────────────────────────────────────────────── */
+.panel-head {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap;
+}
+.panel-title {
+    font-family: var(--font-head); font-size: 0.9rem; font-weight: 800;
+    letter-spacing: 0.06em; text-transform: uppercase; color: #efefef;
+}
+.panel-meta { font-size: 0.7rem; color: var(--text-muted); }
+.filter-bar {
+    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;
+}
+
+/* ── Post grid ───────────────────────────────────────────────────────────── */
+.post-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.6rem;
+}
+.post-card {
+    background: var(--surface); border: 2px solid var(--border);
+    border-radius: var(--r); overflow: hidden; cursor: pointer;
+    transition: border-color 0.15s; position: relative;
+}
+.post-card:hover { border-color: rgba(139,92,246,0.5); }
+.post-card.selected { border-color: var(--danger); }
+.post-card img {
+    width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+    background: var(--surface-2);
+}
+.post-card-no-thumb {
+    width: 100%; aspect-ratio: 1; display: flex; align-items: center;
+    justify-content: center; background: var(--surface-2); color: var(--text-muted);
+    font-size: 1.5rem;
+}
+.post-card-info {
+    padding: 0.35rem 0.5rem; font-size: 0.6rem; color: var(--text-muted); line-height: 1.4;
+}
+.post-card-title {
+    color: var(--text-dim); font-size: 0.65rem; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    margin-bottom: 2px;
+}
+.post-card-meta { display: flex; justify-content: space-between; }
+.sel-check {
+    position: absolute; top: 5px; right: 5px; width: 18px; height: 18px;
+    border-radius: 50%; background: rgba(239,68,68,0.9);
+    display: none; align-items: center; justify-content: center;
+    color: #fff; font-size: 0.55rem;
+}
+.post-card.selected .sel-check { display: flex; }
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+.bulk-toolbar {
+    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;
+}
+.empty-panel {
+    text-align: center; padding: 4rem 1rem; color: var(--text-muted); font-size: 0.8rem;
+}
+
+/* ── Pagination ──────────────────────────────────────────────────────────── */
+.pagination-bar {
+    display: flex; justify-content: center; gap: 0.35rem; margin-top: 1rem; flex-wrap: wrap;
+}
+.page-btn {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 3px 10px; font-size: 0.7rem;
+    color: var(--text-dim); cursor: pointer;
+}
+.page-btn:hover { border-color: var(--accent); color: var(--accent); }
+.page-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.12); }
+.page-btn:disabled { opacity: 0.4; cursor: default; }
+</style>
+
+<!-- ── Page header ────────────────────────────────────────────────────────── -->
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.1rem;flex-wrap:wrap;">
+    <h1 style="font-family:var(--font-head);font-size:1.1rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#efefef;margin:0;">
+        <i class="fas fa-tags" style="color:var(--accent);margin-right:8px;"></i>Browse by Flair
+    </h1>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">
+        <span style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-head);">Subreddit</span>
+        <select id="srFilter" class="form-select form-select-sm" style="min-width:160px;" onchange="loadFlairs()">
+            <option value="">All subreddits</option>
+            {% for sr in subreddits %}
+            <option value="{{ sr }}">r/{{ sr }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<div class="flair-layout">
+    <!-- ── Sidebar: flair list ─────────────────────────────────────────────── -->
+    <div class="flair-sidebar">
+        <div class="sidebar-head">
+            <span class="sidebar-head-title">Flairs</span>
+            <span id="flairCount" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-head);"></span>
+        </div>
+        <div class="flair-search">
+            <input type="text" id="flairSearch" placeholder="Filter flairs…" oninput="filterSidebar()">
+        </div>
+        <div class="flair-list" id="flairList">
+            <div class="no-flairs">Loading…</div>
+        </div>
+    </div>
+
+    <!-- ── Main: post grid ────────────────────────────────────────────────── -->
+    <div>
+        <!-- Bulk toolbar (hidden until flair selected) -->
+        <div class="bulk-toolbar" id="bulkToolbar" style="display:none;">
+            <button class="btn btn-sm btn-outline-secondary" onclick="selectAll()">Select All</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="selectNone()">Deselect All</button>
+            <span id="selBadge" style="font-size:0.72rem;color:var(--text-muted);"></span>
+            <div style="margin-left:auto;">
+                <button class="btn btn-sm btn-danger" id="deleteSelBtn" onclick="deleteSelected()" disabled>
+                    <i class="fas fa-trash"></i> Delete Selected
+                </button>
+                <button class="btn btn-sm btn-outline-danger" id="deleteAllBtn" onclick="deleteAllInFlair()" style="margin-left:4px;">
+                    <i class="fas fa-trash-alt"></i> Delete All in Flair
+                </button>
+            </div>
+        </div>
+
+        <!-- Panel header -->
+        <div class="panel-head" id="panelHead" style="display:none;">
+            <span class="panel-title" id="panelTitle"></span>
+            <span class="panel-meta" id="panelMeta"></span>
+        </div>
+
+        <!-- Grid -->
+        <div class="post-grid" id="postGrid"></div>
+        <div class="empty-panel" id="emptyPanel">
+            <i class="fas fa-tags" style="font-size:2rem;margin-bottom:0.5rem;opacity:0.3;"></i><br>
+            Select a flair from the sidebar to browse posts.
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination-bar" id="paginationBar"></div>
+    </div>
+</div>
+
+<script>
+let _allFlairs = [];
+let _activeFlair = null;
+let _currentPage = 1;
+let _totalPosts  = 0;
+let _perPage     = 48;
+let _selected    = new Set();
+
+// ── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', loadFlairs);
+
+// ── Sidebar ───────────────────────────────────────────────────────────────
+function loadFlairs() {
+    _activeFlair = null;
+    _selected.clear();
+    document.getElementById('postGrid').innerHTML = '';
+    document.getElementById('emptyPanel').style.display = 'block';
+    document.getElementById('panelHead').style.display = 'none';
+    document.getElementById('bulkToolbar').style.display = 'none';
+    document.getElementById('paginationBar').innerHTML = '';
+
+    const sr = document.getElementById('srFilter').value;
+    const url = '/api/flairs' + (sr ? `?subreddit=${encodeURIComponent(sr)}` : '');
+
+    document.getElementById('flairList').innerHTML = '<div class="no-flairs">Loading…</div>';
+
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            _allFlairs = data.flairs || [];
+            document.getElementById('flairCount').textContent = _allFlairs.length.toLocaleString();
+            renderSidebar(_allFlairs);
+        })
+        .catch(() => {
+            document.getElementById('flairList').innerHTML = '<div class="no-flairs">Failed to load.</div>';
+        });
+}
+
+function renderSidebar(flairs) {
+    const list = document.getElementById('flairList');
+    if (!flairs.length) {
+        list.innerHTML = '<div class="no-flairs">No flairs found.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    flairs.forEach(f => {
+        const item = document.createElement('div');
+        item.className = 'flair-item' + (f.flair === _activeFlair ? ' active' : '');
+        item.dataset.flair = f.flair;
+        item.innerHTML = `
+            <span class="flair-pill" title="${escHtml(f.flair)}">${escHtml(f.flair)}</span>
+            <span class="flair-count">${f.post_count.toLocaleString()}</span>`;
+        item.addEventListener('click', () => selectFlair(f.flair));
+        list.appendChild(item);
+    });
+}
+
+function filterSidebar() {
+    const q = document.getElementById('flairSearch').value.toLowerCase();
+    const filtered = _allFlairs.filter(f => f.flair.toLowerCase().includes(q));
+    renderSidebar(filtered);
+}
+
+function selectFlair(flair) {
+    _activeFlair = flair;
+    _currentPage = 1;
+    _selected.clear();
+    // Update sidebar active state
+    document.querySelectorAll('.flair-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.flair === flair);
+    });
+    loadPosts();
+}
+
+// ── Posts ─────────────────────────────────────────────────────────────────
+function loadPosts() {
+    if (!_activeFlair) return;
+    const sr = document.getElementById('srFilter').value;
+    let url = `/api/flairs/posts?flair=${encodeURIComponent(_activeFlair)}&page=${_currentPage}&per_page=${_perPage}`;
+    if (sr) url += `&subreddit=${encodeURIComponent(sr)}`;
+
+    document.getElementById('postGrid').innerHTML = '';
+    document.getElementById('emptyPanel').style.display = 'none';
+    document.getElementById('bulkToolbar').style.display = 'flex';
+    document.getElementById('panelHead').style.display   = 'flex';
+    document.getElementById('panelTitle').textContent = _activeFlair;
+
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            _totalPosts = data.total || 0;
+            document.getElementById('panelMeta').textContent =
+                `${_totalPosts.toLocaleString()} post${_totalPosts !== 1 ? 's' : ''}`;
+            renderPosts(data.posts || []);
+            renderPagination();
+            updateSelUI();
+        })
+        .catch(err => console.error(err));
+}
+
+function renderPosts(posts) {
+    const grid = document.getElementById('postGrid');
+    grid.innerHTML = '';
+
+    if (!posts.length) {
+        document.getElementById('emptyPanel').style.display = 'block';
+        document.getElementById('emptyPanel').innerHTML = '<i class="fas fa-inbox" style="font-size:2rem;opacity:0.3;margin-bottom:0.5rem;"></i><br>No posts for this flair.';
+        return;
+    }
+
+    posts.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'post-card' + (_selected.has(p.post_id) ? ' selected' : '');
+        card.dataset.postId = p.post_id;
+
+        const imgHtml = p.thumb
+            ? `<img src="/thumbs/${escHtml(p.thumb)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-image\\'></i></div>'">`
+            : `<div class="post-card-no-thumb"><i class="fas fa-image"></i></div>`;
+
+        const date = p.created_utc ? p.created_utc.slice(0,10) : '';
+        card.innerHTML = `
+            ${imgHtml}
+            <div class="sel-check"><i class="fas fa-times"></i></div>
+            <div class="post-card-info">
+                <div class="post-card-title" title="${escHtml(p.title)}">${escHtml(p.title)}</div>
+                <div class="post-card-meta">
+                    <span>${p.author ? 'u/'+escHtml(p.author) : ''}</span>
+                    <span>${date}</span>
+                </div>
+                <div style="margin-top:2px;">
+                    <span style="color:var(--text-muted);">r/${escHtml(p.subreddit)}</span>
+                    ${p.image_count > 1 ? `<span style="color:var(--accent);float:right;">${p.image_count} imgs</span>` : ''}
+                </div>
+            </div>`;
+        card.addEventListener('click', () => toggleCard(card, p.post_id));
+        grid.appendChild(card);
+    });
+}
+
+function renderPagination() {
+    const bar = document.getElementById('paginationBar');
+    const totalPages = Math.ceil(_totalPosts / _perPage);
+    if (totalPages <= 1) { bar.innerHTML = ''; return; }
+
+    let html = '';
+    const prev = _currentPage - 1;
+    const next = _currentPage + 1;
+
+    html += `<button class="page-btn" onclick="goPage(1)" ${_currentPage===1?'disabled':''}>«</button>`;
+    html += `<button class="page-btn" onclick="goPage(${prev})" ${_currentPage===1?'disabled':''}>‹</button>`;
+
+    const start = Math.max(1, _currentPage - 3);
+    const end   = Math.min(totalPages, _currentPage + 3);
+    for (let i = start; i <= end; i++) {
+        html += `<button class="page-btn${i===_currentPage?' active':''}" onclick="goPage(${i})">${i}</button>`;
+    }
+
+    html += `<button class="page-btn" onclick="goPage(${next})" ${_currentPage===totalPages?'disabled':''}>›</button>`;
+    html += `<button class="page-btn" onclick="goPage(${totalPages})" ${_currentPage===totalPages?'disabled':''}>»</button>`;
+    bar.innerHTML = html;
+}
+
+function goPage(n) {
+    _currentPage = n;
+    _selected.clear();
+    loadPosts();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Selection ─────────────────────────────────────────────────────────────
+function toggleCard(card, postId) {
+    if (_selected.has(postId)) {
+        _selected.delete(postId);
+        card.classList.remove('selected');
+    } else {
+        _selected.add(postId);
+        card.classList.add('selected');
+    }
+    updateSelUI();
+}
+
+function updateSelUI() {
+    const n = _selected.size;
+    document.getElementById('selBadge').textContent = n > 0 ? `${n} selected` : '';
+    document.getElementById('deleteSelBtn').disabled = n === 0;
+}
+
+function selectAll() {
+    document.querySelectorAll('.post-card').forEach(card => {
+        card.classList.add('selected');
+        _selected.add(parseInt(card.dataset.postId));
+    });
+    updateSelUI();
+}
+
+function selectNone() {
+    document.querySelectorAll('.post-card').forEach(card => card.classList.remove('selected'));
+    _selected.clear();
+    updateSelUI();
+}
+
+// ── Delete ─────────────────────────────────────────────────────────────────
+function deleteSelected() {
+    const ids = [..._selected];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected post(s)? Files will be moved to the deleted folder.`)) return;
+    batchDelete(ids);
+}
+
+function deleteAllInFlair() {
+    if (!_activeFlair) return;
+    if (!confirm(`Delete ALL ${_totalPosts.toLocaleString()} post(s) in flair "${_activeFlair}"? This cannot be undone easily.`)) return;
+
+    const sr = document.getElementById('srFilter').value;
+    // Collect all post IDs by fetching every page
+    fetchAllPostIds(_activeFlair, sr).then(ids => {
+        if (!ids.length) return;
+        if (!confirm(`Confirm: permanently move files for ${ids.length} posts to the deleted folder?`)) return;
+        batchDelete(ids, true);
+    });
+}
+
+function fetchAllPostIds(flair, subreddit) {
+    // Fetch a large page (max 100) repeatedly until we have all IDs
+    const allIds = [];
+    function fetchPage(page) {
+        let url = `/api/flairs/posts?flair=${encodeURIComponent(flair)}&page=${page}&per_page=100`;
+        if (subreddit) url += `&subreddit=${encodeURIComponent(subreddit)}`;
+        return fetch(url).then(r => r.json()).then(data => {
+            (data.posts || []).forEach(p => allIds.push(p.post_id));
+            const total = data.total || 0;
+            if (allIds.length < total) return fetchPage(page + 1);
+            return allIds;
+        });
+    }
+    return fetchPage(1);
+}
+
+function batchDelete(ids, reloadFlairs = false) {
+    fetch('/api/delete-posts-batch', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_ids: ids }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success && !data.deleted_count) {
+            alert('Error: ' + (data.error || 'Failed'));
+            return;
+        }
+        showToast(`${data.deleted_count} post(s) deleted`);
+        _selected.clear();
+        if (reloadFlairs) {
+            loadFlairs();
+        } else {
+            loadPosts();
+            // Refresh flair counts in sidebar
+            setTimeout(loadFlairs, 500);
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function escHtml(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(msg) {
+    const t = document.createElement('div');
+    t.className = 'position-fixed top-0 start-50 translate-middle-x mt-3';
+    t.style.cssText = 'z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:0.5rem 1.25rem;font-size:0.8rem;color:var(--text);box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2500);
+}
+</script>
+{% endblock %}
