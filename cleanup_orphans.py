@@ -37,6 +37,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import mysql.connector
+from mysql.connector import pooling
+
 # ── Stop flag ─────────────────────────────────────────────────────────────
 _stop_requested = False
 
@@ -85,6 +88,18 @@ def _load_config():
     }
 
 
+def _create_pool(cfg: dict) -> pooling.MySQLConnectionPool:
+    return pooling.MySQLConnectionPool(
+        pool_name='cleanup_pool',
+        pool_size=2,
+        host=cfg['host'],
+        port=cfg['port'],
+        user=cfg['user'],
+        password=cfg['password'],
+        database=cfg['database'],
+    )
+
+
 def _invalidate_phash(file_path: str) -> None:
     if not DUPES_DB.exists():
         return
@@ -124,25 +139,19 @@ def _source_exists(thumb_path: Path, download_folder: Path,
 # ── Phase 1: DB orphans ───────────────────────────────────────────────────
 
 def phase1_db_orphans(
-    cfg: dict,
+    pool: pooling.MySQLConnectionPool,
     dry_run: bool,
     thumbs_folder: Path,
     download_folder: Path,
     progress_json: bool,
 ) -> dict:
-    import mysql.connector
-
     def emit(msg, cur=0, tot=0):
         _emit(msg, cur, tot, phase='db', as_json=progress_json)
 
     emit('Phase 1: loading images from database…')
 
     try:
-        conn = mysql.connector.connect(
-            host=cfg['host'], port=cfg['port'],
-            user=cfg['user'], password=cfg['password'],
-            database=cfg['database'],
-        )
+        conn = pool.get_connection()
     except Exception as e:
         emit(f'DB connection failed: {e}')
         return {'checked': 0, 'missing': 0, 'images_deleted': 0,
@@ -186,6 +195,12 @@ def phase1_db_orphans(
 
     if missing_ids and not dry_run:
         placeholders = ','.join(['%s'] * len(missing_ids))
+
+        # Reconnect in case the file-scan loop caused the connection to time out
+        try:
+            conn.ping(reconnect=True, attempts=3, delay=2)
+        except Exception:
+            conn.reconnect(attempts=3, delay=2)
 
         # Find posts that will lose ALL their images
         cur.execute(f'''
@@ -316,7 +331,14 @@ def run_cleanup(
     if dry_run:
         emit('*** DRY RUN — no changes will be made ***')
 
-    r1 = phase1_db_orphans(cfg, dry_run, thumbs_folder, download_folder, progress_json)
+    try:
+        pool = _create_pool(cfg)
+    except Exception as e:
+        emit(f'Failed to create DB connection pool: {e}')
+        return {'checked': 0, 'missing': 0, 'images_deleted': 0,
+                'posts_deleted': 0, 'thumbs_deleted': 0, 'elapsed_sec': 0}
+
+    r1 = phase1_db_orphans(pool, dry_run, thumbs_folder, download_folder, progress_json)
     r2 = {}
     if not _stop_requested:
         r2 = phase2_thumb_orphans(cfg, dry_run, thumbs_folder, download_folder, progress_json)
