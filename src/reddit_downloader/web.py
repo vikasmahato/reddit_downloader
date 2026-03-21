@@ -189,12 +189,22 @@ _ensure_favourite_column()
 
 
 def _ensure_posts_deleted_column():
-    """Add is_deleted column to posts table if it doesn't exist."""
+    """Add is_deleted and removed_by_category columns to posts table if missing."""
     try:
         conn = _get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             "ALTER TABLE posts ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # already exists
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "ALTER TABLE posts ADD COLUMN removed_by_category VARCHAR(50) NULL DEFAULT NULL"
         )
         conn.commit()
         conn.close()
@@ -2592,6 +2602,8 @@ def reddit_deleted_page():
     subreddit = request.args.get('subreddit', '')
     search    = request.args.get('search', '')
 
+    removed_by = request.args.get('removed_by', '')
+
     try:
         conn   = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -2604,6 +2616,12 @@ def reddit_deleted_page():
         if search:
             where_parts.append("(p.title LIKE %s OR p.author LIKE %s)")
             params.extend([f'%{search}%', f'%{search}%'])
+        if removed_by:
+            if removed_by == '__null__':
+                where_parts.append("p.removed_by_category IS NULL")
+            else:
+                where_parts.append("p.removed_by_category = %s")
+                params.append(removed_by)
         where = ' AND '.join(where_parts)
 
         cursor.execute(f"SELECT COUNT(*) AS total FROM posts p WHERE {where}", params)
@@ -2612,6 +2630,7 @@ def reddit_deleted_page():
         cursor.execute(f"""
             SELECT p.id AS post_id, p.title, p.author, p.subreddit,
                    p.permalink, p.created_utc, p.score, p.flair,
+                   p.removed_by_category,
                    i.id AS image_id, i.file_path, i.filename, i.file_size
             FROM (
                 SELECT id FROM posts p WHERE {where}
@@ -2630,6 +2649,13 @@ def reddit_deleted_page():
             "ORDER BY subreddit LIMIT 200"
         )
         subreddits = [r['subreddit'] for r in cursor.fetchall() if r['subreddit']]
+
+        # Categories for filter dropdown
+        cursor.execute(
+            "SELECT removed_by_category, COUNT(*) AS cnt FROM posts "
+            "WHERE is_deleted=1 GROUP BY removed_by_category ORDER BY cnt DESC"
+        )
+        categories = [r['removed_by_category'] for r in cursor.fetchall()]
         conn.close()
 
         # Group into posts
@@ -2641,7 +2667,9 @@ def reddit_deleted_page():
                     'post_id': pid, 'title': row['title'], 'author': row['author'],
                     'subreddit': row['subreddit'], 'permalink': row['permalink'],
                     'created_utc': row['created_utc'], 'score': row['score'],
-                    'flair': row.get('flair'), 'post_images': [],
+                    'flair': row.get('flair'),
+                    'removed_by_category': row.get('removed_by_category'),
+                    'post_images': [],
                 }
             if row.get('image_id'):
                 img = {'id': row['image_id'], 'file_path': row['file_path'],
@@ -2666,12 +2694,16 @@ def reddit_deleted_page():
                                posts=post_list, total=total,
                                current_page=page, total_pages=total_pages,
                                subreddits=subreddits,
-                               filter_subreddit=subreddit, search=search)
+                               categories=categories,
+                               filter_subreddit=subreddit, search=search,
+                               filter_removed_by=removed_by)
     except Exception as e:
         print(f"Reddit deleted page error: {e}")
+        import traceback; traceback.print_exc()
         return render_template('reddit_deleted.html',
                                posts=[], total=0, current_page=1, total_pages=1,
-                               subreddits=[], filter_subreddit='', search='')
+                               subreddits=[], categories=[],
+                               filter_subreddit='', search='', filter_removed_by='')
 
 
 @app.route('/api/posts/<int:post_id>/restore', methods=['POST'])

@@ -264,11 +264,27 @@
             <option value="{{ sr }}" {% if sr == filter_subreddit %}selected{% endif %}>r/{{ sr }}</option>
             {% endfor %}
         </select>
+        <select class="del-filter-select" name="removed_by" onchange="this.form.submit()">
+            <option value="">All categories</option>
+            {% for cat in categories %}
+            {% set val = cat if cat else '__null__' %}
+            {% set label = {
+                'moderator': 'Mod Removed',
+                'deleted': 'Author Deleted',
+                'reddit': 'Reddit Removed',
+                'anti_evil_ops': 'Anti-Evil Ops',
+                'copyright_takedown': 'Copyright',
+                'community_ops': 'Community Ops',
+                'unknown': 'API Gone',
+            }.get(cat, cat) if cat else 'Unknown' %}
+            <option value="{{ val }}" {% if val == filter_removed_by %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
         <input class="del-filter-input" type="text" name="search"
                placeholder="Search title / author…"
                value="{{ search }}" style="width:160px;">
         <button class="del-filter-btn" type="submit"><i class="fas fa-search"></i></button>
-        {% if filter_subreddit or search %}
+        {% if filter_subreddit or search or filter_removed_by %}
         <a class="del-filter-btn" href="{{ url_for('reddit_deleted_page') }}"
            style="background:var(--surface-3); border-color:var(--border-2); color:var(--text-dim);">
             <i class="fas fa-times"></i>
@@ -296,7 +312,17 @@
                 <div class="del-placeholder"><i class="fas fa-image"></i></div>
             {% endif %}
 
-            <span class="del-badge"><i class="fas fa-ghost"></i> Deleted</span>
+            {% set _cat_labels = {
+                'moderator': 'Mod Removed',
+                'deleted': 'Author Deleted',
+                'reddit': 'Reddit Removed',
+                'anti_evil_ops': 'Anti-Evil Ops',
+                'copyright_takedown': 'Copyright',
+                'community_ops': 'Community Ops',
+                'unknown': 'API Gone',
+            } %}
+            {% set _cat = post.removed_by_category %}
+            <span class="del-badge"><i class="fas fa-ghost"></i> {{ _cat_labels.get(_cat, _cat) if _cat else 'Deleted' }}</span>
 
             {% if post.post_images | length > 1 %}
             <span class="multi-badge"><i class="fas fa-images"></i> {{ post.post_images | length }}</span>
@@ -363,6 +389,7 @@
 {% if total_pages > 1 %}
 {% set qs_extra = ('&subreddit=' + filter_subreddit) if filter_subreddit else '' %}
 {% set qs_extra = qs_extra + ('&search=' + search) if search else qs_extra %}
+{% set qs_extra = qs_extra + ('&removed_by=' + filter_removed_by) if filter_removed_by else qs_extra %}
 <div class="pager">
     {% if current_page > 1 %}
     <a href="{{ url_for('reddit_deleted_page', page=current_page-1) }}{{ qs_extra }}">
