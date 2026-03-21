@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Sync Posts — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+.sync-wrap { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+.sync-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+}
+.sync-card-header {
+    padding: 12px 16px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-head);
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #efefef;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.sync-card-body { padding: 16px; }
+
+.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.mode-card {
+    border: 1px solid var(--border-2);
+    border-radius: var(--r);
+    padding: 14px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    background: var(--surface-2);
+}
+.mode-card:hover { background: var(--surface-3); border-color: var(--accent); }
+.mode-card.running { border-color: var(--accent); background: rgba(255,69,0,0.06); }
+
+.mode-title { font-family: var(--font-head); font-size: 0.9rem; font-weight: 700; color: #efefef; margin-bottom: 4px; }
+.mode-desc  { font-size: 0.65rem; color: var(--text-dim); line-height: 1.4; margin-bottom: 10px; }
+.mode-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 14px;
+    border: 1px solid var(--border-2); border-radius: var(--r);
+    background: var(--surface-3); color: var(--text-dim);
+    font-size: 0.68rem; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.mode-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mode-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Progress */
+.progress-section { display: none; flex-direction: column; gap: 8px; }
+.progress-section.visible { display: flex; }
+.progress-header { display: flex; justify-content: space-between; align-items: center; }
+.progress-label { font-size: 0.72rem; color: var(--text-dim); }
+.progress-pct { font-size: 0.72rem; color: var(--accent); font-weight: 700; }
+.progress-track { height: 6px; background: var(--border-2); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s; width: 0%; }
+.progress-stats { display: flex; gap: 14px; font-size: 0.68rem; }
+.stat-pill { display: flex; align-items: center; gap: 4px; color: var(--text-dim); }
+.stat-pill b { color: var(--text); }
+.stat-updated { color: var(--success); }
+.stat-deleted { color: var(--danger); }
+.stat-error   { color: var(--warn); }
+
+/* Log box */
+.log-box {
+    background: #050505;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 10px;
+    height: 220px;
+    overflow-y: auto;
+    font-size: 0.63rem;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    line-height: 1.5;
+}
+.log-box::-webkit-scrollbar { width: 4px; }
+.log-box::-webkit-scrollbar-thumb { background: var(--border-2); }
+
+/* Cron hints */
+.cron-table { width: 100%; border-collapse: collapse; font-size: 0.68rem; }
+.cron-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.cron-table td:first-child { color: var(--text-dim); white-space: nowrap; }
+.cron-table td:last-child  { font-family: var(--font-mono); color: var(--info); }
+</style>
+
+<div class="sync-wrap">
+    <!-- Mode selector -->
+    <div class="sync-card">
+        <div class="sync-card-header">
+            <i class="fas fa-sync-alt" style="color:var(--accent)"></i> Sync Posts
+        </div>
+        <div class="sync-card-body">
+            <p style="font-size:0.72rem; color:var(--text-dim); margin-bottom:14px;">
+                Fetches latest comments from Reddit, updates post scores, and marks posts
+                that have been deleted on Reddit. Batches 100 posts per API call for efficiency.
+            </p>
+            <div class="mode-grid">
+                <div class="mode-card" id="card-weekly">
+                    <div class="mode-title">Weekly</div>
+                    <div class="mode-desc">Last 10 000 posts<br>Recommended: run weekly</div>
+                    <button class="mode-btn" onclick="startSync('weekly')">
+                        <i class="fas fa-play"></i> Run
+                    </button>
+                </div>
+                <div class="mode-card" id="card-monthly">
+                    <div class="mode-title">Monthly</div>
+                    <div class="mode-desc">Last 100 000 posts<br>Recommended: run monthly</div>
+                    <button class="mode-btn" onclick="startSync('monthly')">
+                        <i class="fas fa-play"></i> Run
+                    </button>
+                </div>
+                <div class="mode-card" id="card-full">
+                    <div class="mode-title">Full</div>
+                    <div class="mode-desc">All posts in database<br>Use for initial sync</div>
+                    <button class="mode-btn" onclick="startSync('full')">
+                        <i class="fas fa-play"></i> Run
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="sync-card">
+        <div class="sync-card-header" style="justify-content:space-between;">
+            <span><i class="fas fa-tasks"></i> Progress</span>
+            <button class="mode-btn" id="stopBtn" onclick="stopSync()"
+                    style="display:none; border-color:var(--danger); color:var(--danger);">
+                <i class="fas fa-stop"></i> Stop
+            </button>
+        </div>
+        <div class="sync-card-body">
+            <div class="progress-section" id="progressSection">
+                <div class="progress-header">
+                    <span class="progress-label" id="progressMsg">Idle</span>
+                    <span class="progress-pct" id="progressPct">—</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span class="stat-pill">
+                        <i class="fas fa-check-circle stat-updated"></i>
+                        Updated: <b id="statUpdated">0</b>
+                    </span>
+                    <span class="stat-pill">
+                        <i class="fas fa-ghost stat-deleted"></i>
+                        Deleted: <b id="statDeleted">0</b>
+                    </span>
+                    <span class="stat-pill">
+                        <i class="fas fa-exclamation-circle stat-error"></i>
+                        Errors: <b id="statErrors">0</b>
+                    </span>
+                </div>
+            </div>
+            <div id="idleMsg" style="font-size:0.72rem; color:var(--text-dim);">
+                No sync running. Pick a mode above to start.
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="sync-card">
+        <div class="sync-card-header">
+            <i class="fas fa-terminal"></i> Logs
+        </div>
+        <div class="sync-card-body" style="padding:10px;">
+            <div class="log-box" id="logBox"></div>
+        </div>
+    </div>
+
+    <!-- Cron hints -->
+    <div class="sync-card">
+        <div class="sync-card-header"><i class="fas fa-clock"></i> Cron Schedule (Raspberry Pi)</div>
+        <div class="sync-card-body">
+            <p style="font-size:0.68rem; color:var(--text-dim); margin-bottom:10px;">
+                Add to crontab on the Pi (<code>crontab -e</code>) to run automatically:
+            </p>
+            <table class="cron-table">
+                <tr>
+                    <td>Weekly (Mon 3 AM)</td>
+                    <td>0 3 * * 1 cd ~/hdd/reddit_downloader && .venv/bin/reddit-update-comments --mode weekly >> logs/update_weekly.log 2>&1</td>
+                </tr>
+                <tr>
+                    <td>Monthly (1st, 4 AM)</td>
+                    <td>0 4 1 * * cd ~/hdd/reddit_downloader && .venv/bin/reddit-update-comments --mode monthly >> logs/update_monthly.log 2>&1</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+let pollTimer = null;
+let logOffset = 0;
+
+async function startSync(mode) {
+    const res = await fetch('/api/update-posts/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode})
+    });
+    const d = await res.json();
+    if (d.error) { alert(d.error); return; }
+
+    document.getElementById('idleMsg').style.display = 'none';
+    document.getElementById('progressSection').classList.add('visible');
+    document.getElementById('stopBtn').style.display = 'inline-flex';
+    document.querySelectorAll('.mode-btn').forEach(b => b.disabled = true);
+    document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('running'));
+    document.getElementById('card-' + mode).classList.add('running');
+    document.getElementById('logBox').innerHTML = '';
+    logOffset = 0;
+
+    pollTimer = setInterval(pollStatus, 1200);
+}
+
+async function stopSync() {
+    await fetch('/api/update-posts/stop', {method: 'POST'});
+}
+
+async function pollStatus() {
+    try {
+        const [sRes, lRes] = await Promise.all([
+            fetch('/api/update-posts/status'),
+            fetch('/api/update-posts/logs?offset=' + logOffset)
+        ]);
+        const s = await sRes.json();
+        const l = await lRes.json();
+
+        // Update progress UI
+        const pct = s.total > 0 ? Math.round(s.progress * 100 / s.total) : 0;
+        document.getElementById('progressMsg').textContent  = s.message || '…';
+        document.getElementById('progressPct').textContent  = pct + '%';
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('statUpdated').textContent  = s.updated || 0;
+        document.getElementById('statDeleted').textContent  = s.deleted || 0;
+        document.getElementById('statErrors').textContent   = s.errors  || 0;
+
+        // Append new log lines (strip ANSI escape codes)
+        const box = document.getElementById('logBox');
+        l.logs.forEach(line => {
+            const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
+            if (clean.trim()) {
+                box.innerHTML += '<div>' + escapeHtml(clean) + '</div>';
+            }
+        });
+        logOffset = l.offset;
+        box.scrollTop = box.scrollHeight;
+
+        if (!s.running) {
+            clearInterval(pollTimer);
+            document.getElementById('stopBtn').style.display = 'none';
+            document.querySelectorAll('.mode-btn').forEach(b => b.disabled = false);
+            document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('running'));
+        }
+    } catch (e) {}
+}
+
+function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// On load: check if a sync is already running
+(async () => {
+    const res = await fetch('/api/update-posts/status');
+    const s   = await res.json();
+    if (s.running) {
+        document.getElementById('idleMsg').style.display = 'none';
+        document.getElementById('progressSection').classList.add('visible');
+        document.getElementById('stopBtn').style.display = 'inline-flex';
+        document.querySelectorAll('.mode-btn').forEach(b => b.disabled = true);
+        pollTimer = setInterval(pollStatus, 1200);
+    }
+})();
+</script>
+{% endblock %}

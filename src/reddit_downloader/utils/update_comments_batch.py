@@ -1,342 +1,323 @@
 #!/usr/bin/env python3
 """
-Update comments for the last N posts in the database using Reddit API (PRAW).
+Sync Reddit posts: fetch latest comments, detect Reddit-deletions, update scores.
 
-This script fetches the latest comments from Reddit for posts in the database
-and updates them, preserving deleted comments by marking them.
+Modes
+-----
+  weekly   — last 10 000 posts  (run via cron weekly)
+  monthly  — last 100 000 posts (run via cron monthly)
+  full     — all posts          (manual / initial run)
+
+How it works
+------------
+1. Batch 100 post IDs at a time into reddit.info() to detect deletions and
+   get current scores — one API call per 100 posts.
+2. For each non-deleted post, fetch top-level comments individually.
+3. Merge new comments with old ones (preserve disappeared comments, mark
+   them "(deleted)").
+4. Write updated comments + score + is_deleted flag back to MySQL.
+
+Progress output
+---------------
+When --progress-json is set every status update is emitted as a single JSON
+line to stdout so the Flask web UI can parse it:
+  {"message": "...", "progress": 42, "total": 1000, ...}
 """
+
 import json
-import praw
 import re
-import os
 import sys
-import argparse
 import time
-from configparser import ConfigParser
-from pathlib import Path
-import logging
-import mysql.connector
+import argparse
 import configparser
+from pathlib import Path
+
 from loguru import logger
+import mysql.connector
+import praw
 
 logger.remove()
 logger.add(sys.stdout, colorize=True, format="<lvl>{message}</lvl>")
 
-# Load MySQL config
-mysql_config = None
-try:
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    mysql_config = {
-        'host': config.get('mysql', 'host', fallback='localhost'),
-        'port': config.getint('mysql', 'port', fallback=3306),
-        'user': config.get('mysql', 'user', fallback='root'),
-        'password': config.get('mysql', 'password', fallback=''),
-        'database': config.get('mysql', 'database', fallback='reddit_images')
+# ── constants ──────────────────────────────────────────────────────────────
+INFO_BATCH   = 100   # reddit.info() accepts up to 100 fullnames
+COMMENT_LIMIT = 100  # top comments to keep per post
+
+MODE_LIMITS = {
+    'weekly':  10_000,
+    'monthly': 100_000,
+    'full':    None,
+}
+
+# ── config helpers ─────────────────────────────────────────────────────────
+
+def _load_mysql(config_path):
+    cfg = configparser.ConfigParser()
+    cfg.read(config_path)
+    return {
+        'host':     cfg.get('mysql', 'host',     fallback='localhost'),
+        'port':     cfg.getint('mysql', 'port',  fallback=3306),
+        'user':     cfg.get('mysql', 'user',     fallback='root'),
+        'password': cfg.get('mysql', 'password', fallback=''),
+        'database': cfg.get('mysql', 'database', fallback='reddit_images'),
     }
-except Exception as e:
-    logger.error(f"Error loading MySQL config: {e}")
-    sys.exit(1)
 
-def parse_config_file(config_file: str) -> ConfigParser:
-    """Parse config file handling list sections properly."""
-    config = ConfigParser()
+
+def _parse_reddit_config(config_path):
+    """Read config.ini skipping list-style sections that break ConfigParser."""
+    cfg = configparser.ConfigParser()
+    skip = {'scrape_list', 'user_scrape_list'}
+    lines, skipping = [], False
+    with open(config_path, encoding='utf-8') as f:
+        for line in f:
+            s = line.strip()
+            if s in {f'[{k}]' for k in skip}:
+                skipping = True
+                continue
+            if skipping and s.startswith('[') and s.endswith(']'):
+                skipping = False
+            if not skipping:
+                lines.append(line)
+    tmp = Path('_tmp_update_cfg.ini')
+    tmp.write_text(''.join(lines) + '\n', encoding='utf-8')
     try:
-        temp_config = []
-        skip_sections = ['scrape_list', 'user_scrape_list']
-        skipping = False
-        with open(config_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line_stripped = line.strip()
-                if line_stripped in [f'[{s}]' for s in skip_sections]:
-                    skipping = True
-                    continue
-                if skipping and line_stripped.startswith('[') and line_stripped.endswith(']'):
-                    skipping = False
-                elif skipping:
-                    continue
-                temp_config.append(line)
-        temp_config.append('\n')
-        temp_content = ''.join(temp_config)
-        temp_file = 'temp_config.ini'
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            f.write(temp_content)
-        try:
-            config.read(temp_file)
-        finally:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-    except Exception as e:
-        raise Exception(f"⚠️  Config parsing error: {e}")
+        cfg.read(str(tmp))
+    finally:
+        tmp.unlink(missing_ok=True)
+    return cfg
 
-    return config
 
-def get_reddit_instance(config_path):
-    """Initialize and return a Reddit API instance."""
-    config = parse_config_file(str(config_path))
-    client_id = config.get('reddit', 'client_id', fallback=None)
-    client_secret = config.get('reddit', 'client_secret', fallback=None)
-    user_agent = config.get('reddit', 'user_agent', fallback='reddit_image_downloader')
-    username = config.get('reddit', 'username', fallback=None)
-    password = config.get('reddit', 'password', fallback=None)
-    
-    if not client_id or not client_secret:
-        raise ValueError("Reddit API credentials (client_id, client_secret) are required")
-    
-    if username and password:
-        reddit = praw.Reddit(
-            client_id=client_id,
-            client_secret=client_secret,
-            user_agent=user_agent,
-            username=username,
-            password=password
-        )
-        # Test authentication
+def get_reddit(config_path):
+    cfg = _parse_reddit_config(config_path)
+    kwargs = dict(
+        client_id     = cfg.get('reddit', 'client_id'),
+        client_secret = cfg.get('reddit', 'client_secret'),
+        user_agent    = cfg.get('reddit', 'user_agent', fallback='reddit_sync/1.0'),
+    )
+    u = cfg.get('reddit', 'username', fallback=None)
+    p = cfg.get('reddit', 'password', fallback=None)
+    if u and p:
+        kwargs.update(username=u, password=p)
+    reddit = praw.Reddit(**kwargs)
+    if u and p:
         try:
-            user = reddit.user.me()
-            logger.success(f"✓ Authenticated as: u/{user}")
-        except Exception as e:
-            logger.warning(f"⚠️  Authentication test failed: {e}")
+            logger.success(f"Authenticated as u/{reddit.user.me()}")
+        except Exception:
+            logger.warning("Auth check failed, continuing")
     else:
-        reddit = praw.Reddit(
-            client_id=client_id,
-            client_secret=client_secret,
-            user_agent=user_agent
-        )
-        logger.info("✓ Connected with client credentials (read-only mode)")
-    
+        logger.info("Connected (read-only)")
     return reddit
 
-def extract_post_id(permalink, url=""):
-    """Extract Reddit post ID from permalink or URL."""
-    # Try to extract post id from permalink
-    if permalink:
-        match = re.search(r'/comments/([a-z0-9]+)', permalink)
-        if match:
-            return match.group(1)
-    # Try to extract from gallery or post url
-    if url:
-        match = re.search(r'reddit.com/(?:gallery|comments)/([a-z0-9]+)', url)
-        if match:
-            return match.group(1)
-    return None
 
-def fetch_comments(reddit, post_id, limit=100):
-    """Fetch comments from a Reddit post.
-    
-    Args:
-        reddit: PRAW Reddit instance
-        post_id: Reddit post ID
-        limit: Maximum number of comments to fetch (default: 100)
-    
-    Returns:
-        List of comment dictionaries
-    """
+# ── progress emitter ───────────────────────────────────────────────────────
+
+def emit(enabled, progress, total, message, **extra):
+    if enabled:
+        print(json.dumps({'progress': progress, 'total': total,
+                          'message': message, **extra}), flush=True)
+
+
+# ── core batch processor ───────────────────────────────────────────────────
+
+def _merge_comments(old_json, new_comments):
+    """Merge new comment list with old, preserving comments that disappeared."""
     try:
-        submission = reddit.submission(id=post_id)
-        submission.comments.replace_more(limit=0)
-        comments = []
-        for c in submission.comments[:limit]:
-            comments.append({
-                'author': str(c.author) if c.author else '[deleted]',
-                'body': c.body,
-                'score': c.score,
-                'created_utc': c.created_utc
-            })
-        return comments
-    except Exception as e:
-        logger.error(f"Error fetching comments for post {post_id}: {e}")
-        return []
+        old = json.loads(old_json) if old_json else []
+    except Exception:
+        old = []
 
-def update_comments(config_path, limit=10000, batch_size=100, delay=1.0):
-    """Update comments for the last N posts in the database.
-    
-    Args:
-        config_path: Path to config.ini file
-        limit: Number of posts to update (default: 10000)
-        batch_size: Number of posts to process before committing (default: 100)
-        delay: Delay between API calls in seconds (default: 1.0)
+    new_keys = {(c.get('author', ''), c.get('body', '')) for c in new_comments}
+    merged = []
+    for oc in old:
+        key = (oc.get('author', ''), oc.get('body', ''))
+        if key not in new_keys:
+            mc = dict(oc)
+            a = mc.get('author', '')
+            b = mc.get('body', '')
+            if a not in ('[deleted]', '[removed]') and not a.endswith(' (deleted)'):
+                mc['author'] = a + ' (deleted)'
+            if b not in ('[deleted]', '[removed]') and not b.endswith(' (deleted)'):
+                mc['body'] = b + ' (deleted)'
+            merged.append(mc)
+    merged.extend(new_comments)
+    return merged
+
+
+def process_batch(reddit, conn, rows):
     """
-    logger.info(f"🚀 Starting comment update for last {limit} posts...")
-    
-    reddit = get_reddit_instance(config_path)
-    conn = mysql.connector.connect(**mysql_config)
+    Process one batch of up to INFO_BATCH posts.
+    Returns (updated, deleted, skipped, errors).
+    """
+    valid = [(r['id'], r['reddit_id'], r['comments'])
+             for r in rows if r.get('reddit_id')]
+    if not valid:
+        return 0, 0, len(rows), 0
+
+    # Step 1 — batch status/score check via reddit.info()
+    id_map  = {rid: (db_id, comments) for db_id, rid, comments in valid}
+    fullnames = [f't3_{rid}' for rid in id_map]
+
+    found = {}
+    try:
+        for sub in reddit.info(fullnames=fullnames):
+            found[sub.id] = sub
+    except Exception as e:
+        logger.error(f"reddit.info error: {e}")
+        return 0, 0, 0, len(valid)
+
     cursor = conn.cursor()
-    
-    # Fetch posts ordered by ID descending (newest first)
-    logger.info(f"📥 Fetching {limit} posts from database...")
-    cursor.execute("""
-        SELECT id, reddit_id, permalink, comments 
-        FROM posts 
-        ORDER BY id DESC 
-        LIMIT %s
-    """, (limit,))
-    rows = cursor.fetchall()
-    total = len(rows)
-    
-    if total == 0:
-        logger.warning("❌ No posts found in database")
-        conn.close()
-        return
-    
-    logger.info(f"✓ Found {total} posts to update")
-    
-    updated = 0
-    skipped = 0
-    errors = 0
-    start_time = time.time()
-    
-    for idx, row in enumerate(rows, 1):
-        post_db_id, reddit_id, permalink, old_comments_json = row
-        
-        # Use reddit_id if available, otherwise try to extract from permalink
-        post_id = reddit_id
-        if not post_id:
-            post_id = extract_post_id(permalink, "")
-        
-        if not post_id:
-            logger.warning(f"[{idx}/{total}] ⚠️  Could not extract post id for entry {post_db_id}")
-            skipped += 1
+    updated = deleted = errors = 0
+
+    for rid, (db_id, old_comments_json) in id_map.items():
+        if rid not in found:
+            # Not returned by Reddit → deleted
+            cursor.execute(
+                "UPDATE posts SET is_deleted = 1 WHERE id = %s",
+                [db_id]
+            )
+            deleted += 1
             continue
-        
+
+        sub = found[rid]
+        score = getattr(sub, 'score', None)
+
+        # Step 2 — fetch comments for this post
         try:
-            # Fetch new comments from Reddit
-            logger.info(f"[{idx}/{total}] 🔍 Fetching comments for post {post_id} (db id {post_db_id})")
-            new_comments = fetch_comments(reddit, post_id, limit=100)
-            
-            # Parse old comments
-            try:
-                old_comments = json.loads(old_comments_json) if old_comments_json else []
-            except Exception:
-                old_comments = []
-            
-            # Merge comments: preserve deleted ones, add new ones
-            merged_comments = []
-            # Use (author, body) as identity for matching
-            new_comment_keys = set((c.get('author', ''), c.get('body', '')) for c in new_comments)
-            
-            # Mark old comments that are no longer present as deleted
-            for old in old_comments:
-                key = (old.get('author', ''), old.get('body', ''))
-                if key not in new_comment_keys:
-                    # Mark as deleted if not already marked
-                    deleted_comment = dict(old)
-                    author = deleted_comment.get('author', '')
-                    body = deleted_comment.get('body', '')
-                    
-                    if not author.endswith(' (deleted)') and author != '[deleted]':
-                        deleted_comment['author'] = author + ' (deleted)'
-                    if not body.endswith(' (deleted)'):
-                        deleted_comment['body'] = body + ' (deleted)'
-                    
-                    merged_comments.append(deleted_comment)
-            
-            # Add new comments
-            merged_comments.extend(new_comments)
-            
-            # Update database
-            comments_json = json.dumps(merged_comments)
-            cursor.execute("UPDATE posts SET comments = %s WHERE id = %s", (comments_json, post_db_id))
-            updated += 1
-            
-            # Commit in batches
-            if idx % batch_size == 0:
-                conn.commit()
-                logger.info(f"💾 Committed batch: {idx}/{total} processed")
-            
-            # Rate limiting delay
-            if delay > 0 and idx < total:
-                time.sleep(delay)
-            
-            # Progress update every 50 posts
-            if idx % 50 == 0:
-                elapsed = time.time() - start_time
-                rate = idx / elapsed if elapsed > 0 else 0
-                remaining = (total - idx) / rate if rate > 0 else 0
-                logger.info(f"📊 Progress: {idx}/{total} ({idx*100//total}%) | "
-                          f"Updated: {updated} | Skipped: {skipped} | Errors: {errors} | "
-                          f"Rate: {rate:.1f}/s | ETA: {remaining:.0f}s")
-        
+            sub.comments.replace_more(limit=0)
+            new_comments = [
+                {
+                    'author':      str(c.author) if c.author else '[deleted]',
+                    'body':        c.body,
+                    'score':       c.score,
+                    'created_utc': c.created_utc,
+                }
+                for c in sub.comments[:COMMENT_LIMIT]
+            ]
         except Exception as e:
-            logger.error(f"[{idx}/{total}] ❌ Error processing post {post_db_id}: {e}")
+            logger.error(f"Comment fetch error for {rid}: {e}")
+            # Still update score and clear deleted flag
+            if score is not None:
+                cursor.execute(
+                    "UPDATE posts SET score=%s, is_deleted=0 WHERE id=%s",
+                    [score, db_id]
+                )
             errors += 1
             continue
-    
-    # Final commit
+
+        merged = _merge_comments(old_comments_json, new_comments)
+
+        if score is not None:
+            cursor.execute(
+                "UPDATE posts SET comments=%s, score=%s, is_deleted=0 WHERE id=%s",
+                [json.dumps(merged), score, db_id]
+            )
+        else:
+            cursor.execute(
+                "UPDATE posts SET comments=%s, is_deleted=0 WHERE id=%s",
+                [json.dumps(merged), db_id]
+            )
+        updated += 1
+
     conn.commit()
+    cursor.close()
+    return updated, deleted, len(rows) - len(valid), errors
+
+
+# ── main entry point ───────────────────────────────────────────────────────
+
+def run(config_path, mode='weekly', progress_json=False):
+    limit = MODE_LIMITS.get(mode)
+    mysql_cfg = _load_mysql(config_path)
+    reddit    = get_reddit(config_path)
+
+    conn   = mysql.connector.connect(**mysql_cfg)
+    cursor = conn.cursor(dictionary=True)
+
+    if limit:
+        cursor.execute(
+            "SELECT id, reddit_id, comments FROM posts "
+            "ORDER BY created_utc DESC LIMIT %s",
+            [limit]
+        )
+    else:
+        cursor.execute(
+            "SELECT id, reddit_id, comments FROM posts ORDER BY created_utc DESC"
+        )
+    rows = cursor.fetchall()
+    cursor.close()
+
+    total = len(rows)
+    if total == 0:
+        logger.warning("No posts found")
+        emit(progress_json, 0, 0, "No posts found")
+        conn.close()
+        return
+
+    logger.info(f"Mode={mode}  posts={total}")
+    emit(progress_json, 0, total, f"Starting {mode} update for {total} posts…")
+
+    done = updated_total = deleted_total = error_total = 0
+    start = time.time()
+
+    for i in range(0, total, INFO_BATCH):
+        batch = rows[i:i + INFO_BATCH]
+        u, d, _s, e = process_batch(reddit, conn, batch)
+        done          += len(batch)
+        updated_total += u
+        deleted_total += d
+        error_total   += e
+
+        elapsed = time.time() - start
+        rate    = done / elapsed if elapsed else 0
+        eta     = int((total - done) / rate) if rate else 0
+        msg = (f"[{done}/{total}] updated={updated_total} "
+               f"deleted={deleted_total} errors={error_total} "
+               f"eta={eta}s")
+        logger.info(msg)
+        emit(progress_json, done, total, msg,
+             updated=updated_total, deleted=deleted_total, errors=error_total)
+
     conn.close()
-    
-    elapsed = time.time() - start_time
-    logger.success(f"\n✅ Comment update complete!")
-    logger.info(f"📊 Summary:")
-    logger.info(f"   Total posts: {total}")
-    logger.info(f"   Updated: {updated}")
-    logger.info(f"   Skipped: {skipped}")
-    logger.info(f"   Errors: {errors}")
-    logger.info(f"   Time elapsed: {elapsed:.1f}s")
-    logger.info(f"   Average rate: {total/elapsed:.2f} posts/s" if elapsed > 0 else "")
+    summary = (f"Done — {updated_total} updated, "
+               f"{deleted_total} marked deleted, {error_total} errors.")
+    logger.success(summary)
+    emit(progress_json, total, total, summary,
+         updated=updated_total, deleted=deleted_total, errors=error_total)
+
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description='Update comments for posts in the database',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+    ap = argparse.ArgumentParser(
+        description='Sync Reddit post comments, scores, and deletion status',
         epilog="""
-Examples:
-  %(prog)s                    # Update last 10000 posts (default)
-  %(prog)s --limit 5000       # Update last 5000 posts
-  %(prog)s --limit 20000      # Update last 20000 posts
-  %(prog)s --delay 0.5        # Use 0.5s delay between requests
-  %(prog)s --batch-size 50    # Commit every 50 posts
+Modes:
+  weekly   — last 10 000 posts (run weekly via cron)
+  monthly  — last 100 000 posts (run monthly via cron)
+  full     — all posts (initial / on-demand run)
         """
     )
-    parser.add_argument(
-        '--limit',
-        type=int,
-        default=10000,
-        help='Number of posts to update (default: 10000)'
-    )
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=100,
-        help='Number of posts to process before committing (default: 100)'
-    )
-    parser.add_argument(
-        '--delay',
-        type=float,
-        default=1.0,
-        help='Delay between API calls in seconds (default: 1.0)'
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='config.ini',
-        help='Path to config.ini file (default: config.ini)'
-    )
-    
-    args = parser.parse_args()
-    
-    config_path = Path(args.config)
-    if not config_path.exists():
-        logger.error(f"❌ Config file not found: {config_path}")
-        logger.info("   Run with --setup to create a default config file.")
+    ap.add_argument('--mode', choices=['weekly', 'monthly', 'full'],
+                    default='weekly',
+                    help='Update scope (default: weekly = last 10k posts)')
+    ap.add_argument('--config', default='config.ini',
+                    help='Path to config.ini (default: config.ini)')
+    ap.add_argument('--progress-json', action='store_true',
+                    help='Emit JSON progress lines for web UI consumption')
+    args = ap.parse_args()
+
+    cfg = Path(args.config)
+    if not cfg.exists():
+        logger.error(f"Config not found: {cfg}")
         sys.exit(1)
-    
+
     try:
-        update_comments(
-            config_path=config_path,
-            limit=args.limit,
-            batch_size=args.batch_size,
-            delay=args.delay
-        )
+        run(str(cfg), mode=args.mode, progress_json=args.progress_json)
     except KeyboardInterrupt:
-        logger.warning("\n⏹️  Update cancelled by user")
+        logger.warning("Cancelled")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        sys.exit(1)
+        logger.error(f"Fatal: {e}")
+        raise
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
-

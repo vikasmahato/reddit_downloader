@@ -187,6 +187,22 @@ def _ensure_favourite_column():
 
 _ensure_favourite_column()
 
+
+def _ensure_posts_deleted_column():
+    """Add is_deleted column to posts table if it doesn't exist."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "ALTER TABLE posts ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # already exists
+
+_ensure_posts_deleted_column()
+
 # Add Python built-ins to template context
 @app.context_processor
 def inject_template_globals():
@@ -2464,6 +2480,210 @@ def api_explicit_dismiss():
         flagged = [f for f in flagged if f['file_path'] not in paths_set]
         _EXPLICIT_FLAGGED_FILE.write_text(json.dumps(flagged, indent=2))
         return jsonify({'success': True, 'remaining': len(flagged)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UPDATE POSTS (comments + deletion status)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_update_posts_state: dict = {
+    'running': False, 'message': '', 'progress': 0, 'total': 0,
+    'error': None, 'logs': [], 'updated': 0, 'deleted': 0, 'errors': 0,
+}
+_update_posts_lock = threading.Lock()
+_update_posts_proc = None
+
+
+def _run_update_posts_job(mode: str):
+    import sys as _sys
+    script = Path(__file__).parent / 'utils' / 'update_comments_batch.py'
+    cmd = [_sys.executable, str(script),
+           '--mode', mode, '--progress-json', '--config', 'config.ini']
+
+    global _update_posts_proc
+
+    def _set_proc(p):
+        global _update_posts_proc
+        with _update_posts_lock:
+            _update_posts_proc = p
+
+    def _on_complete(state, lock):
+        with lock:
+            for line in reversed(state['logs']):
+                try:
+                    ev = json.loads(line)
+                    if 'updated' in ev:
+                        state['updated']  = ev['updated']
+                        state['deleted']  = ev.get('deleted', 0)
+                        state['errors']   = ev.get('errors', 0)
+                        break
+                except Exception:
+                    pass
+
+    with _update_posts_lock:
+        _update_posts_state.update({
+            'running': True, 'message': 'Starting…', 'progress': 0, 'total': 0,
+            'error': None, 'logs': [], 'updated': 0, 'deleted': 0, 'errors': 0,
+        })
+
+    _run_subprocess_with_state(cmd, _update_posts_state, _update_posts_lock,
+                               _set_proc, _on_complete)
+
+    with _update_posts_lock:
+        _update_posts_state['running'] = False
+
+
+@app.route('/update-posts')
+def update_posts_page():
+    return render_template('update_posts.html')
+
+
+@app.route('/api/update-posts/start', methods=['POST'])
+def api_update_posts_start():
+    data = request.get_json() or {}
+    mode = data.get('mode', 'weekly')
+    if mode not in ('weekly', 'monthly', 'full'):
+        return jsonify({'error': 'Invalid mode'}), 400
+    with _update_posts_lock:
+        if _update_posts_state['running']:
+            return jsonify({'error': 'Already running'}), 400
+    threading.Thread(target=_run_update_posts_job, args=(mode,), daemon=True).start()
+    return jsonify({'success': True, 'mode': mode})
+
+
+@app.route('/api/update-posts/status')
+def api_update_posts_status():
+    with _update_posts_lock:
+        state = dict(_update_posts_state)
+        state.pop('logs', None)
+    return jsonify(state)
+
+
+@app.route('/api/update-posts/logs')
+def api_update_posts_logs():
+    offset = int(request.args.get('offset', 0))
+    with _update_posts_lock:
+        logs = _update_posts_state['logs'][offset:]
+    return jsonify({'logs': logs, 'offset': offset + len(logs)})
+
+
+@app.route('/api/update-posts/stop', methods=['POST'])
+def api_update_posts_stop():
+    global _update_posts_proc
+    with _update_posts_lock:
+        proc = _update_posts_proc
+    if proc:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return jsonify({'success': True})
+
+
+# ── Reddit-deleted posts page ──────────────────────────────────────────────
+
+@app.route('/reddit-deleted')
+def reddit_deleted_page():
+    page     = int(request.args.get('page', 1))
+    per_page = 50
+    offset   = (page - 1) * per_page
+    subreddit = request.args.get('subreddit', '')
+    search    = request.args.get('search', '')
+
+    try:
+        conn   = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        where_parts = ["p.is_deleted = 1"]
+        params = []
+        if subreddit:
+            where_parts.append("p.subreddit = %s")
+            params.append(subreddit)
+        if search:
+            where_parts.append("(p.title LIKE %s OR p.author LIKE %s)")
+            params.extend([f'%{search}%', f'%{search}%'])
+        where = ' AND '.join(where_parts)
+
+        cursor.execute(f"SELECT COUNT(*) AS total FROM posts p WHERE {where}", params)
+        total = cursor.fetchone()['total']
+
+        cursor.execute(f"""
+            SELECT p.id AS post_id, p.title, p.author, p.subreddit,
+                   p.permalink, p.created_utc, p.score, p.flair,
+                   i.id AS image_id, i.file_path, i.filename, i.file_size
+            FROM (
+                SELECT id FROM posts p WHERE {where}
+                ORDER BY created_utc DESC LIMIT %s OFFSET %s
+            ) paged
+            JOIN posts p ON p.id = paged.id
+            LEFT JOIN post_images pi ON pi.post_id = p.id
+            LEFT JOIN images i ON i.id = pi.image_id
+            ORDER BY p.created_utc DESC, i.id ASC
+        """, params + [per_page, offset])
+        rows = cursor.fetchall()
+
+        # Subreddits for filter dropdown
+        cursor.execute(
+            "SELECT DISTINCT subreddit FROM posts WHERE is_deleted=1 "
+            "ORDER BY subreddit LIMIT 200"
+        )
+        subreddits = [r['subreddit'] for r in cursor.fetchall() if r['subreddit']]
+        conn.close()
+
+        # Group into posts
+        posts = {}
+        for row in rows:
+            pid = row['post_id']
+            if pid not in posts:
+                posts[pid] = {
+                    'post_id': pid, 'title': row['title'], 'author': row['author'],
+                    'subreddit': row['subreddit'], 'permalink': row['permalink'],
+                    'created_utc': row['created_utc'], 'score': row['score'],
+                    'flair': row.get('flair'), 'post_images': [],
+                }
+            if row.get('image_id'):
+                img = {'id': row['image_id'], 'file_path': row['file_path'],
+                       'filename': row['filename'], 'file_size': row['file_size']}
+                if img['file_path']:
+                    wp = ui_handler.make_web_path(img['file_path'])
+                    if wp:
+                        img['web_path'] = wp
+                        img['thumb_url'] = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
+                posts[pid]['post_images'].append(img)
+
+        post_list = list(posts.values())
+        for p in post_list:
+            if p['post_images']:
+                first = p['post_images'][0]
+                p['web_path']   = first.get('web_path')
+                p['thumb_url']  = first.get('thumb_url')
+                p['filename']   = first.get('filename')
+
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return render_template('reddit_deleted.html',
+                               posts=post_list, total=total,
+                               current_page=page, total_pages=total_pages,
+                               subreddits=subreddits,
+                               filter_subreddit=subreddit, search=search)
+    except Exception as e:
+        print(f"Reddit deleted page error: {e}")
+        return render_template('reddit_deleted.html',
+                               posts=[], total=0, current_page=1, total_pages=1,
+                               subreddits=[], filter_subreddit='', search='')
+
+
+@app.route('/api/posts/<int:post_id>/restore', methods=['POST'])
+def restore_post(post_id):
+    try:
+        conn   = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE posts SET is_deleted = 0 WHERE id = %s", [post_id])
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
