@@ -407,7 +407,6 @@ async function toggleFav(imageId, btn) {
 }
 
 async function deleteFile(imageId, btn) {
-    if (!confirm('Delete this file from disk?')) return;
     try {
         const res = await fetch(`/api/files/delete/${imageId}`, { method: 'DELETE' });
         const data = await res.json();
