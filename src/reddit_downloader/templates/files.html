@@ -314,16 +314,18 @@
          id="fc-{{ f.id }}" data-id="{{ f.id }}">
 
         <!-- Thumbnail -->
-        {% if f.get('is_video') %}
-            <div class="file-thumb-placeholder"><i class="fas fa-film"></i></div>
-        {% elif f.get('thumb_url') %}
+        {% if f.get('thumb_url') %}
             <img class="file-thumb"
                  src="{{ f.thumb_url }}"
-                 onerror="this.onerror=null;{% if f.get('web_path') %}this.src='/reddit_downloads/{{ f.web_path }}'{% else %}this.style.display='none'{% endif %}"
+                 data-fallback="{{ ('/reddit_downloads/' + f.web_path) if (f.get('is_image') and f.get('web_path')) else '' }}"
+                 data-is-video="{{ 'true' if f.get('is_video') else '' }}"
+                 onerror="thumbError(this)"
                  alt="{{ f.filename }}" loading="lazy">
         {% elif f.get('web_path') and f.get('is_image') %}
             <img class="file-thumb" src="/reddit_downloads/{{ f.web_path }}"
                  alt="{{ f.filename }}" loading="lazy">
+        {% elif f.get('is_video') %}
+            <div class="file-thumb-placeholder"><i class="fas fa-film"></i></div>
         {% else %}
             <div class="file-thumb-placeholder"><i class="fas fa-file"></i></div>
         {% endif %}
@@ -427,6 +429,22 @@
 "></div>
 
 <script>
+// ── Thumbnail fallback ──────────────────────────────────────
+function thumbError(img) {
+    img.onerror = null;
+    const fallback = img.dataset.fallback;
+    if (fallback) {
+        img.src = fallback;
+    } else {
+        // No full-image fallback (video with no thumb yet) — show icon placeholder
+        const icon = img.dataset.isVideo ? 'fa-film' : 'fa-file';
+        const ph = document.createElement('div');
+        ph.className = 'file-thumb-placeholder';
+        ph.innerHTML = `<i class="fas ${icon}"></i>`;
+        img.replaceWith(ph);
+    }
+}
+
 // ── State ───────────────────────────────────────────────────
 let selectMode = false;
 const selected = new Set();
