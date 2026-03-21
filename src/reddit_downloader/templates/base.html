@@ -471,7 +471,7 @@
         </a>
     </div>
     <div class="nav-counter">
-        <strong id="image-count">{{ stats.total_images or 0 }}</strong>
+        <strong id="image-count">{{ stats.total_images if stats is defined else 0 }}</strong>
         <span>images</span>
     </div>
 </nav>
