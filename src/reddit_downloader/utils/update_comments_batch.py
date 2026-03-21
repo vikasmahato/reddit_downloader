@@ -93,6 +93,7 @@ def get_reddit(config_path):
         client_id     = cfg.get('reddit', 'client_id'),
         client_secret = cfg.get('reddit', 'client_secret'),
         user_agent    = cfg.get('reddit', 'user_agent', fallback='reddit_sync/1.0'),
+        requestor_kwargs = {'timeout': 15},
     )
     u = cfg.get('reddit', 'username', fallback=None)
     p = cfg.get('reddit', 'password', fallback=None)
@@ -143,10 +144,13 @@ def _merge_comments(old_json, new_comments):
     return merged
 
 
-def process_batch(reddit, conn, rows):
+def process_batch(reddit, conn, rows, skip_comments=False):
     """
     Process one batch of up to INFO_BATCH posts.
     Returns (updated, deleted, skipped, errors).
+
+    skip_comments=True — only update score + is_deleted (100x faster,
+    no per-post API call); used by the web UI sync.
     """
     valid = [(r['id'], r['reddit_id'], r['comments'])
              for r in rows if r.get('reddit_id')]
@@ -154,7 +158,7 @@ def process_batch(reddit, conn, rows):
         return 0, 0, len(rows), 0
 
     # Step 1 — batch status/score check via reddit.info()
-    id_map  = {rid: (db_id, comments) for db_id, rid, comments in valid}
+    id_map    = {rid: (db_id, comments) for db_id, rid, comments in valid}
     fullnames = [f't3_{rid}' for rid in id_map]
 
     found = {}
@@ -170,18 +174,26 @@ def process_batch(reddit, conn, rows):
 
     for rid, (db_id, old_comments_json) in id_map.items():
         if rid not in found:
-            # Not returned by Reddit → deleted
-            cursor.execute(
-                "UPDATE posts SET is_deleted = 1 WHERE id = %s",
-                [db_id]
-            )
+            cursor.execute("UPDATE posts SET is_deleted = 1 WHERE id = %s", [db_id])
             deleted += 1
             continue
 
         sub = found[rid]
         score = getattr(sub, 'score', None)
 
-        # Step 2 — fetch comments for this post
+        if skip_comments:
+            # Fast path — score + deletion only, no per-post API call
+            if score is not None:
+                cursor.execute(
+                    "UPDATE posts SET score=%s, is_deleted=0 WHERE id=%s",
+                    [score, db_id]
+                )
+            else:
+                cursor.execute("UPDATE posts SET is_deleted=0 WHERE id=%s", [db_id])
+            updated += 1
+            continue
+
+        # Step 2 — fetch comments for this post (one API call each)
         try:
             sub.comments.replace_more(limit=0)
             new_comments = [
@@ -195,7 +207,6 @@ def process_batch(reddit, conn, rows):
             ]
         except Exception as e:
             logger.error(f"Comment fetch error for {rid}: {e}")
-            # Still update score and clear deleted flag
             if score is not None:
                 cursor.execute(
                     "UPDATE posts SET score=%s, is_deleted=0 WHERE id=%s",
@@ -205,7 +216,6 @@ def process_batch(reddit, conn, rows):
             continue
 
         merged = _merge_comments(old_comments_json, new_comments)
-
         if score is not None:
             cursor.execute(
                 "UPDATE posts SET comments=%s, score=%s, is_deleted=0 WHERE id=%s",
@@ -225,7 +235,7 @@ def process_batch(reddit, conn, rows):
 
 # ── main entry point ───────────────────────────────────────────────────────
 
-def run(config_path, mode='weekly', progress_json=False):
+def run(config_path, mode='weekly', progress_json=False, skip_comments=False):
     limit = MODE_LIMITS.get(mode)
     mysql_cfg = _load_mysql(config_path)
     reddit    = get_reddit(config_path)
@@ -253,15 +263,22 @@ def run(config_path, mode='weekly', progress_json=False):
         conn.close()
         return
 
-    logger.info(f"Mode={mode}  posts={total}")
-    emit(progress_json, 0, total, f"Starting {mode} update for {total} posts…")
+    mode_label = f"{mode} (scores+deletions only)" if skip_comments else mode
+    logger.info(f"Mode={mode_label}  posts={total}")
+    emit(progress_json, 0, total, f"Starting {mode_label} update for {total} posts…")
 
     done = updated_total = deleted_total = error_total = 0
     start = time.time()
 
     for i in range(0, total, INFO_BATCH):
         batch = rows[i:i + INFO_BATCH]
-        u, d, _s, e = process_batch(reddit, conn, batch)
+
+        # Emit a "checking batch…" line immediately so the UI doesn't look stuck
+        emit(progress_json, done, total,
+             f"Checking posts {i+1}–{min(i+INFO_BATCH, total)} of {total}…",
+             updated=updated_total, deleted=deleted_total, errors=error_total)
+
+        u, d, _s, e = process_batch(reddit, conn, batch, skip_comments=skip_comments)
         done          += len(batch)
         updated_total += u
         deleted_total += d
@@ -302,6 +319,8 @@ Modes:
                     help='Path to config.ini (default: config.ini)')
     ap.add_argument('--progress-json', action='store_true',
                     help='Emit JSON progress lines for web UI consumption')
+    ap.add_argument('--skip-comments', action='store_true',
+                    help='Only update score + is_deleted, skip per-post comment fetch (much faster)')
     args = ap.parse_args()
 
     cfg = Path(args.config)
@@ -310,7 +329,8 @@ Modes:
         sys.exit(1)
 
     try:
-        run(str(cfg), mode=args.mode, progress_json=args.progress_json)
+        run(str(cfg), mode=args.mode, progress_json=args.progress_json,
+            skip_comments=args.skip_comments)
     except KeyboardInterrupt:
         logger.warning("Cancelled")
         sys.exit(1)

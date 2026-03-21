@@ -2500,7 +2500,7 @@ def _run_update_posts_job(mode: str):
     import sys as _sys
     script = Path(__file__).parent / 'utils' / 'update_comments_batch.py'
     cmd = [_sys.executable, str(script),
-           '--mode', mode, '--progress-json', '--config', 'config.ini']
+           '--mode', mode, '--progress-json', '--skip-comments', '--config', 'config.ini']
 
     global _update_posts_proc
 
