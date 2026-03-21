@@ -2806,7 +2806,7 @@ def file_browser():
     file_type = request.args.get('type', 'all')   # all | image | video
     sort      = request.args.get('sort', 'size_desc')
     page      = int(request.args.get('page', 1))
-    per_page  = 100
+    per_page  = 10
     offset    = (page - 1) * per_page
 
     sort_map = {
