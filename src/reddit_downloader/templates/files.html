@@ -216,7 +216,10 @@
     display: flex; align-items: center; justify-content: center; gap: 4px;
 }
 .file-action-btn:hover { background: var(--surface-3); color: var(--text); }
-.file-action-btn.delete:hover { background: rgba(239,68,68,0.12); border-color: var(--danger); color: var(--danger); }
+.file-action-btn.delete:hover   { background: rgba(239,68,68,0.12);  border-color: var(--danger); color: var(--danger); }
+.file-action-btn.compress-video { color: #a855f7; border-color: rgba(168,85,247,0.4); }
+.file-action-btn.compress-video:hover { background: rgba(168,85,247,0.12); border-color: #a855f7; color: #a855f7; }
+.file-action-btn.compress-video:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── PAGINATION ───────────────────────────────────────────── */
 .pager { display: flex; gap: 4px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
@@ -379,6 +382,12 @@
             <a class="file-action-btn" href="{{ url_for('image_details', post_id=f.post_id) }}">
                 <i class="fas fa-info-circle"></i> Post
             </a>
+            {% endif %}
+            {% if f.get('is_video') %}
+            <button class="file-action-btn compress-video" id="cvbtn-{{ f.id }}"
+                    onclick="compressVideo({{ f.id }}, this)" title="Compress video with ffmpeg">
+                <i class="fas fa-compress-alt"></i>
+            </button>
             {% endif %}
             <button class="file-action-btn delete" onclick="deleteFile({{ f.id }}, this)">
                 <i class="fas fa-trash"></i>
@@ -604,6 +613,49 @@ async function toggleFav(imageId, btn) {
         card.classList.toggle('is-favourite', data.is_favourite);
         showToast(data.is_favourite ? 'Added to favourites' : 'Removed from favourites');
     } catch (e) { showToast('Error', false); }
+}
+
+// ── Video compression ────────────────────────────────────────
+async function compressVideo(imageId, btn) {
+    btn.disabled = true;
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    try {
+        const res = await fetch(`/api/files/compress-video/${imageId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({crf: 28})
+        });
+        const d = await res.json();
+        if (d.error) { throw new Error(d.error); }
+    } catch (e) {
+        showToast('Failed to start: ' + e.message, false);
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
+        return;
+    }
+
+    const timer = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/files/compress-video/${imageId}/status`);
+            const d = await res.json();
+            if (!d.done) return;
+            clearInterval(timer);
+            if (d.error) {
+                showToast('Compression failed: ' + d.error, false);
+                btn.innerHTML = origHtml;
+                btn.disabled = false;
+            } else {
+                const saved = d.saved_bytes > 0 ? ' (saved ' + formatBytes(d.saved_bytes) + ')' : '';
+                showToast('Compressed!' + saved);
+                btn.innerHTML = '<i class="fas fa-check"></i>';
+                if (d.web_path) {
+                    window.open('/reddit_downloads/' + d.web_path, '_blank');
+                }
+            }
+        } catch (_) {}
+    }, 1500);
 }
 
 // ── Delete ──────────────────────────────────────────────────

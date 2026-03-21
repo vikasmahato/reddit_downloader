@@ -2696,6 +2696,106 @@ _batch_compress_state: dict = {'running': False, 'total': 0, 'done': 0, 'errors'
                                 'saved_bytes': 0, 'message': ''}
 _batch_compress_lock = threading.Lock()
 
+# ── Per-file video compression ─────────────────────────────────────────────
+
+_video_compress_jobs: dict = {}   # image_id -> {running, done, error, web_path, saved_bytes}
+_video_compress_lock = threading.Lock()
+
+
+def _run_video_compression(image_id: int, crf: int):
+    import subprocess
+
+    with _video_compress_lock:
+        _video_compress_jobs[image_id] = {
+            'running': True, 'done': False, 'error': None,
+            'web_path': None, 'saved_bytes': 0
+        }
+
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT file_path, file_size FROM images WHERE id = %s", [image_id])
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row or not row['file_path']:
+            raise ValueError("File not found in DB")
+
+        file_path = Path(row['file_path'])
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        if file_path.suffix.lower() not in _VIDEO_EXTS:
+            raise ValueError(f"Not a video: {file_path.suffix}")
+
+        original_size = file_path.stat().st_size
+        tmp_path = file_path.with_suffix('.compressed_tmp.mp4')
+        out_path = file_path.with_suffix('.mp4')
+
+        cmd = [
+            'ffmpeg', '-y', '-i', str(file_path),
+            '-c:v', 'libx264', '-crf', str(crf),
+            '-preset', 'medium',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            str(tmp_path)
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        if result.returncode != 0:
+            tmp_path.unlink(missing_ok=True)
+            raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()[-500:]}")
+
+        if file_path != out_path:
+            file_path.unlink(missing_ok=True)
+        tmp_path.rename(out_path)
+
+        new_size = out_path.stat().st_size
+        saved = max(0, original_size - new_size)
+
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE images SET file_size = %s, file_path = %s WHERE id = %s",
+            [new_size, str(out_path), image_id]
+        )
+        conn.commit()
+        conn.close()
+
+        wp = ui_handler.make_web_path(str(out_path))
+        with _video_compress_lock:
+            _video_compress_jobs[image_id].update({
+                'running': False, 'done': True,
+                'web_path': wp, 'saved_bytes': saved
+            })
+
+    except Exception as e:
+        print(f"Video compress error for {image_id}: {e}")
+        with _video_compress_lock:
+            _video_compress_jobs[image_id].update({
+                'running': False, 'done': True, 'error': str(e)
+            })
+
+
+@app.route('/api/files/compress-video/<int:image_id>', methods=['POST'])
+def compress_video_file(image_id):
+    data = request.get_json() or {}
+    crf = max(18, min(51, int(data.get('crf', 28))))
+    with _video_compress_lock:
+        job = _video_compress_jobs.get(image_id)
+        if job and job.get('running'):
+            return jsonify({'error': 'Already compressing'}), 400
+    threading.Thread(target=_run_video_compression, args=(image_id, crf), daemon=True).start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/files/compress-video/<int:image_id>/status')
+def compress_video_status(image_id):
+    with _video_compress_lock:
+        job = _video_compress_jobs.get(image_id)
+    if not job:
+        return jsonify({'running': False, 'done': False})
+    return jsonify(job)
+
 
 def _run_batch_compression(image_ids: list, quality: int):
     from PIL import Image as PILImage
