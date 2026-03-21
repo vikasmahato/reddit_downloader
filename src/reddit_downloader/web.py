@@ -2961,15 +2961,15 @@ def file_browser():
         conn.close()
 
         for f in files:
+            ext = Path(f['filename']).suffix.lower() if f.get('filename') else ''
+            f['is_video'] = ext in _VIDEO_EXTS
+            f['is_image'] = ext in _IMAGE_EXTS
             if f.get('file_path'):
                 wp = ui_handler.make_web_path(f['file_path'])
                 if wp:
                     f['web_path'] = wp
                     # Always emit a thumb_url; browser onerror will fall back to full image
                     f['thumb_url'] = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
-                ext = Path(f['file_path']).suffix.lower()
-                f['is_video'] = ext in _VIDEO_EXTS
-                f['is_image'] = ext in _IMAGE_EXTS
 
         total_pages = max(1, (total + per_page - 1) // per_page)
         return render_template('files.html',
