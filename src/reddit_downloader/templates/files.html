@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+{% block title %}Files — Reddit Vault{% endblock %}
+
+{% block content %}
+<style>
+/* ── FILES PAGE ───────────────────────────────────────────── */
+.files-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.files-bar .bar-title {
+    font-family: var(--font-head);
+    font-size: 1rem;
+    font-weight: 700;
+    color: #efefef;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+.type-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.type-btn:hover { background: var(--surface-3); color: var(--text); }
+.type-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.sort-select {
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    border-radius: var(--r);
+    outline: none;
+    margin-left: auto;
+}
+.sort-select:focus { border-color: var(--accent); }
+
+.total-badge {
+    margin-left: 4px;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+}
+.total-badge span { color: var(--accent); font-weight: 700; }
+
+/* ── FILE GRID ────────────────────────────────────────────── */
+.files-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 10px;
+}
+
+.file-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.15s;
+    position: relative;
+}
+.file-card:hover { border-color: var(--border-2); }
+.file-card.is-favourite { border-color: #e11d48 !important; }
+
+.file-thumb {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    background: var(--surface-2);
+    display: block;
+}
+.file-thumb-placeholder {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 2rem;
+}
+
+.file-type-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 2px;
+    font-weight: 600;
+}
+.badge-image { background: rgba(96,165,250,0.85); color: #fff; }
+.badge-video { background: rgba(168,85,247,0.85); color: #fff; }
+
+.fav-overlay {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+}
+.fav-btn {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,0.6);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color 0.15s, background 0.15s;
+    backdrop-filter: blur(4px);
+}
+.fav-btn:hover { background: rgba(0,0,0,0.85); color: #e11d48; }
+.fav-btn.active { color: #e11d48; }
+
+.file-info {
+    padding: 8px 10px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.file-name {
+    font-size: 0.68rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+.file-meta {
+    font-size: 0.63rem;
+    color: var(--text-dim);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.file-size { color: var(--info); font-weight: 600; }
+
+.file-post-link {
+    font-size: 0.62rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-decoration: none;
+}
+.file-post-link:hover { color: var(--accent); }
+
+.file-actions {
+    display: flex;
+    gap: 6px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.file-action-btn {
+    flex: 1;
+    padding: 4px 0;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.63rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    text-decoration: none;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.file-action-btn:hover { background: var(--surface-3); color: var(--text); }
+.file-action-btn.delete:hover { background: rgba(239,68,68,0.12); border-color: var(--danger); color: var(--danger); }
+
+/* ── PAGINATION ───────────────────────────────────────────── */
+.pager { display: flex; gap: 4px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+.pager a, .pager span {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 32px; height: 32px; padding: 0 8px;
+    border: 1px solid var(--border-2);
+    border-radius: var(--r);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    background: var(--surface);
+    transition: background 0.15s, color 0.15s;
+}
+.pager a:hover { background: var(--surface-3); color: var(--text); }
+.pager .current { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pager .disabled { opacity: 0.3; pointer-events: none; }
+
+/* ── EMPTY STATE ──────────────────────────────────────────── */
+.empty-state {
+    text-align: center; padding: 60px 20px;
+    color: var(--text-dim);
+}
+.empty-state i { font-size: 3rem; margin-bottom: 16px; opacity: 0.3; display: block; }
+</style>
+
+<!-- Filter / sort bar -->
+<div class="files-bar">
+    <span class="bar-title"><i class="fas fa-folder-open" style="color:var(--accent)"></i> Files</span>
+
+    <a href="{{ url_for('file_browser', type='all', sort=sort) }}"
+       class="type-btn {% if file_type == 'all' %}active{% endif %}">
+        <i class="fas fa-th-large"></i> All
+    </a>
+    <a href="{{ url_for('file_browser', type='image', sort=sort) }}"
+       class="type-btn {% if file_type == 'image' %}active{% endif %}">
+        <i class="fas fa-image"></i> Images
+    </a>
+    <a href="{{ url_for('file_browser', type='video', sort=sort) }}"
+       class="type-btn {% if file_type == 'video' %}active{% endif %}">
+        <i class="fas fa-film"></i> Videos
+    </a>
+
+    <span class="total-badge">— <span>{{ total | default(0) }}</span> files</span>
+
+    <select class="sort-select" onchange="applySort(this.value)">
+        <option value="size_desc"  {% if sort == 'size_desc'  %}selected{% endif %}>Size ↓</option>
+        <option value="size_asc"   {% if sort == 'size_asc'   %}selected{% endif %}>Size ↑</option>
+        <option value="name_asc"   {% if sort == 'name_asc'   %}selected{% endif %}>Name A→Z</option>
+        <option value="name_desc"  {% if sort == 'name_desc'  %}selected{% endif %}>Name Z→A</option>
+        <option value="date_desc"  {% if sort == 'date_desc'  %}selected{% endif %}>Date ↓</option>
+        <option value="date_asc"   {% if sort == 'date_asc'   %}selected{% endif %}>Date ↑</option>
+    </select>
+</div>
+
+<!-- File grid -->
+{% if files %}
+<div class="files-grid" id="filesGrid">
+    {% for f in files %}
+    <div class="file-card {% if f.is_favourite %}is-favourite{% endif %}" id="fc-{{ f.id }}">
+
+        <!-- Thumbnail / preview -->
+        {% if f.get('thumb_path') %}
+            <img class="file-thumb" src="/thumbs/{{ f.thumb_path }}"
+                 alt="{{ f.filename }}" loading="lazy">
+        {% elif f.get('web_path') and f.get('is_image') %}
+            <img class="file-thumb" data-src="/reddit_downloads/{{ f.web_path }}"
+                 src="/reddit_downloads/{{ f.web_path }}"
+                 alt="{{ f.filename }}" loading="lazy">
+        {% elif f.get('is_video') %}
+            <div class="file-thumb-placeholder"><i class="fas fa-film"></i></div>
+        {% else %}
+            <div class="file-thumb-placeholder"><i class="fas fa-file"></i></div>
+        {% endif %}
+
+        <!-- Type badge -->
+        {% if f.get('is_video') %}
+            <span class="file-type-badge badge-video">video</span>
+        {% elif f.get('is_image') %}
+            <span class="file-type-badge badge-image">img</span>
+        {% endif %}
+
+        <!-- Favourite button -->
+        <div class="fav-overlay">
+            <button class="fav-btn {% if f.is_favourite %}active{% endif %}"
+                    onclick="toggleFav({{ f.id }}, this)"
+                    title="{% if f.is_favourite %}Unfavourite{% else %}Favourite{% endif %}">
+                <i class="fas fa-heart"></i>
+            </button>
+        </div>
+
+        <!-- Info -->
+        <div class="file-info">
+            <div class="file-name" title="{{ f.filename }}">{{ f.filename or '—' }}</div>
+            <div class="file-meta">
+                <span class="file-size">{{ (f.file_size / 1048576) | round(1) }} MB</span>
+                {% if f.download_date %}<span>{{ f.download_date }}</span>{% endif %}
+            </div>
+            {% if f.get('title') %}
+            <a class="file-post-link"
+               href="{{ url_for('image_details', post_id=f.post_id) }}"
+               title="{{ f.title }}">{{ f.title | truncate(50) }}</a>
+            {% endif %}
+        </div>
+
+        <!-- Actions -->
+        <div class="file-actions">
+            {% if f.get('web_path') %}
+            <a class="file-action-btn"
+               href="/reddit_downloads/{{ f.web_path }}" target="_blank"
+               title="Open full size">
+                <i class="fas fa-expand-alt"></i> Open
+            </a>
+            {% endif %}
+            {% if f.get('post_id') %}
+            <a class="file-action-btn"
+               href="{{ url_for('image_details', post_id=f.post_id) }}"
+               title="Post details">
+                <i class="fas fa-info-circle"></i> Post
+            </a>
+            {% endif %}
+            <button class="file-action-btn delete"
+                    onclick="deleteFile({{ f.id }}, this)"
+                    title="Delete file">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pager">
+    {% if current_page > 1 %}
+    <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page-1) }}">
+        <i class="fas fa-chevron-left"></i>
+    </a>
+    {% else %}
+    <span class="disabled"><i class="fas fa-chevron-left"></i></span>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == current_page %}
+            <span class="current">{{ p }}</span>
+        {% elif p == 1 or p == total_pages or (p >= current_page - 2 and p <= current_page + 2) %}
+            <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=p) }}">{{ p }}</a>
+        {% elif p == current_page - 3 or p == current_page + 3 %}
+            <span>…</span>
+        {% endif %}
+    {% endfor %}
+
+    {% if current_page < total_pages %}
+    <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page+1) }}">
+        <i class="fas fa-chevron-right"></i>
+    </a>
+    {% else %}
+    <span class="disabled"><i class="fas fa-chevron-right"></i></span>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <i class="fas fa-folder-open"></i>
+    <p>No files found.</p>
+</div>
+{% endif %}
+
+<!-- Toast -->
+<div id="toast" style="
+    position:fixed; bottom:24px; right:24px; z-index:9000;
+    background:var(--surface-3); border:1px solid var(--border-2);
+    color:var(--text); padding:10px 18px; border-radius:var(--r);
+    font-size:0.75rem; display:none; align-items:center; gap:8px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.5);
+"></div>
+
+<script>
+function applySort(val) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('sort', val);
+    url.searchParams.set('page', '1');
+    window.location.href = url.toString();
+}
+
+function showToast(msg, ok=true) {
+    const t = document.getElementById('toast');
+    t.innerHTML = `<i class="fas fa-${ok ? 'check-circle' : 'exclamation-circle'}"
+        style="color:var(--${ok ? 'success' : 'danger'})"></i> ${msg}`;
+    t.style.display = 'flex';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.style.display = 'none', 2500);
+}
+
+async function toggleFav(imageId, btn) {
+    try {
+        const res = await fetch(`/api/favourite/${imageId}`, { method: 'POST' });
+        const data = await res.json();
+        const card = document.getElementById('fc-' + imageId);
+        if (data.is_favourite) {
+            btn.classList.add('active');
+            card.classList.add('is-favourite');
+            showToast('Added to favourites');
+        } else {
+            btn.classList.remove('active');
+            card.classList.remove('is-favourite');
+            showToast('Removed from favourites');
+        }
+    } catch (e) {
+        showToast('Error', false);
+    }
+}
+
+async function deleteFile(imageId, btn) {
+    if (!confirm('Delete this file from disk?')) return;
+    try {
+        const res = await fetch(`/api/files/delete/${imageId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            const card = document.getElementById('fc-' + imageId);
+            card.style.opacity = '0';
+            card.style.transition = 'opacity 0.3s';
+            setTimeout(() => card.remove(), 300);
+            showToast('File deleted');
+        } else {
+            showToast(data.error || 'Error', false);
+        }
+    } catch (e) {
+        showToast('Error', false);
+    }
+}
+</script>
+{% endblock %}

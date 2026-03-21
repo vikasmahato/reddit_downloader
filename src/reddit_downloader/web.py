@@ -172,6 +172,21 @@ def _ensure_blocked_users_table():
 
 _ensure_blocked_users_table()
 
+
+def _ensure_favourite_column():
+    """Add is_favourite column to images table if it doesn't exist."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("ALTER TABLE images ADD COLUMN is_favourite TINYINT(1) NOT NULL DEFAULT 0")
+        conn.commit()
+        conn.close()
+    except Exception:
+        # Column already exists — ignore
+        pass
+
+_ensure_favourite_column()
+
 # Add Python built-ins to template context
 @app.context_processor
 def inject_template_globals():
@@ -2451,6 +2466,218 @@ def api_explicit_dismiss():
         return jsonify({'success': True, 'remaining': len(flagged)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.tiff'}
+_VIDEO_EXTS = {'.mp4', '.webm', '.mov', '.avi', '.mkv', '.gifv'}
+
+
+@app.route('/files')
+def file_browser():
+    """Browse all downloaded files with filter by type and sort by size."""
+    file_type = request.args.get('type', 'all')   # all | image | video
+    sort      = request.args.get('sort', 'size_desc')
+    page      = int(request.args.get('page', 1))
+    per_page  = 100
+    offset    = (page - 1) * per_page
+
+    sort_map = {
+        'size_desc': 'i.file_size DESC',
+        'size_asc':  'i.file_size ASC',
+        'name_asc':  'i.filename ASC',
+        'name_desc': 'i.filename DESC',
+        'date_desc': 'i.download_date DESC, i.download_time DESC',
+        'date_asc':  'i.download_date ASC, i.download_time ASC',
+    }
+    order_by = sort_map.get(sort, 'i.file_size DESC')
+
+    if file_type == 'image':
+        type_clause = ("AND (LOWER(i.filename) LIKE '%.jpg' OR LOWER(i.filename) LIKE '%.jpeg'"
+                       " OR LOWER(i.filename) LIKE '%.png' OR LOWER(i.filename) LIKE '%.gif'"
+                       " OR LOWER(i.filename) LIKE '%.webp' OR LOWER(i.filename) LIKE '%.bmp'"
+                       " OR LOWER(i.filename) LIKE '%.avif' OR LOWER(i.filename) LIKE '%.tiff')")
+    elif file_type == 'video':
+        type_clause = ("AND (LOWER(i.filename) LIKE '%.mp4' OR LOWER(i.filename) LIKE '%.webm'"
+                       " OR LOWER(i.filename) LIKE '%.mov' OR LOWER(i.filename) LIKE '%.avi'"
+                       " OR LOWER(i.filename) LIKE '%.mkv' OR LOWER(i.filename) LIKE '%.gifv')")
+    else:
+        type_clause = ""
+
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(f"""
+            SELECT COUNT(*) as total FROM images i
+            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL) {type_clause}
+        """)
+        total = cursor.fetchone()['total']
+
+        cursor.execute(f"""
+            SELECT i.id, i.filename, i.file_path, i.file_size,
+                   i.download_date, i.file_hash, i.is_favourite,
+                   p.id AS post_id, p.title, p.author, p.subreddit
+            FROM images i
+            LEFT JOIN post_images pi ON pi.image_id = i.id
+            LEFT JOIN posts p ON p.id = pi.post_id
+            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL) {type_clause}
+            ORDER BY {order_by}
+            LIMIT %s OFFSET %s
+        """, [per_page, offset])
+        files = cursor.fetchall()
+        conn.close()
+
+        for f in files:
+            if f.get('file_path'):
+                wp = ui_handler.make_web_path(f['file_path'])
+                if wp:
+                    f['web_path'] = wp
+                tp = ui_handler.make_thumb_path(f['file_path'])
+                if tp:
+                    f['thumb_path'] = tp
+                ext = Path(f['file_path']).suffix.lower()
+                f['is_video'] = ext in _VIDEO_EXTS
+                f['is_image'] = ext in _IMAGE_EXTS
+
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return render_template('files.html',
+                               files=files, file_type=file_type, sort=sort,
+                               current_page=page, total_pages=total_pages, total=total)
+    except Exception as e:
+        print(f"File browser error: {e}")
+        return render_template('files.html', files=[], file_type=file_type, sort=sort,
+                               current_page=1, total_pages=1, total=0)
+
+
+@app.route('/favourites')
+def favourites():
+    """Posts that have at least one favourited image."""
+    page     = int(request.args.get('page', 1))
+    per_page = 100
+    offset   = (page - 1) * per_page
+
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT COUNT(DISTINCT p.id) AS total
+            FROM posts p
+            JOIN post_images pi ON pi.post_id = p.id
+            JOIN images i ON i.id = pi.image_id
+            WHERE i.is_favourite = 1
+        """)
+        total = cursor.fetchone()['total']
+
+        cursor.execute("""
+            SELECT p.id AS post_id, p.title, p.author, p.subreddit,
+                   p.permalink, p.created_utc, p.score, p.flair,
+                   i.id AS image_id, i.file_path, i.filename, i.file_size,
+                   i.is_favourite, pi.url
+            FROM (
+                SELECT DISTINCT p2.id FROM posts p2
+                JOIN post_images pi2 ON pi2.post_id = p2.id
+                JOIN images i2 ON i2.id = pi2.image_id
+                WHERE i2.is_favourite = 1
+                ORDER BY p2.created_utc DESC
+                LIMIT %s OFFSET %s
+            ) paged
+            JOIN posts p ON p.id = paged.id
+            JOIN post_images pi ON pi.post_id = p.id
+            JOIN images i ON i.id = pi.image_id
+            WHERE i.is_favourite = 1
+            ORDER BY p.created_utc DESC, i.id ASC
+        """, [per_page, offset])
+        rows = cursor.fetchall()
+        conn.close()
+
+        posts = {}
+        for row in rows:
+            pid = row['post_id']
+            if pid not in posts:
+                posts[pid] = {
+                    'post_id': pid, 'title': row['title'], 'author': row['author'],
+                    'subreddit': row['subreddit'], 'permalink': row['permalink'],
+                    'created_utc': row['created_utc'], 'score': row['score'],
+                    'flair': row.get('flair'), 'post_images': []
+                }
+            img = {
+                'id': row['image_id'], 'file_path': row['file_path'],
+                'filename': row['filename'], 'file_size': row['file_size'],
+                'is_favourite': row['is_favourite'], 'url': row['url']
+            }
+            if img['file_path']:
+                wp = ui_handler.make_web_path(img['file_path'])
+                if wp:
+                    img['web_path'] = wp
+                tp = ui_handler.make_thumb_path(img['file_path'])
+                if tp:
+                    img['thumb_path'] = tp
+            posts[pid]['post_images'].append(img)
+
+        post_list = list(posts.values())
+        for p in post_list:
+            if p['post_images']:
+                first = p['post_images'][0]
+                p['web_path']   = first.get('web_path')
+                p['thumb_path'] = first.get('thumb_path')
+                p['filename']   = first.get('filename')
+
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        return render_template('favourites.html',
+                               posts=post_list, current_page=page,
+                               total_pages=total_pages, total=total)
+    except Exception as e:
+        print(f"Favourites error: {e}")
+        return render_template('favourites.html', posts=[],
+                               current_page=1, total_pages=1, total=0)
+
+
+@app.route('/api/favourite/<int:image_id>', methods=['POST'])
+def toggle_favourite(image_id):
+    """Toggle is_favourite flag for an image."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_favourite FROM images WHERE id = %s", [image_id])
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Image not found'}), 404
+        new_val = 0 if row[0] else 1
+        cursor.execute("UPDATE images SET is_favourite = %s WHERE id = %s", [new_val, image_id])
+        conn.commit()
+        conn.close()
+        return jsonify({'is_favourite': bool(new_val)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/files/delete/<int:image_id>', methods=['DELETE'])
+def delete_file_physical(image_id):
+    """Delete file from disk and mark as deleted in DB."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT file_path FROM images WHERE id = %s", [image_id])
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Image not found'}), 404
+        file_path = row['file_path']
+        if file_path:
+            try:
+                p = Path(file_path)
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+        cursor.execute("UPDATE images SET is_deleted = 1 WHERE id = %s", [image_id])
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 def main():
