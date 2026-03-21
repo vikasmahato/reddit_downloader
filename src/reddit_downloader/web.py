@@ -2624,10 +2624,15 @@ def file_browser():
         cursor.execute(f"""
             SELECT i.id, i.filename, i.file_path, i.file_size,
                    i.download_date, i.file_hash, i.is_favourite,
-                   p.id AS post_id, p.title, p.author, p.subreddit
+                   (SELECT p2.id FROM post_images pi2
+                    JOIN posts p2 ON p2.id = pi2.post_id
+                    WHERE pi2.image_id = i.id LIMIT 1) AS post_id,
+                   (SELECT p2.title FROM post_images pi2
+                    JOIN posts p2 ON p2.id = pi2.post_id
+                    WHERE pi2.image_id = i.id LIMIT 1) AS title,
+                   (SELECT COUNT(*) FROM post_images pi2
+                    WHERE pi2.image_id = i.id) AS post_count
             FROM images i
-            LEFT JOIN post_images pi ON pi.image_id = i.id
-            LEFT JOIN posts p ON p.id = pi.post_id
             WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL) {type_clause}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
@@ -2762,7 +2767,7 @@ def toggle_favourite(image_id):
 
 @app.route('/api/files/delete/<int:image_id>', methods=['DELETE'])
 def delete_file_physical(image_id):
-    """Delete file from disk and mark as deleted in DB."""
+    """Delete file from disk, mark as deleted, and delete all linked posts."""
     try:
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -2771,6 +2776,8 @@ def delete_file_physical(image_id):
         if not row:
             conn.close()
             return jsonify({'error': 'Image not found'}), 404
+
+        # Delete physical file
         file_path = row['file_path']
         if file_path:
             try:
@@ -2779,10 +2786,23 @@ def delete_file_physical(image_id):
                     p.unlink()
             except Exception:
                 pass
+
+        # Find all posts linked to this image
+        cursor.execute(
+            "SELECT post_id FROM post_images WHERE image_id = %s", [image_id]
+        )
+        post_ids = [r['post_id'] for r in cursor.fetchall()]
+
+        # Delete linked posts (post_images cascade via FK)
+        if post_ids:
+            fmt = ','.join(['%s'] * len(post_ids))
+            cursor.execute(f"DELETE FROM posts WHERE id IN ({fmt})", post_ids)
+
+        # Mark image as deleted
         cursor.execute("UPDATE images SET is_deleted = 1 WHERE id = %s", [image_id])
         conn.commit()
         conn.close()
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'posts_deleted': len(post_ids)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

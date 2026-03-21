@@ -361,6 +361,11 @@
                href="{{ url_for('image_details', post_id=f.post_id) }}"
                title="{{ f.title }}">{{ f.title | truncate(50) }}</a>
             {% endif %}
+            {% if f.get('post_count', 0) > 1 %}
+            <span style="font-size:0.6rem;color:var(--warn);">
+                <i class="fas fa-link"></i> {{ f.post_count }} posts
+            </span>
+            {% endif %}
         </div>
 
         <!-- Actions -->
