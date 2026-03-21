@@ -2470,6 +2470,114 @@ def api_explicit_dismiss():
 
 _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.tiff'}
 _VIDEO_EXTS = {'.mp4', '.webm', '.mov', '.avi', '.mkv', '.gifv'}
+_COMPRESSIBLE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.avif'}
+
+_batch_compress_state: dict = {'running': False, 'total': 0, 'done': 0, 'errors': 0,
+                                'saved_bytes': 0, 'message': ''}
+_batch_compress_lock = threading.Lock()
+
+
+def _run_batch_compression(image_ids: list, quality: int):
+    from PIL import Image as PILImage
+
+    with _batch_compress_lock:
+        _batch_compress_state.update({
+            'running': True, 'total': len(image_ids), 'done': 0,
+            'errors': 0, 'saved_bytes': 0, 'message': 'Starting…'
+        })
+
+    saved_total = 0
+    errors = 0
+
+    for i, image_id in enumerate(image_ids):
+        try:
+            conn = _get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT file_path, file_size FROM images WHERE id = %s", [image_id])
+            row = cursor.fetchone()
+            conn.close()
+
+            if not row or not row['file_path']:
+                errors += 1
+                continue
+
+            file_path = Path(row['file_path'])
+            if not file_path.exists():
+                errors += 1
+                continue
+
+            ext = file_path.suffix.lower()
+            if ext not in _COMPRESSIBLE_EXTS:
+                continue  # skip videos / unsupported
+
+            original_size = file_path.stat().st_size
+
+            with PILImage.open(file_path) as img:
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    bg = PILImage.new('RGB', img.size, (255, 255, 255))
+                    if img.mode == 'P':
+                        img = img.convert('RGBA')
+                    mask = img.split()[-1] if img.mode in ('RGBA', 'LA') else None
+                    bg.paste(img, mask=mask)
+                    img = bg
+                elif img.mode != 'RGB':
+                    img = img.convert('RGB')
+                img.save(file_path.with_suffix('.jpg'), 'JPEG', quality=quality, optimize=True)
+
+            new_path = file_path.with_suffix('.jpg')
+            if ext not in {'.jpg', '.jpeg'}:
+                file_path.unlink(missing_ok=True)
+            file_path = new_path
+
+            new_size = file_path.stat().st_size
+            saved = max(0, original_size - new_size)
+            saved_total += saved
+
+            conn = _get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE images SET file_size = %s, file_path = %s WHERE id = %s",
+                [new_size, str(file_path), image_id]
+            )
+            conn.commit()
+            conn.close()
+
+        except Exception as e:
+            print(f"Batch compress error on {image_id}: {e}")
+            errors += 1
+
+        with _batch_compress_lock:
+            _batch_compress_state.update({
+                'done': i + 1, 'errors': errors, 'saved_bytes': saved_total,
+                'message': f'Compressing {i + 1}/{len(image_ids)}…'
+            })
+
+    with _batch_compress_lock:
+        saved_mb = round(saved_total / 1048576, 1)
+        _batch_compress_state.update({
+            'running': False,
+            'message': f'Done — saved {saved_mb} MB across {len(image_ids) - errors} files.'
+        })
+
+
+@app.route('/api/files/compress-batch', methods=['POST'])
+def compress_batch_files():
+    data = request.get_json() or {}
+    image_ids = [int(x) for x in data.get('image_ids', [])]
+    quality = max(10, min(85, int(data.get('quality', 35))))
+    if not image_ids:
+        return jsonify({'error': 'No images selected'}), 400
+    with _batch_compress_lock:
+        if _batch_compress_state['running']:
+            return jsonify({'error': 'Compression already running'}), 400
+    threading.Thread(target=_run_batch_compression, args=(image_ids, quality), daemon=True).start()
+    return jsonify({'success': True, 'total': len(image_ids)})
+
+
+@app.route('/api/files/compress-batch/status')
+def compress_batch_status():
+    with _batch_compress_lock:
+        return jsonify(dict(_batch_compress_state))
 
 
 @app.route('/files')
@@ -2532,9 +2640,8 @@ def file_browser():
                 wp = ui_handler.make_web_path(f['file_path'])
                 if wp:
                     f['web_path'] = wp
-                tp = ui_handler.make_thumb_path(f['file_path'])
-                if tp:
-                    f['thumb_path'] = tp
+                    # Always emit a thumb_url; browser onerror will fall back to full image
+                    f['thumb_url'] = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
                 ext = Path(f['file_path']).suffix.lower()
                 f['is_video'] = ext in _VIDEO_EXTS
                 f['is_image'] = ext in _IMAGE_EXTS

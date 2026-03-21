@@ -7,61 +7,115 @@
 .files-bar {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 10px 14px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r);
-    margin-bottom: 14px;
+    margin-bottom: 10px;
     flex-wrap: wrap;
 }
-
-.files-bar .bar-title {
+.bar-title {
     font-family: var(--font-head);
     font-size: 1rem;
     font-weight: 700;
     color: #efefef;
-    margin-right: 8px;
+    margin-right: 4px;
     flex-shrink: 0;
 }
-
 .type-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
+    display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 12px;
-    border: 1px solid var(--border-2);
-    border-radius: var(--r);
-    background: var(--surface-2);
-    color: var(--text-dim);
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    border: 1px solid var(--border-2); border-radius: var(--r);
+    background: var(--surface-2); color: var(--text-dim);
+    font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
     text-decoration: none;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .type-btn:hover { background: var(--surface-3); color: var(--text); }
 .type-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+.icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 4px 12px; height: 28px;
+    border: 1px solid var(--border-2); border-radius: var(--r);
+    background: var(--surface-2); color: var(--text-dim);
+    font-size: 0.7rem; letter-spacing: 0.06em; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+.icon-btn:hover { background: var(--surface-3); color: var(--text); }
+.icon-btn.active { background: var(--surface-3); border-color: var(--border-2); color: var(--text); }
+
 .sort-select {
-    background: var(--surface-2);
-    border: 1px solid var(--border-2);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    padding: 4px 8px;
-    border-radius: var(--r);
-    outline: none;
-    margin-left: auto;
+    background: var(--surface-2); border: 1px solid var(--border-2); color: var(--text);
+    font-family: var(--font-mono); font-size: 0.7rem;
+    padding: 4px 8px; border-radius: var(--r); outline: none; margin-left: auto;
 }
 .sort-select:focus { border-color: var(--accent); }
 
-.total-badge {
-    margin-left: 4px;
-    font-size: 0.68rem;
-    color: var(--text-dim);
-}
+.total-badge { font-size: 0.68rem; color: var(--text-dim); }
 .total-badge span { color: var(--accent); font-weight: 700; }
+
+/* ── SELECTION ACTION BAR ─────────────────────────────────── */
+.action-bar {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--r);
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+.action-bar.visible { display: flex; }
+.action-bar-count { font-size: 0.75rem; color: var(--text); font-weight: 600; }
+.action-bar-count span { color: var(--accent); }
+
+.compress-panel {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.compress-panel.visible { display: flex; }
+
+.quality-label { font-size: 0.68rem; color: var(--text-dim); white-space: nowrap; }
+.quality-range {
+    -webkit-appearance: none; appearance: none;
+    width: 140px; height: 4px;
+    background: var(--border-2); border-radius: 2px; outline: none;
+    cursor: pointer;
+}
+.quality-range::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+}
+.quality-val { font-size: 0.7rem; color: var(--accent); font-weight: 700; min-width: 26px; }
+
+/* ── PROGRESS BAR ─────────────────────────────────────────── */
+.progress-wrap {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    margin-bottom: 10px;
+}
+.progress-wrap.visible { display: flex; }
+.progress-track {
+    height: 4px; background: var(--border-2); border-radius: 2px; overflow: hidden;
+}
+.progress-fill {
+    height: 100%; background: var(--accent); border-radius: 2px;
+    transition: width 0.3s; width: 0%;
+}
+.progress-msg { font-size: 0.7rem; color: var(--text-dim); }
+.progress-saved { font-size: 0.7rem; color: var(--success); font-weight: 600; }
 
 /* ── FILE GRID ────────────────────────────────────────────── */
 .files-grid {
@@ -75,59 +129,52 @@
     border: 1px solid var(--border);
     border-radius: var(--r);
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    display: flex; flex-direction: column;
     transition: border-color 0.15s;
     position: relative;
 }
 .file-card:hover { border-color: var(--border-2); }
 .file-card.is-favourite { border-color: #e11d48 !important; }
+.file-card.selected { border-color: var(--accent) !important; outline: 2px solid rgba(255,69,0,0.3); }
 
 .file-thumb {
-    width: 100%;
-    aspect-ratio: 4/3;
-    object-fit: cover;
-    background: var(--surface-2);
-    display: block;
+    width: 100%; aspect-ratio: 4/3; object-fit: cover;
+    background: var(--surface-2); display: block;
 }
 .file-thumb-placeholder {
-    width: 100%;
-    aspect-ratio: 4/3;
+    width: 100%; aspect-ratio: 4/3;
     background: var(--surface-2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    font-size: 2rem;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); font-size: 2rem;
 }
 
 .file-type-badge {
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    font-size: 0.6rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 2px 6px;
-    border-radius: 2px;
-    font-weight: 600;
+    position: absolute; top: 6px; left: 6px;
+    font-size: 0.6rem; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 2px; font-weight: 600;
 }
 .badge-image { background: rgba(96,165,250,0.85); color: #fff; }
 .badge-video { background: rgba(168,85,247,0.85); color: #fff; }
 
-.fav-overlay {
-    position: absolute;
-    top: 6px;
-    right: 6px;
+/* Checkbox overlay (visible in select mode) */
+.card-checkbox-wrap {
+    position: absolute; top: 6px; left: 6px;
+    display: none;
+}
+.select-mode .card-checkbox-wrap { display: block; }
+.select-mode .file-type-badge { display: none; }
+.card-checkbox {
+    width: 18px; height: 18px; cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.fav-overlay-btn {
+    position: absolute; top: 6px; right: 6px;
 }
 .fav-btn {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    border: none;
-    background: rgba(0,0,0,0.6);
-    color: var(--text-dim);
-    font-size: 0.8rem;
-    cursor: pointer;
+    width: 28px; height: 28px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,0.6); color: var(--text-dim);
+    font-size: 0.8rem; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: color 0.15s, background 0.15s;
     backdrop-filter: blur(4px);
@@ -136,56 +183,34 @@
 .fav-btn.active { color: #e11d48; }
 
 .file-info {
-    padding: 8px 10px;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+    padding: 8px 10px; flex: 1;
+    display: flex; flex-direction: column; gap: 3px;
 }
 .file-name {
-    font-size: 0.68rem;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-weight: 500;
+    font-size: 0.68rem; color: var(--text); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .file-meta {
-    font-size: 0.63rem;
-    color: var(--text-dim);
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    flex-wrap: wrap;
+    font-size: 0.63rem; color: var(--text-dim);
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
 }
 .file-size { color: var(--info); font-weight: 600; }
-
 .file-post-link {
-    font-size: 0.62rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.62rem; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     text-decoration: none;
 }
 .file-post-link:hover { color: var(--accent); }
 
 .file-actions {
-    display: flex;
-    gap: 6px;
-    padding: 6px 10px;
-    border-top: 1px solid var(--border);
-    background: var(--surface-2);
+    display: flex; gap: 6px; padding: 6px 10px;
+    border-top: 1px solid var(--border); background: var(--surface-2);
 }
 .file-action-btn {
-    flex: 1;
-    padding: 4px 0;
-    border: 1px solid var(--border-2);
-    border-radius: var(--r);
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 0.63rem;
-    cursor: pointer;
+    flex: 1; padding: 4px 0;
+    border: 1px solid var(--border-2); border-radius: var(--r);
+    background: transparent; color: var(--text-dim);
+    font-size: 0.63rem; cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
     text-decoration: none;
     display: flex; align-items: center; justify-content: center; gap: 4px;
@@ -198,23 +223,15 @@
 .pager a, .pager span {
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 32px; height: 32px; padding: 0 8px;
-    border: 1px solid var(--border-2);
-    border-radius: var(--r);
-    font-size: 0.7rem;
-    color: var(--text-dim);
-    text-decoration: none;
-    background: var(--surface);
-    transition: background 0.15s, color 0.15s;
+    border: 1px solid var(--border-2); border-radius: var(--r);
+    font-size: 0.7rem; color: var(--text-dim); text-decoration: none;
+    background: var(--surface); transition: background 0.15s, color 0.15s;
 }
 .pager a:hover { background: var(--surface-3); color: var(--text); }
 .pager .current { background: var(--accent); border-color: var(--accent); color: #fff; }
 .pager .disabled { opacity: 0.3; pointer-events: none; }
 
-/* ── EMPTY STATE ──────────────────────────────────────────── */
-.empty-state {
-    text-align: center; padding: 60px 20px;
-    color: var(--text-dim);
-}
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text-dim); }
 .empty-state i { font-size: 3rem; margin-bottom: 16px; opacity: 0.3; display: block; }
 </style>
 
@@ -237,6 +254,10 @@
 
     <span class="total-badge">— <span>{{ total | default(0) }}</span> files</span>
 
+    <button class="icon-btn" id="selectToggleBtn" onclick="toggleSelectMode()">
+        <i class="fas fa-check-square"></i> Select
+    </button>
+
     <select class="sort-select" onchange="applySort(this.value)">
         <option value="size_desc"  {% if sort == 'size_desc'  %}selected{% endif %}>Size ↓</option>
         <option value="size_asc"   {% if sort == 'size_asc'   %}selected{% endif %}>Size ↑</option>
@@ -247,27 +268,71 @@
     </select>
 </div>
 
+<!-- Selection action bar -->
+<div class="action-bar" id="actionBar">
+    <span class="action-bar-count"><span id="selCount">0</span> selected</span>
+
+    <button class="icon-btn" onclick="selectAll()"><i class="fas fa-check-double"></i> All</button>
+    <button class="icon-btn" onclick="clearSelection()"><i class="fas fa-times"></i> Clear</button>
+
+    <button class="icon-btn" id="compressToggleBtn"
+            onclick="toggleCompressPanel()"
+            style="border-color:#f59e0b; color:#f59e0b;">
+        <i class="fas fa-compress-alt"></i> Compress
+    </button>
+
+    <!-- Compress options -->
+    <div class="compress-panel" id="compressPanel">
+        <span class="quality-label">Quality:</span>
+        <input type="range" class="quality-range" id="qualityRange"
+               min="10" max="85" value="35" oninput="updateQualityLabel(this.value)">
+        <span class="quality-val" id="qualityVal">35</span>
+        <span class="quality-label" style="color:var(--text-muted)">(lower = smaller)</span>
+        <button class="icon-btn" onclick="startCompression()"
+                style="background:rgba(245,158,11,0.15); border-color:#f59e0b; color:#f59e0b;">
+            <i class="fas fa-play"></i> Go
+        </button>
+    </div>
+</div>
+
+<!-- Progress bar -->
+<div class="progress-wrap" id="progressWrap">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span class="progress-msg" id="progressMsg">Compressing…</span>
+        <span class="progress-saved" id="progressSaved"></span>
+    </div>
+    <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+    </div>
+</div>
+
 <!-- File grid -->
 {% if files %}
 <div class="files-grid" id="filesGrid">
     {% for f in files %}
-    <div class="file-card {% if f.is_favourite %}is-favourite{% endif %}" id="fc-{{ f.id }}">
+    <div class="file-card {% if f.is_favourite %}is-favourite{% endif %}"
+         id="fc-{{ f.id }}" data-id="{{ f.id }}">
 
-        <!-- Thumbnail / preview -->
-        {% if f.get('thumb_path') %}
-            <img class="file-thumb" src="/thumbs/{{ f.thumb_path }}"
+        <!-- Thumbnail -->
+        {% if f.get('is_video') %}
+            <div class="file-thumb-placeholder"><i class="fas fa-film"></i></div>
+        {% elif f.get('thumb_url') %}
+            <img class="file-thumb"
+                 src="{{ f.thumb_url }}"
+                 onerror="this.onerror=null;{% if f.get('web_path') %}this.src='/reddit_downloads/{{ f.web_path }}'{% else %}this.style.display='none'{% endif %}"
                  alt="{{ f.filename }}" loading="lazy">
         {% elif f.get('web_path') and f.get('is_image') %}
-            <img class="file-thumb" data-src="/reddit_downloads/{{ f.web_path }}"
-                 src="/reddit_downloads/{{ f.web_path }}"
+            <img class="file-thumb" src="/reddit_downloads/{{ f.web_path }}"
                  alt="{{ f.filename }}" loading="lazy">
-        {% elif f.get('is_video') %}
-            <div class="file-thumb-placeholder"><i class="fas fa-film"></i></div>
         {% else %}
             <div class="file-thumb-placeholder"><i class="fas fa-file"></i></div>
         {% endif %}
 
-        <!-- Type badge -->
+        <!-- Type badge / checkbox (select mode) -->
+        <div class="card-checkbox-wrap">
+            <input type="checkbox" class="card-checkbox" data-id="{{ f.id }}"
+                   onchange="onCardCheck({{ f.id }}, this)">
+        </div>
         {% if f.get('is_video') %}
             <span class="file-type-badge badge-video">video</span>
         {% elif f.get('is_image') %}
@@ -275,16 +340,15 @@
         {% endif %}
 
         <!-- Favourite button -->
-        <div class="fav-overlay">
+        <div class="fav-overlay-btn">
             <button class="fav-btn {% if f.is_favourite %}active{% endif %}"
-                    onclick="toggleFav({{ f.id }}, this)"
-                    title="{% if f.is_favourite %}Unfavourite{% else %}Favourite{% endif %}">
+                    onclick="toggleFav({{ f.id }}, this)">
                 <i class="fas fa-heart"></i>
             </button>
         </div>
 
         <!-- Info -->
-        <div class="file-info">
+        <div class="file-info" onclick="onCardClick({{ f.id }}, event)">
             <div class="file-name" title="{{ f.filename }}">{{ f.filename or '—' }}</div>
             <div class="file-meta">
                 <span class="file-size">{{ (f.file_size / 1048576) | round(1) }} MB</span>
@@ -300,22 +364,16 @@
         <!-- Actions -->
         <div class="file-actions">
             {% if f.get('web_path') %}
-            <a class="file-action-btn"
-               href="/reddit_downloads/{{ f.web_path }}" target="_blank"
-               title="Open full size">
+            <a class="file-action-btn" href="/reddit_downloads/{{ f.web_path }}" target="_blank">
                 <i class="fas fa-expand-alt"></i> Open
             </a>
             {% endif %}
             {% if f.get('post_id') %}
-            <a class="file-action-btn"
-               href="{{ url_for('image_details', post_id=f.post_id) }}"
-               title="Post details">
+            <a class="file-action-btn" href="{{ url_for('image_details', post_id=f.post_id) }}">
                 <i class="fas fa-info-circle"></i> Post
             </a>
             {% endif %}
-            <button class="file-action-btn delete"
-                    onclick="deleteFile({{ f.id }}, this)"
-                    title="Delete file">
+            <button class="file-action-btn delete" onclick="deleteFile({{ f.id }}, this)">
                 <i class="fas fa-trash"></i>
             </button>
         </div>
@@ -328,8 +386,7 @@
 <div class="pager">
     {% if current_page > 1 %}
     <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page-1) }}">
-        <i class="fas fa-chevron-left"></i>
-    </a>
+        <i class="fas fa-chevron-left"></i></a>
     {% else %}
     <span class="disabled"><i class="fas fa-chevron-left"></i></span>
     {% endif %}
@@ -346,8 +403,7 @@
 
     {% if current_page < total_pages %}
     <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page+1) }}">
-        <i class="fas fa-chevron-right"></i>
-    </a>
+        <i class="fas fa-chevron-right"></i></a>
     {% else %}
     <span class="disabled"><i class="fas fa-chevron-right"></i></span>
     {% endif %}
@@ -371,6 +427,12 @@
 "></div>
 
 <script>
+// ── State ───────────────────────────────────────────────────
+let selectMode = false;
+const selected = new Set();
+let pollTimer = null;
+
+// ── Utilities ───────────────────────────────────────────────
 function applySort(val) {
     const url = new URL(window.location.href);
     url.searchParams.set('sort', val);
@@ -378,50 +440,161 @@ function applySort(val) {
     window.location.href = url.toString();
 }
 
-function showToast(msg, ok=true) {
+function showToast(msg, ok = true) {
     const t = document.getElementById('toast');
     t.innerHTML = `<i class="fas fa-${ok ? 'check-circle' : 'exclamation-circle'}"
         style="color:var(--${ok ? 'success' : 'danger'})"></i> ${msg}`;
     t.style.display = 'flex';
     clearTimeout(t._timer);
-    t._timer = setTimeout(() => t.style.display = 'none', 2500);
+    t._timer = setTimeout(() => t.style.display = 'none', 2800);
 }
 
+function formatBytes(b) {
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB';
+    if (b >= 1024)    return (b / 1024).toFixed(0) + ' KB';
+    return b + ' B';
+}
+
+// ── Selection ───────────────────────────────────────────────
+function toggleSelectMode() {
+    selectMode = !selectMode;
+    document.getElementById('filesGrid').classList.toggle('select-mode', selectMode);
+    document.getElementById('selectToggleBtn').classList.toggle('active', selectMode);
+    if (!selectMode) {
+        clearSelection();
+        document.getElementById('actionBar').classList.remove('visible');
+    } else {
+        document.getElementById('actionBar').classList.add('visible');
+    }
+}
+
+function onCardClick(imageId, e) {
+    if (!selectMode) return;
+    if (e.target.closest('a') || e.target.closest('button')) return;
+    toggleSelect(imageId);
+}
+
+function onCardCheck(imageId, cb) {
+    if (cb.checked) selected.add(imageId);
+    else selected.delete(imageId);
+    document.getElementById('fc-' + imageId).classList.toggle('selected', cb.checked);
+    updateSelCount();
+}
+
+function toggleSelect(imageId) {
+    const card = document.getElementById('fc-' + imageId);
+    const cb = card.querySelector('.card-checkbox');
+    if (selected.has(imageId)) {
+        selected.delete(imageId);
+        card.classList.remove('selected');
+        if (cb) cb.checked = false;
+    } else {
+        selected.add(imageId);
+        card.classList.add('selected');
+        if (cb) cb.checked = true;
+    }
+    updateSelCount();
+}
+
+function updateSelCount() {
+    document.getElementById('selCount').textContent = selected.size;
+}
+
+function selectAll() {
+    document.querySelectorAll('.file-card').forEach(card => {
+        const id = parseInt(card.dataset.id);
+        selected.add(id);
+        card.classList.add('selected');
+        const cb = card.querySelector('.card-checkbox');
+        if (cb) cb.checked = true;
+    });
+    updateSelCount();
+}
+
+function clearSelection() {
+    selected.clear();
+    document.querySelectorAll('.file-card').forEach(card => {
+        card.classList.remove('selected');
+        const cb = card.querySelector('.card-checkbox');
+        if (cb) cb.checked = false;
+    });
+    updateSelCount();
+}
+
+// ── Compress ────────────────────────────────────────────────
+function toggleCompressPanel() {
+    document.getElementById('compressPanel').classList.toggle('visible');
+    document.getElementById('compressToggleBtn').classList.toggle('active');
+}
+
+function updateQualityLabel(v) {
+    document.getElementById('qualityVal').textContent = v;
+}
+
+async function startCompression() {
+    if (selected.size === 0) { showToast('Select images first', false); return; }
+    const quality = parseInt(document.getElementById('qualityRange').value);
+
+    document.getElementById('compressPanel').classList.remove('visible');
+    document.getElementById('progressWrap').classList.add('visible');
+    document.getElementById('progressFill').style.width = '0%';
+    document.getElementById('progressMsg').textContent = 'Starting…';
+    document.getElementById('progressSaved').textContent = '';
+
+    await fetch('/api/files/compress-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_ids: [...selected], quality })
+    });
+
+    pollTimer = setInterval(pollCompressStatus, 800);
+}
+
+async function pollCompressStatus() {
+    try {
+        const res = await fetch('/api/files/compress-batch/status');
+        const d = await res.json();
+        const pct = d.total > 0 ? Math.round((d.done / d.total) * 100) : 0;
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('progressMsg').textContent = d.message || '';
+        if (d.saved_bytes > 0) {
+            document.getElementById('progressSaved').textContent = '↓ ' + formatBytes(d.saved_bytes);
+        }
+        if (!d.running) {
+            clearInterval(pollTimer);
+            showToast(d.message || 'Compression done');
+            // Refresh page after a moment to show updated sizes
+            setTimeout(() => location.reload(), 1800);
+        }
+    } catch (e) {
+        clearInterval(pollTimer);
+    }
+}
+
+// ── Favourite ───────────────────────────────────────────────
 async function toggleFav(imageId, btn) {
     try {
         const res = await fetch(`/api/favourite/${imageId}`, { method: 'POST' });
         const data = await res.json();
         const card = document.getElementById('fc-' + imageId);
-        if (data.is_favourite) {
-            btn.classList.add('active');
-            card.classList.add('is-favourite');
-            showToast('Added to favourites');
-        } else {
-            btn.classList.remove('active');
-            card.classList.remove('is-favourite');
-            showToast('Removed from favourites');
-        }
-    } catch (e) {
-        showToast('Error', false);
-    }
+        btn.classList.toggle('active', data.is_favourite);
+        card.classList.toggle('is-favourite', data.is_favourite);
+        showToast(data.is_favourite ? 'Added to favourites' : 'Removed from favourites');
+    } catch (e) { showToast('Error', false); }
 }
 
+// ── Delete ──────────────────────────────────────────────────
 async function deleteFile(imageId, btn) {
     try {
         const res = await fetch(`/api/files/delete/${imageId}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.success) {
             const card = document.getElementById('fc-' + imageId);
-            card.style.opacity = '0';
-            card.style.transition = 'opacity 0.3s';
+            card.style.opacity = '0'; card.style.transition = 'opacity 0.3s';
             setTimeout(() => card.remove(), 300);
-            showToast('File deleted');
-        } else {
-            showToast(data.error || 'Error', false);
-        }
-    } catch (e) {
-        showToast('Error', false);
-    }
+            showToast('Deleted');
+        } else { showToast(data.error || 'Error', false); }
+    } catch (e) { showToast('Error', false); }
 }
 </script>
 {% endblock %}
