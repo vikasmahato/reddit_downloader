@@ -174,12 +174,31 @@ def process_batch(reddit, conn, rows, skip_comments=False):
 
     for rid, (db_id, old_comments_json) in id_map.items():
         if rid not in found:
+            # Post completely absent from Reddit API (very rare)
             cursor.execute("UPDATE posts SET is_deleted = 1 WHERE id = %s", [db_id])
             deleted += 1
             continue
 
         sub = found[rid]
         score = getattr(sub, 'score', None)
+
+        # reddit.info() still returns deleted/removed posts — check their attributes.
+        # removed_by_category is set when a mod, Reddit, or the author removed the post.
+        # author is None in PRAW when the user deleted their own post.
+        removed_by = getattr(sub, 'removed_by_category', None)
+        author     = getattr(sub, 'author', None)
+        if removed_by is not None or author is None:
+            if score is not None:
+                cursor.execute(
+                    "UPDATE posts SET is_deleted=1, score=%s WHERE id=%s",
+                    [score, db_id]
+                )
+            else:
+                cursor.execute("UPDATE posts SET is_deleted=1 WHERE id=%s", [db_id])
+            deleted += 1
+            logger.debug(f"Marked deleted: t3_{rid} "
+                         f"(removed_by={removed_by}, author={author})")
+            continue
 
         if skip_comments:
             # Fast path — score + deletion only, no per-post API call
