@@ -188,6 +188,20 @@ def _ensure_favourite_column():
 _ensure_favourite_column()
 
 
+def _ensure_ignored_column():
+    """Add is_ignored column to images table if it doesn't exist."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("ALTER TABLE images ADD COLUMN is_ignored TINYINT(1) NOT NULL DEFAULT 0")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+_ensure_ignored_column()
+
+
 def _ensure_posts_deleted_column():
     """Add is_deleted and removed_by_category columns to posts table if missing."""
     try:
@@ -2938,7 +2952,8 @@ def file_browser():
     file_type = request.args.get('type', 'all')   # all | image | video
     sort      = request.args.get('sort', 'size_desc')
     page      = int(request.args.get('page', 1))
-    per_page  = 10
+    per_page  = int(request.args.get('per_page', 24))
+    per_page  = per_page if per_page in (10, 24, 50, 100) else 24
     offset    = (page - 1) * per_page
 
     sort_map = {
@@ -2967,10 +2982,9 @@ def file_browser():
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        cursor.execute(f"""
-            SELECT COUNT(*) as total FROM images i
-            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL) {type_clause}
-        """)
+        base_where = f"(i.is_deleted = 0 OR i.is_deleted IS NULL) AND (i.is_ignored = 0 OR i.is_ignored IS NULL) {type_clause}"
+
+        cursor.execute(f"SELECT COUNT(*) as total FROM images i WHERE {base_where}")
         total = cursor.fetchone()['total']
 
         cursor.execute(f"""
@@ -2985,7 +2999,7 @@ def file_browser():
                    (SELECT COUNT(*) FROM post_images pi2
                     WHERE pi2.image_id = i.id) AS post_count
             FROM images i
-            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL) {type_clause}
+            WHERE {base_where}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
         """, [per_page, offset])
@@ -3006,11 +3020,12 @@ def file_browser():
         total_pages = max(1, (total + per_page - 1) // per_page)
         return render_template('files.html',
                                files=files, file_type=file_type, sort=sort,
-                               current_page=page, total_pages=total_pages, total=total)
+                               current_page=page, total_pages=total_pages, total=total,
+                               per_page=per_page)
     except Exception as e:
         print(f"File browser error: {e}")
         return render_template('files.html', files=[], file_type=file_type, sort=sort,
-                               current_page=1, total_pages=1, total=0)
+                               current_page=1, total_pages=1, total=0, per_page=24)
 
 
 @app.route('/favourites')
@@ -3113,6 +3128,26 @@ def toggle_favourite(image_id):
         conn.commit()
         conn.close()
         return jsonify({'is_favourite': bool(new_val)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/files/ignore/<int:image_id>', methods=['POST'])
+def ignore_file(image_id):
+    """Toggle is_ignored flag — hides the file from the Files list without deleting it."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_ignored FROM images WHERE id = %s", [image_id])
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Image not found'}), 404
+        new_val = 0 if row[0] else 1
+        cursor.execute("UPDATE images SET is_ignored = %s WHERE id = %s", [new_val, image_id])
+        conn.commit()
+        conn.close()
+        return jsonify({'is_ignored': bool(new_val)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

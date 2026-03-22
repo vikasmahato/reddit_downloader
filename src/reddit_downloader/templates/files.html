@@ -220,6 +220,7 @@
 .file-action-btn.compress-video { color: #a855f7; border-color: rgba(168,85,247,0.4); }
 .file-action-btn.compress-video:hover { background: rgba(168,85,247,0.12); border-color: #a855f7; color: #a855f7; }
 .file-action-btn.compress-video:disabled { opacity: 0.5; cursor: not-allowed; }
+.file-action-btn.ignore:hover { background: rgba(234,179,8,0.12); border-color: #eab308; color: #eab308; }
 
 /* ── PAGINATION ───────────────────────────────────────────── */
 .pager { display: flex; gap: 4px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
@@ -268,6 +269,12 @@
         <option value="name_desc"  {% if sort == 'name_desc'  %}selected{% endif %}>Name Z→A</option>
         <option value="date_desc"  {% if sort == 'date_desc'  %}selected{% endif %}>Date ↓</option>
         <option value="date_asc"   {% if sort == 'date_asc'   %}selected{% endif %}>Date ↑</option>
+    </select>
+    <select class="sort-select" onchange="applyPerPage(this.value)" title="Files per page">
+        <option value="10"  {% if per_page == 10  %}selected{% endif %}>10 / page</option>
+        <option value="24"  {% if per_page == 24  %}selected{% endif %}>24 / page</option>
+        <option value="50"  {% if per_page == 50  %}selected{% endif %}>50 / page</option>
+        <option value="100" {% if per_page == 100 %}selected{% endif %}>100 / page</option>
     </select>
 </div>
 
@@ -389,6 +396,10 @@
                 <i class="fas fa-compress-alt"></i>
             </button>
             {% endif %}
+            <button class="file-action-btn ignore" onclick="ignoreFile({{ f.id }}, this)"
+                    title="Hide from this list (keeps the file)">
+                <i class="fas fa-eye-slash"></i>
+            </button>
             <button class="file-action-btn delete" onclick="deleteFile({{ f.id }}, this)">
                 <i class="fas fa-trash"></i>
             </button>
@@ -401,7 +412,7 @@
 {% if total_pages > 1 %}
 <div class="pager">
     {% if current_page > 1 %}
-    <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page-1) }}">
+    <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page-1, per_page=per_page) }}">
         <i class="fas fa-chevron-left"></i></a>
     {% else %}
     <span class="disabled"><i class="fas fa-chevron-left"></i></span>
@@ -411,14 +422,14 @@
         {% if p == current_page %}
             <span class="current">{{ p }}</span>
         {% elif p == 1 or p == total_pages or (p >= current_page - 2 and p <= current_page + 2) %}
-            <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=p) }}">{{ p }}</a>
+            <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=p, per_page=per_page) }}">{{ p }}</a>
         {% elif p == current_page - 3 or p == current_page + 3 %}
             <span>…</span>
         {% endif %}
     {% endfor %}
 
     {% if current_page < total_pages %}
-    <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page+1) }}">
+    <a href="{{ url_for('file_browser', type=file_type, sort=sort, page=current_page+1, per_page=per_page) }}">
         <i class="fas fa-chevron-right"></i></a>
     {% else %}
     <span class="disabled"><i class="fas fa-chevron-right"></i></span>
@@ -468,6 +479,13 @@ let pollTimer = null;
 function applySort(val) {
     const url = new URL(window.location.href);
     url.searchParams.set('sort', val);
+    url.searchParams.set('page', '1');
+    window.location.href = url.toString();
+}
+
+function applyPerPage(val) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('per_page', val);
     url.searchParams.set('page', '1');
     window.location.href = url.toString();
 }
@@ -656,6 +674,19 @@ async function compressVideo(imageId, btn) {
             }
         } catch (_) {}
     }, 1500);
+}
+
+// ── Ignore ──────────────────────────────────────────────────
+async function ignoreFile(imageId, btn) {
+    try {
+        const res = await fetch(`/api/files/ignore/${imageId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.error) { showToast(data.error, false); return; }
+        const card = document.getElementById('fc-' + imageId);
+        card.style.opacity = '0'; card.style.transition = 'opacity 0.3s';
+        setTimeout(() => card.remove(), 300);
+        showToast('File hidden from list');
+    } catch (e) { showToast('Error', false); }
 }
 
 // ── Delete ──────────────────────────────────────────────────
