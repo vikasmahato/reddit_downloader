@@ -3132,6 +3132,65 @@ def toggle_favourite(image_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/files/videos-for-review')
+def videos_for_review():
+    """Return a batch of videos for the review slider."""
+    offset   = max(0, int(request.args.get('offset', 0)))
+    limit    = min(50, max(1, int(request.args.get('limit', 20))))
+    sort     = request.args.get('sort', 'size_desc')
+    sort_map = {
+        'size_desc': 'i.file_size DESC',
+        'size_asc':  'i.file_size ASC',
+        'date_desc': 'i.download_date DESC, i.download_time DESC',
+        'date_asc':  'i.download_date ASC, i.download_time ASC',
+    }
+    order_by = sort_map.get(sort, 'i.file_size DESC')
+    video_clause = ("(LOWER(i.filename) LIKE '%.mp4' OR LOWER(i.filename) LIKE '%.webm'"
+                    " OR LOWER(i.filename) LIKE '%.mov' OR LOWER(i.filename) LIKE '%.avi'"
+                    " OR LOWER(i.filename) LIKE '%.mkv' OR LOWER(i.filename) LIKE '%.gifv')")
+    base_where = (f"(i.is_deleted = 0 OR i.is_deleted IS NULL) "
+                  f"AND (i.is_ignored = 0 OR i.is_ignored IS NULL) "
+                  f"AND {video_clause}")
+    try:
+        conn   = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(f"SELECT COUNT(*) as total FROM images i WHERE {base_where}")
+        total = cursor.fetchone()['total']
+        cursor.execute(f"""
+            SELECT i.id, i.filename, i.file_path, i.file_size, i.download_date,
+                   (SELECT p2.id FROM post_images pi2
+                    JOIN posts p2 ON p2.id = pi2.post_id
+                    WHERE pi2.image_id = i.id LIMIT 1) AS post_id,
+                   (SELECT p2.title FROM post_images pi2
+                    JOIN posts p2 ON p2.id = pi2.post_id
+                    WHERE pi2.image_id = i.id LIMIT 1) AS post_title
+            FROM images i
+            WHERE {base_where}
+            ORDER BY {order_by}
+            LIMIT %s OFFSET %s
+        """, [limit, offset])
+        rows = cursor.fetchall()
+        conn.close()
+        videos = []
+        for v in rows:
+            web_path = None
+            if v.get('file_path'):
+                wp = ui_handler.make_web_path(v['file_path'])
+                if wp:
+                    web_path = wp
+            videos.append({
+                'id':        v['id'],
+                'filename':  v['filename'],
+                'file_size': v['file_size'],
+                'post_id':   v['post_id'],
+                'post_title': v['post_title'],
+                'web_path':  web_path,
+            })
+        return jsonify({'videos': videos, 'total': total, 'offset': offset})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/files/ignore/<int:image_id>', methods=['POST'])
 def ignore_file(image_id):
     """Toggle is_ignored flag — hides the file from the Files list without deleting it."""
