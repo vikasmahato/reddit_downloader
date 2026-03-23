@@ -3132,9 +3132,17 @@ def toggle_favourite(image_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/files/videos-for-review')
-def videos_for_review():
-    """Return a batch of videos for the review slider."""
+_REVIEW_TYPE_CLAUSES = {
+    'video': ("(LOWER(i.filename) LIKE '%.mp4' OR LOWER(i.filename) LIKE '%.webm'"
+              " OR LOWER(i.filename) LIKE '%.mov' OR LOWER(i.filename) LIKE '%.avi'"
+              " OR LOWER(i.filename) LIKE '%.mkv' OR LOWER(i.filename) LIKE '%.gifv')"),
+    'image': ("(LOWER(i.filename) LIKE '%.jpg' OR LOWER(i.filename) LIKE '%.jpeg'"
+              " OR LOWER(i.filename) LIKE '%.png' OR LOWER(i.filename) LIKE '%.gif'"
+              " OR LOWER(i.filename) LIKE '%.webp' OR LOWER(i.filename) LIKE '%.bmp'"
+              " OR LOWER(i.filename) LIKE '%.avif' OR LOWER(i.filename) LIKE '%.tiff')"),
+}
+
+def _media_for_review(media_type):
     offset   = max(0, int(request.args.get('offset', 0)))
     limit    = min(50, max(1, int(request.args.get('limit', 20))))
     sort     = request.args.get('sort', 'size_desc')
@@ -3144,13 +3152,11 @@ def videos_for_review():
         'date_desc': 'i.download_date DESC, i.download_time DESC',
         'date_asc':  'i.download_date ASC, i.download_time ASC',
     }
-    order_by = sort_map.get(sort, 'i.file_size DESC')
-    video_clause = ("(LOWER(i.filename) LIKE '%.mp4' OR LOWER(i.filename) LIKE '%.webm'"
-                    " OR LOWER(i.filename) LIKE '%.mov' OR LOWER(i.filename) LIKE '%.avi'"
-                    " OR LOWER(i.filename) LIKE '%.mkv' OR LOWER(i.filename) LIKE '%.gifv')")
-    base_where = (f"(i.is_deleted = 0 OR i.is_deleted IS NULL) "
-                  f"AND (i.is_ignored = 0 OR i.is_ignored IS NULL) "
-                  f"AND {video_clause}")
+    order_by   = sort_map.get(sort, 'i.file_size DESC')
+    type_clause = _REVIEW_TYPE_CLAUSES.get(media_type, _REVIEW_TYPE_CLAUSES['video'])
+    base_where  = (f"(i.is_deleted = 0 OR i.is_deleted IS NULL) "
+                   f"AND (i.is_ignored = 0 OR i.is_ignored IS NULL) "
+                   f"AND {type_clause}")
     try:
         conn   = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -3164,31 +3170,42 @@ def videos_for_review():
                    (SELECT p2.title FROM post_images pi2
                     JOIN posts p2 ON p2.id = pi2.post_id
                     WHERE pi2.image_id = i.id LIMIT 1) AS post_title
-            FROM images i
-            WHERE {base_where}
-            ORDER BY {order_by}
-            LIMIT %s OFFSET %s
+            FROM images i WHERE {base_where}
+            ORDER BY {order_by} LIMIT %s OFFSET %s
         """, [limit, offset])
         rows = cursor.fetchall()
         conn.close()
-        videos = []
+        items = []
         for v in rows:
             web_path = None
             if v.get('file_path'):
                 wp = ui_handler.make_web_path(v['file_path'])
                 if wp:
                     web_path = wp
-            videos.append({
+                    if media_type == 'image':
+                        v['thumb_url'] = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
+            items.append({
                 'id':        v['id'],
                 'filename':  v['filename'],
                 'file_size': v['file_size'],
                 'post_id':   v['post_id'],
                 'post_title': v['post_title'],
                 'web_path':  web_path,
+                'thumb_url': v.get('thumb_url'),
             })
-        return jsonify({'videos': videos, 'total': total, 'offset': offset})
+        return jsonify({'items': items, 'total': total, 'offset': offset})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/files/videos-for-review')
+def videos_for_review():
+    return _media_for_review('video')
+
+
+@app.route('/api/files/images-for-review')
+def images_for_review():
+    return _media_for_review('image')
 
 
 @app.route('/api/files/ignore/<int:image_id>', methods=['POST'])

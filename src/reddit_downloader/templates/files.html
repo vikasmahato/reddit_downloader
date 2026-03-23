@@ -261,10 +261,15 @@
     <button class="icon-btn" id="selectToggleBtn" onclick="toggleSelectMode()">
         <i class="fas fa-check-square"></i> Select
     </button>
-    <button class="icon-btn" onclick="openVideoReview()"
+    <button class="icon-btn" onclick="openMediaReview('video')"
             style="border-color:#a855f7; color:#a855f7;"
             title="Review videos one by one — delete or keep">
         <i class="fas fa-play-circle"></i> Review Videos
+    </button>
+    <button class="icon-btn" onclick="openMediaReview('image')"
+            style="border-color:#60a5fa; color:#60a5fa;"
+            title="Review images one by one — delete or keep">
+        <i class="fas fa-images"></i> Review Images
     </button>
 
     <select class="sort-select" onchange="applySort(this.value)">
@@ -709,275 +714,277 @@ async function deleteFile(imageId, btn) {
 }
 </script>
 
-<!-- ── VIDEO REVIEW SLIDER ─────────────────────────────────────────── -->
+<!-- ── MEDIA REVIEW SLIDER (images + videos) ──────────────────────── -->
 <style>
-#vrOverlay {
-    display: none;
-    position: fixed; inset: 0; z-index: 10000;
+#mrOverlay {
+    display: none; position: fixed; inset: 0; z-index: 10000;
     background: rgba(0,0,0,0.96);
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column; align-items: center; justify-content: center;
 }
-#vrOverlay.open { display: flex; }
+#mrOverlay.open { display: flex; }
 
-.vr-header {
+.mr-header {
     position: absolute; top: 0; left: 0; right: 0;
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 20px;
-    background: rgba(0,0,0,0.5);
-    backdrop-filter: blur(6px);
+    background: rgba(0,0,0,0.5); backdrop-filter: blur(6px);
     border-bottom: 1px solid rgba(255,255,255,0.06);
 }
-.vr-title {
-    font-size: 0.8rem; font-weight: 700; color: #efefef;
-    display: flex; align-items: center; gap: 8px;
-}
-.vr-counter { font-size: 0.75rem; color: var(--text-dim); }
-.vr-counter span { color: #a855f7; font-weight: 700; }
-.vr-close {
-    background: none; border: none; color: var(--text-dim);
-    font-size: 1.1rem; cursor: pointer; padding: 4px 8px;
-    transition: color 0.15s;
-}
-.vr-close:hover { color: #fff; }
+.mr-title { font-size: 0.8rem; font-weight: 700; color: #efefef; display: flex; align-items: center; gap: 8px; }
+.mr-counter { font-size: 0.75rem; color: var(--text-dim); }
+.mr-counter span { font-weight: 700; }
+.mr-close { background: none; border: none; color: var(--text-dim); font-size: 1.1rem; cursor: pointer; padding: 4px 8px; transition: color 0.15s; }
+.mr-close:hover { color: #fff; }
 
-.vr-body {
-    display: flex; align-items: center; gap: 16px;
-    width: 100%; max-width: 1100px;
-    padding: 70px 16px 150px;
-}
-.vr-arrow {
-    flex-shrink: 0;
-    width: 44px; height: 44px; border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.12);
-    background: rgba(255,255,255,0.05);
-    color: var(--text-dim); font-size: 1rem;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
+.mr-body { display: flex; align-items: center; gap: 16px; width: 100%; max-width: 1100px; padding: 70px 16px 150px; }
+.mr-arrow {
+    flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05);
+    color: var(--text-dim); font-size: 1rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
     transition: background 0.15s, color 0.15s;
 }
-.vr-arrow:hover { background: rgba(255,255,255,0.12); color: #fff; }
-.vr-arrow:disabled { opacity: 0.2; cursor: default; pointer-events: none; }
+.mr-arrow:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.mr-arrow:disabled { opacity: 0.2; cursor: default; pointer-events: none; }
 
-.vr-player-wrap {
-    flex: 1; display: flex; align-items: center; justify-content: center;
-    min-height: 200px;
-}
-#vrVideo {
-    max-width: 100%; max-height: calc(100vh - 230px);
-    border-radius: 6px; background: #000; outline: none;
-}
-.vr-spinner { color: var(--text-dim); font-size: 2rem; display: none; }
-.vr-spinner.visible { display: block; }
-.vr-no-videos { color: var(--text-dim); text-align: center; display: none; font-size: 0.85rem; line-height: 2; }
-.vr-no-videos.visible { display: block; }
+.mr-media-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 200px; }
+#mrVideo { max-width: 100%; max-height: calc(100vh - 230px); border-radius: 6px; background: #000; outline: none; display: none; }
+#mrImage { max-width: 100%; max-height: calc(100vh - 230px); border-radius: 6px; object-fit: contain; display: none; }
+.mr-spinner { color: var(--text-dim); font-size: 2rem; display: none; }
+.mr-spinner.visible { display: block; }
+.mr-empty { color: var(--text-dim); text-align: center; display: none; font-size: 0.85rem; line-height: 2; }
+.mr-empty.visible { display: block; }
 
-.vr-footer {
+.mr-footer {
     position: absolute; bottom: 0; left: 0; right: 0;
     display: flex; flex-direction: column; align-items: center; gap: 10px;
     padding: 14px 20px 20px;
-    background: rgba(0,0,0,0.6);
-    backdrop-filter: blur(6px);
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
     border-top: 1px solid rgba(255,255,255,0.06);
 }
-.vr-info {
-    display: flex; gap: 12px; align-items: center; font-size: 0.72rem;
-    color: var(--text-dim); flex-wrap: wrap; justify-content: center;
-}
-.vr-filename { color: #efefef; font-weight: 600; }
-.vr-size { color: var(--info); font-weight: 600; }
-.vr-post-link { color: var(--accent); text-decoration: none; }
-.vr-post-link:hover { text-decoration: underline; }
-.vr-actions { display: flex; gap: 10px; }
-.vr-btn {
+.mr-info { display: flex; gap: 12px; align-items: center; font-size: 0.72rem; color: var(--text-dim); flex-wrap: wrap; justify-content: center; }
+.mr-filename { color: #efefef; font-weight: 600; }
+.mr-size { color: var(--info); font-weight: 600; }
+.mr-post-link { color: var(--accent); text-decoration: none; }
+.mr-post-link:hover { text-decoration: underline; }
+.mr-actions { display: flex; gap: 10px; }
+.mr-btn {
     padding: 8px 24px; border-radius: var(--r); border: 1px solid;
     font-size: 0.75rem; font-weight: 600; cursor: pointer;
     display: flex; align-items: center; gap: 7px;
     transition: opacity 0.15s, transform 0.1s;
 }
-.vr-btn:hover { opacity: 0.85; transform: translateY(-1px); }
-.vr-btn:active { transform: translateY(0); }
-.vr-btn.delete { background: rgba(239,68,68,0.15);  border-color: var(--danger);  color: var(--danger); }
-.vr-btn.ignore { background: rgba(234,179,8,0.15);  border-color: #eab308;        color: #eab308; }
-.vr-btn.keep   { background: rgba(34,197,94,0.15);  border-color: var(--success); color: var(--success); }
-.vr-shortcuts  { font-size: 0.6rem; color: rgba(255,255,255,0.2); letter-spacing: 0.04em; }
+.mr-btn:hover { opacity: 0.85; transform: translateY(-1px); }
+.mr-btn:active { transform: translateY(0); }
+.mr-btn.delete { background: rgba(239,68,68,0.15);  border-color: var(--danger);  color: var(--danger); }
+.mr-btn.ignore { background: rgba(234,179,8,0.15);  border-color: #eab308;        color: #eab308; }
+.mr-btn.keep   { background: rgba(34,197,94,0.15);  border-color: var(--success); color: var(--success); }
+.mr-shortcuts  { font-size: 0.6rem; color: rgba(255,255,255,0.2); letter-spacing: 0.04em; }
 </style>
 
-<div id="vrOverlay">
-    <div class="vr-header">
-        <span class="vr-title"><i class="fas fa-play-circle" style="color:#a855f7"></i> Video Review</span>
-        <span class="vr-counter">Video <span id="vrCurrent">—</span> of <span id="vrTotal">—</span></span>
-        <button class="vr-close" onclick="closeVideoReview()" title="Close (Esc)"><i class="fas fa-times"></i></button>
+<div id="mrOverlay">
+    <div class="mr-header">
+        <span class="mr-title" id="mrTitle"><i class="fas fa-images"></i> Media Review</span>
+        <span class="mr-counter">Item <span id="mrCurrent">—</span> of <span id="mrTotal">—</span></span>
+        <button class="mr-close" onclick="mrClose()" title="Close (Esc)"><i class="fas fa-times"></i></button>
     </div>
 
-    <div class="vr-body">
-        <button class="vr-arrow" id="vrPrev" onclick="vrNavigate(-1)" title="Previous (←)">
+    <div class="mr-body">
+        <button class="mr-arrow" id="mrPrev" onclick="mrNavigate(-1)" title="Previous (←)">
             <i class="fas fa-chevron-left"></i>
         </button>
-        <div class="vr-player-wrap">
-            <i class="fas fa-spinner fa-spin vr-spinner" id="vrSpinner"></i>
-            <div class="vr-no-videos" id="vrNoVideos">
-                <i class="fas fa-film" style="font-size:3rem;opacity:0.3;display:block;margin-bottom:12px"></i>
-                No videos left to review.
+        <div class="mr-media-wrap">
+            <i class="fas fa-spinner fa-spin mr-spinner" id="mrSpinner"></i>
+            <div class="mr-empty" id="mrEmpty">
+                <i id="mrEmptyIcon" class="fas fa-images" style="font-size:3rem;opacity:0.3;display:block;margin-bottom:12px"></i>
+                <span id="mrEmptyText">Nothing left to review.</span>
             </div>
-            <video id="vrVideo" controls autoplay muted playsinline style="display:none" onerror="vrVideoError()"></video>
+            <video id="mrVideo" controls autoplay muted playsinline onerror="mrMediaError()"></video>
+            <img   id="mrImage" alt="" onerror="mrMediaError()">
         </div>
-        <button class="vr-arrow" id="vrNext" onclick="vrNavigate(1)" title="Next (→)">
+        <button class="mr-arrow" id="mrNext" onclick="mrNavigate(1)" title="Next (→)">
             <i class="fas fa-chevron-right"></i>
         </button>
     </div>
 
-    <div class="vr-footer">
-        <div class="vr-info">
-            <span class="vr-filename" id="vrFilename"></span>
-            <span class="vr-size" id="vrFileSize"></span>
-            <a class="vr-post-link" id="vrPostLink" href="#" target="_blank" style="display:none"></a>
+    <div class="mr-footer">
+        <div class="mr-info">
+            <span class="mr-filename" id="mrFilename"></span>
+            <span class="mr-size"     id="mrFileSize"></span>
+            <a class="mr-post-link"   id="mrPostLink" href="#" target="_blank" style="display:none"></a>
         </div>
-        <div class="vr-actions">
-            <button class="vr-btn delete" onclick="vrAction('delete')" title="Delete file (D)">
+        <div class="mr-actions">
+            <button class="mr-btn delete" onclick="mrAction('delete')" title="Delete file (D)">
                 <i class="fas fa-trash"></i> Delete
             </button>
-            <button class="vr-btn ignore" onclick="vrAction('ignore')" title="Hide from list (I)">
+            <button class="mr-btn ignore" onclick="mrAction('ignore')" title="Hide from list (I)">
                 <i class="fas fa-eye-slash"></i> Ignore
             </button>
-            <button class="vr-btn keep" onclick="vrAction('keep')" title="Keep &amp; next (K / →)">
+            <button class="mr-btn keep" onclick="mrAction('keep')" title="Keep &amp; next (K / →)">
                 <i class="fas fa-check"></i> Keep
             </button>
         </div>
-        <span class="vr-shortcuts">D = delete &nbsp;·&nbsp; I = ignore &nbsp;·&nbsp; K / → = keep &nbsp;·&nbsp; ← = prev &nbsp;·&nbsp; Esc = close</span>
+        <span class="mr-shortcuts">D = delete &nbsp;·&nbsp; I = ignore &nbsp;·&nbsp; K / → = keep &nbsp;·&nbsp; ← = prev &nbsp;·&nbsp; Esc = close</span>
     </div>
 </div>
 
 <script>
-const VR_BATCH = 20;
-let vrQueue     = [];
-let vrIndex     = 0;
-let vrOffset    = 0;
-let vrTotal     = 0;
-let vrFetching  = false;
-let vrGlobalPos = 0;
+// ── Media Review Slider ──────────────────────────────────────
+const MR_BATCH = 20;
+const mr = { queue: [], index: 0, offset: 0, total: 0, fetching: false, globalPos: 0, mode: 'video' };
 
-function vrFmtBytes(b) {
+const MR_CONFIG = {
+    video: { api: '/api/files/videos-for-review', label: 'Video Review', icon: 'fa-play-circle', color: '#a855f7', emptyIcon: 'fa-film',   emptyText: 'No videos left to review.' },
+    image: { api: '/api/files/images-for-review', label: 'Image Review', icon: 'fa-images',      color: '#60a5fa', emptyIcon: 'fa-images', emptyText: 'No images left to review.' },
+};
+
+function mrFmtBytes(b) {
     if (!b) return '';
     if (b >= 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
     if (b >= 1048576)    return (b / 1048576).toFixed(1) + ' MB';
     return (b / 1024).toFixed(0) + ' KB';
 }
 
-async function openVideoReview() {
-    document.getElementById('vrOverlay').classList.add('open');
+async function openMediaReview(mode) {
+    mr.mode = mode;
+    mr.queue = []; mr.index = 0; mr.offset = 0; mr.total = 0; mr.globalPos = 0;
+    const cfg = MR_CONFIG[mode];
+    document.getElementById('mrTitle').innerHTML =
+        `<i class="fas ${cfg.icon}" style="color:${cfg.color}"></i> ${cfg.label}`;
+    document.getElementById('mrCounter') && (document.getElementById('mrCurrent').textContent = '—');
+    document.getElementById('mrOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
-    vrQueue = []; vrIndex = 0; vrOffset = 0; vrTotal = 0; vrGlobalPos = 0;
-    vrShowSpinner();
-    await vrFetchBatch();
-    vrLoad();
+    mrShowSpinner();
+    await mrFetchBatch();
+    mrLoad();
 }
 
-function closeVideoReview() {
-    document.getElementById('vrOverlay').classList.remove('open');
+function mrClose() {
+    document.getElementById('mrOverlay').classList.remove('open');
     document.body.style.overflow = '';
-    const v = document.getElementById('vrVideo');
+    const v = document.getElementById('mrVideo');
     v.pause(); v.src = '';
+    document.getElementById('mrImage').src = '';
 }
 
-async function vrFetchBatch() {
-    if (vrFetching) return;
-    vrFetching = true;
+async function mrFetchBatch() {
+    if (mr.fetching) return;
+    mr.fetching = true;
     try {
-        const res  = await fetch(`/api/files/videos-for-review?offset=${vrOffset}&limit=${VR_BATCH}`);
+        const cfg = MR_CONFIG[mr.mode];
+        const res  = await fetch(`${cfg.api}?offset=${mr.offset}&limit=${MR_BATCH}`);
         const data = await res.json();
-        vrTotal   = data.total;
-        vrOffset += data.videos.length;
-        vrQueue.push(...data.videos);
-    } catch(e) { showToast('Failed to load videos', false); }
-    vrFetching = false;
+        mr.total   = data.total;
+        mr.offset += data.items.length;
+        mr.queue.push(...data.items);
+    } catch(e) { showToast('Failed to load media', false); }
+    mr.fetching = false;
 }
 
-function vrShowSpinner() {
-    document.getElementById('vrSpinner').classList.add('visible');
-    document.getElementById('vrVideo').style.display = 'none';
-    document.getElementById('vrNoVideos').classList.remove('visible');
+function mrShowSpinner() {
+    document.getElementById('mrSpinner').classList.add('visible');
+    document.getElementById('mrVideo').style.display = 'none';
+    document.getElementById('mrImage').style.display = 'none';
+    document.getElementById('mrEmpty').classList.remove('visible');
 }
 
-function vrLoad() {
-    const spinner  = document.getElementById('vrSpinner');
-    const video    = document.getElementById('vrVideo');
-    const noVideos = document.getElementById('vrNoVideos');
+function mrLoad() {
+    const spinner = document.getElementById('mrSpinner');
+    const video   = document.getElementById('mrVideo');
+    const image   = document.getElementById('mrImage');
+    const empty   = document.getElementById('mrEmpty');
+    const cfg     = MR_CONFIG[mr.mode];
 
-    if (vrQueue.length === 0) {
+    if (mr.queue.length === 0) {
         spinner.classList.remove('visible');
-        video.style.display = 'none';
-        noVideos.classList.add('visible');
-        document.getElementById('vrCurrent').textContent = '—';
-        document.getElementById('vrTotal').textContent = '0';
-        document.getElementById('vrFilename').textContent = '';
-        document.getElementById('vrFileSize').textContent = '';
-        document.getElementById('vrPostLink').style.display = 'none';
-        document.getElementById('vrPrev').disabled = true;
-        document.getElementById('vrNext').disabled = true;
+        video.style.display = 'none'; image.style.display = 'none';
+        document.getElementById('mrEmptyIcon').className = `fas ${cfg.emptyIcon}` + ' ' + document.getElementById('mrEmptyIcon').className.split(' ').slice(2).join(' ');
+        document.getElementById('mrEmptyText').textContent = cfg.emptyText;
+        empty.classList.add('visible');
+        document.getElementById('mrCurrent').textContent = '—';
+        document.getElementById('mrTotal').textContent   = '0';
+        document.getElementById('mrFilename').textContent = '';
+        document.getElementById('mrFileSize').textContent = '';
+        document.getElementById('mrPostLink').style.display = 'none';
+        document.getElementById('mrPrev').disabled = true;
+        document.getElementById('mrNext').disabled = true;
         return;
     }
 
-    const item = vrQueue[vrIndex];
-    vrGlobalPos = vrOffset - vrQueue.length + vrIndex + 1;
+    const item = mr.queue[mr.index];
+    mr.globalPos = mr.offset - mr.queue.length + mr.index + 1;
 
-    document.getElementById('vrCurrent').textContent = vrGlobalPos;
-    document.getElementById('vrTotal').textContent   = vrTotal;
-    document.getElementById('vrFilename').textContent = item.filename || '—';
-    document.getElementById('vrFileSize').textContent = vrFmtBytes(item.file_size);
-    document.getElementById('vrPrev').disabled = (vrGlobalPos <= 1);
-    document.getElementById('vrNext').disabled = (vrGlobalPos >= vrTotal && vrIndex >= vrQueue.length - 1);
+    document.getElementById('mrCurrent').textContent  = mr.globalPos;
+    document.getElementById('mrTotal').textContent    = mr.total;
+    document.getElementById('mrFilename').textContent = item.filename || '—';
+    document.getElementById('mrFileSize').textContent = mrFmtBytes(item.file_size);
+    document.getElementById('mrPrev').disabled = (mr.globalPos <= 1);
+    document.getElementById('mrNext').disabled = (mr.globalPos >= mr.total && mr.index >= mr.queue.length - 1);
 
-    const postLink = document.getElementById('vrPostLink');
+    const postLink = document.getElementById('mrPostLink');
     if (item.post_id && item.post_title) {
         postLink.href = `/details/${item.post_id}`;
-        postLink.textContent = item.post_title.length > 60
-            ? item.post_title.slice(0, 60) + '…' : item.post_title;
+        postLink.textContent = item.post_title.length > 60 ? item.post_title.slice(0, 60) + '…' : item.post_title;
         postLink.style.display = '';
-    } else {
-        postLink.style.display = 'none';
+    } else { postLink.style.display = 'none'; }
+
+    if (!item.web_path) {
+        spinner.classList.remove('visible');
+        video.style.display = 'none'; image.style.display = 'none';
+        empty.classList.add('visible');
+        return;
     }
 
-    if (item.web_path) {
-        vrShowSpinner();
+    mrShowSpinner();
+    if (mr.mode === 'video') {
+        image.style.display = 'none';
         video.src = '/reddit_downloads/' + item.web_path;
         video.load();
-        video.oncanplay = () => {
-            spinner.classList.remove('visible');
-            video.style.display = '';
-            video.play().catch(() => {});
-        };
+        video.oncanplay = () => { spinner.classList.remove('visible'); video.style.display = ''; video.play().catch(() => {}); };
     } else {
-        spinner.classList.remove('visible');
-        video.style.display = 'none';
-        noVideos.classList.add('visible');
+        video.style.display = 'none'; video.src = '';
+        // Use thumb first; on error fall back to full image
+        const src = item.thumb_url || ('/reddit_downloads/' + item.web_path);
+        image.src = src;
+        image.onload  = () => { spinner.classList.remove('visible'); image.style.display = ''; };
+        image.onerror = () => {
+            if (item.thumb_url && image.src !== '/reddit_downloads/' + item.web_path) {
+                image.src = '/reddit_downloads/' + item.web_path;
+            } else { mrMediaError(); }
+        };
     }
 
-    if (vrIndex >= vrQueue.length - 5 && vrOffset < vrTotal) vrFetchBatch();
+    if (mr.index >= mr.queue.length - 5 && mr.offset < mr.total) mrFetchBatch();
 }
 
-function vrVideoError() {
-    document.getElementById('vrSpinner').classList.remove('visible');
-    showToast('Failed to load video — try next', false);
+function mrMediaError() {
+    document.getElementById('mrSpinner').classList.remove('visible');
+    showToast('Failed to load — try next', false);
 }
 
-async function vrNavigate(dir) {
-    const video = document.getElementById('vrVideo');
-    video.pause();
+async function mrNavigate(dir) {
+    document.getElementById('mrVideo').pause();
     if (dir === 1) {
-        if (vrIndex < vrQueue.length - 1) { vrIndex++; }
-        else if (vrOffset < vrTotal) { vrShowSpinner(); await vrFetchBatch(); vrIndex++; }
+        if (mr.index < mr.queue.length - 1) { mr.index++; }
+        else if (mr.offset < mr.total) { mrShowSpinner(); await mrFetchBatch(); mr.index++; }
         else return;
     } else {
-        if (vrIndex > 0) vrIndex--; else return;
+        if (mr.index > 0) mr.index--; else return;
     }
-    vrLoad();
+    mrLoad();
 }
 
-async function vrAction(action) {
-    if (vrQueue.length === 0) return;
-    const item = vrQueue[vrIndex];
-    document.getElementById('vrVideo').pause();
+async function mrAction(action) {
+    if (mr.queue.length === 0) return;
+    const item = mr.queue[mr.index];
+    document.getElementById('mrVideo').pause();
+
+    if (action === 'keep') {
+        if (mr.index < mr.queue.length - 1) { mr.index++; }
+        else if (mr.offset < mr.total) { mrShowSpinner(); await mrFetchBatch(); mr.index++; }
+        else return;
+        mrLoad(); return;
+    }
 
     if (action === 'delete') {
         try {
@@ -986,8 +993,6 @@ async function vrAction(action) {
             if (!d.success) { showToast(d.error || 'Delete failed', false); return; }
             showToast('Deleted');
         } catch(e) { showToast('Error', false); return; }
-        vrQueue.splice(vrIndex, 1);
-        vrTotal = Math.max(0, vrTotal - 1);
     } else if (action === 'ignore') {
         try {
             const res = await fetch(`/api/files/ignore/${item.id}`, { method: 'POST' });
@@ -995,31 +1000,24 @@ async function vrAction(action) {
             if (d.error) { showToast(d.error, false); return; }
             showToast('Ignored');
         } catch(e) { showToast('Error', false); return; }
-        vrQueue.splice(vrIndex, 1);
-        vrTotal = Math.max(0, vrTotal - 1);
-    } else {
-        // keep — just advance
-        if (vrIndex < vrQueue.length - 1) { vrIndex++; }
-        else if (vrOffset < vrTotal) { vrShowSpinner(); await vrFetchBatch(); vrIndex++; }
-        else return;
-        vrLoad();
-        return;
     }
 
-    if (vrIndex >= vrQueue.length) vrIndex = Math.max(0, vrQueue.length - 1);
-    if (vrQueue.length < 5 && vrOffset < vrTotal) { vrShowSpinner(); await vrFetchBatch(); }
-    vrLoad();
+    mr.queue.splice(mr.index, 1);
+    mr.total = Math.max(0, mr.total - 1);
+    if (mr.index >= mr.queue.length) mr.index = Math.max(0, mr.queue.length - 1);
+    if (mr.queue.length < 5 && mr.offset < mr.total) { mrShowSpinner(); await mrFetchBatch(); }
+    mrLoad();
 }
 
 document.addEventListener('keydown', e => {
-    if (!document.getElementById('vrOverlay').classList.contains('open')) return;
+    if (!document.getElementById('mrOverlay').classList.contains('open')) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     const k = e.key;
-    if (k === 'Escape')                      closeVideoReview();
-    else if (k === 'ArrowRight' || k === 'k' || k === 'K') vrAction('keep');
-    else if (k === 'ArrowLeft')              vrNavigate(-1);
-    else if (k === 'd' || k === 'D')         vrAction('delete');
-    else if (k === 'i' || k === 'I')         vrAction('ignore');
+    if (k === 'Escape')                                    mrClose();
+    else if (k === 'ArrowRight' || k === 'k' || k === 'K') mrAction('keep');
+    else if (k === 'ArrowLeft')                            mrNavigate(-1);
+    else if (k === 'd' || k === 'D')                       mrAction('delete');
+    else if (k === 'i' || k === 'I')                       mrAction('ignore');
 });
 </script>
 {% endblock %}
