@@ -31,6 +31,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
+try:
+    from PIL import Image as _PILImage
+except ImportError:
+    _PILImage = None
+
 # ── Stop flag ─────────────────────────────────────────────────────────────
 _stop_requested = False
 
@@ -126,7 +131,7 @@ def _invalidate_phash(file_path: str) -> None:
 def _to_rgb(img):
     """Convert any mode to RGB, compositing transparency onto white."""
     if img.mode in ('RGBA', 'LA'):
-        bg = Image.new('RGB', img.size, (255, 255, 255))
+        bg = _PILImage.new('RGB', img.size, (255, 255, 255))
         bg.paste(img.convert('RGB'), mask=img.split()[-1])
         return bg
     if img.mode == 'P':
@@ -143,14 +148,12 @@ def compress_file(path: Path, quality: int,
 
     Strategy:
       1. Re-encode at the requested quality.
-      2. If the result is still >= min_size_bytes, downscale to MOBILE_MAX_PX
-         on the longest side and re-encode again.
+      2. If the result is still >= min_size_bytes, progressively downscale
+         through MOBILE_RESIZE_STEPS until below threshold.
 
     Returns bytes saved (positive), 0 if nothing helped, or None if skipped/failed.
     """
-    try:
-        from PIL import Image
-    except ImportError:
+    if _PILImage is None:
         print('Pillow not installed — run: pip install Pillow', file=sys.stderr)
         sys.exit(1)
 
@@ -158,7 +161,7 @@ def compress_file(path: Path, quality: int,
     ext = path.suffix.lower()
 
     try:
-        with Image.open(path) as img:
+        with _PILImage.open(path) as img:
             fmt = img.format  # 'JPEG', 'PNG', …
 
             if ext in IMAGE_EXT or fmt == 'JPEG':
@@ -175,7 +178,7 @@ def compress_file(path: Path, quality: int,
         # ── Step 2: if still too large, progressively downscale for mobile ──
         if min_size_bytes and path.stat().st_size >= min_size_bytes \
                 and ext in (IMAGE_EXT | PNG_EXT):
-            with Image.open(path) as img2:
+            with _PILImage.open(path) as img2:
                 img_rgb = _to_rgb(img2)
             for max_dim in MOBILE_RESIZE_STEPS:
                 w, h = img_rgb.size
@@ -183,7 +186,7 @@ def compress_file(path: Path, quality: int,
                     scale = max_dim / max(w, h)
                     img_rgb = img_rgb.resize(
                         (max(1, int(w * scale)), max(1, int(h * scale))),
-                        Image.LANCZOS)
+                        _PILImage.LANCZOS)
                 img_rgb.save(path, 'JPEG', quality=quality, optimize=True,
                              progressive=True)
                 if path.stat().st_size < min_size_bytes:
