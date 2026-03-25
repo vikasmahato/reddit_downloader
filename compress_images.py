@@ -171,7 +171,11 @@ def compress_file(path: Path, quality: int,
                              progressive=True)
 
             elif ext in PNG_EXT or fmt == 'PNG':
-                img.save(path, 'PNG', optimize=True)
+                # Convert large PNGs straight to JPEG — lossless PNG
+                # optimization is extremely slow and saves < 5% on big files
+                img_out = _to_rgb(img)
+                img_out.save(path, 'JPEG', quality=quality, optimize=True,
+                             progressive=True)
 
             else:
                 return None  # unsupported format
