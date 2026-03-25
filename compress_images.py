@@ -198,7 +198,7 @@ def compress_file(path: Path, quality: int,
 
     except Exception as e:
         msg = str(e)
-        silent = 'cannot identify' in msg or 'NoneType' in msg
+        silent = any(s in msg for s in ('cannot identify', 'NoneType', 'truncated', 'OSError'))
         if not silent:
             print(f'[warn] Could not compress {path}: {e}', file=sys.stderr)
         return None
