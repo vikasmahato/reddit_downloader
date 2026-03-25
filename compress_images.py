@@ -194,7 +194,9 @@ def compress_file(path: Path, quality: int,
         return saved  # may be negative if already well-compressed
 
     except Exception as e:
-        print(f'[warn] Could not compress {path}: {e}', file=sys.stderr)
+        msg = str(e)
+        if 'cannot identify' not in msg:
+            print(f'[warn] Could not compress {path}: {e}', file=sys.stderr)
         return None
 
 
