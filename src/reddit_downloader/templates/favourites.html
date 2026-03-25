@@ -177,6 +177,14 @@
     transition: opacity 0.15s;
 }
 .fav-strip-img:hover { opacity: 1; }
+.fav-strip-video-icon {
+    width: 48px; height: 36px;
+    border-radius: 2px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-2); color: var(--text-muted); font-size: 0.9rem;
+}
 
 .fav-actions {
     display: flex;
@@ -238,12 +246,16 @@
 
         <!-- Media -->
         <div class="fav-media">
-            {% if post.get('thumb_path') %}
-                <img class="fav-thumb" src="/thumbs/{{ post.thumb_path }}"
-                     alt="{{ post.title }}" loading="lazy">
-            {% elif post.get('web_path') %}
+            {% if post.get('thumb_url') %}
+                <img class="fav-thumb" src="{{ post.thumb_url }}"
+                     alt="{{ post.title }}" loading="lazy"
+                     {% if not post.get('is_video') %}data-fallback="/reddit_downloads/{{ post.web_path or '' }}"{% endif %}
+                     onerror="favThumbError(this)">
+            {% elif post.get('web_path') and not post.get('is_video') %}
                 <img class="fav-thumb" src="/reddit_downloads/{{ post.web_path }}"
                      alt="{{ post.title }}" loading="lazy">
+            {% elif post.get('is_video') %}
+                <div class="fav-placeholder"><i class="fas fa-film"></i></div>
             {% else %}
                 <div class="fav-placeholder"><i class="fas fa-image"></i></div>
             {% endif %}
@@ -267,13 +279,19 @@
         {% if post.post_images | length > 1 %}
         <div class="fav-images-strip">
             {% for img in post.post_images %}
-            {% if img.get('thumb_path') %}
+            {% if img.get('thumb_url') %}
                 <a href="/reddit_downloads/{{ img.web_path or '' }}" target="_blank">
-                    <img class="fav-strip-img" src="/thumbs/{{ img.thumb_path }}" loading="lazy">
+                    <img class="fav-strip-img" src="{{ img.thumb_url }}" loading="lazy"
+                         {% if not img.get('is_video') %}data-fallback="/reddit_downloads/{{ img.web_path or '' }}"{% endif %}
+                         onerror="favThumbError(this)">
                 </a>
-            {% elif img.get('web_path') %}
+            {% elif img.get('web_path') and not img.get('is_video') %}
                 <a href="/reddit_downloads/{{ img.web_path }}" target="_blank">
                     <img class="fav-strip-img" src="/reddit_downloads/{{ img.web_path }}" loading="lazy">
+                </a>
+            {% elif img.get('is_video') %}
+                <a href="/reddit_downloads/{{ img.web_path or '' }}" target="_blank">
+                    <span class="fav-strip-video-icon"><i class="fas fa-film"></i></span>
                 </a>
             {% endif %}
             {% endfor %}
@@ -362,6 +380,19 @@
 "></div>
 
 <script>
+function favThumbError(img) {
+    img.onerror = null;
+    const fallback = img.dataset.fallback;
+    if (fallback) {
+        img.src = fallback;
+    } else {
+        const ph = document.createElement('div');
+        ph.className = img.classList.contains('fav-strip-img') ? 'fav-strip-video-icon' : 'fav-placeholder';
+        ph.innerHTML = '<i class="fas fa-film"></i>';
+        img.replaceWith(ph);
+    }
+}
+
 function showToast(msg, ok=true) {
     const t = document.getElementById('toast');
     t.innerHTML = `<i class="fas fa-${ok ? 'check-circle' : 'exclamation-circle'}"

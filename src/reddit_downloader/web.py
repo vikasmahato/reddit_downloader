@@ -3092,9 +3092,9 @@ def favourites():
                 wp = ui_handler.make_web_path(img['file_path'])
                 if wp:
                     img['web_path'] = wp
-                tp = ui_handler.make_thumb_path(img['file_path'])
-                if tp:
-                    img['thumb_path'] = tp
+                    img['thumb_url'] = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
+                ext = Path(img['file_path']).suffix.lower()
+                img['is_video'] = ext in ('.mp4', '.webm', '.mov', '.avi', '.mkv', '.gif')
             posts[pid]['post_images'].append(img)
 
         post_list = list(posts.values())
@@ -3102,8 +3102,9 @@ def favourites():
             if p['post_images']:
                 first = p['post_images'][0]
                 p['web_path']   = first.get('web_path')
-                p['thumb_path'] = first.get('thumb_path')
+                p['thumb_url']  = first.get('thumb_url')
                 p['filename']   = first.get('filename')
+                p['is_video']   = first.get('is_video', False)
 
         total_pages = max(1, (total + per_page - 1) // per_page)
         return render_template('favourites.html',
