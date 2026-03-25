@@ -176,11 +176,14 @@ def run_compress(
     min_size_bytes: int = DEFAULT_MIN_SIZE_KB * 1024,
     quality: int = DEFAULT_QUALITY,
     progress_json: bool = False,
+    stats_file: Optional[Path] = None,
 ) -> dict:
     """
     Compress all oversized images under `folder`.
     Returns a summary dict.
     """
+    import datetime
+
     global _stop_requested
     _stop_requested = False
 
@@ -211,7 +214,12 @@ def run_compress(
 
     if total == 0:
         emit('Nothing to compress.', 0, 0)
-        return {'total': 0, 'compressed': 0, 'skipped': 0, 'saved_bytes': 0}
+        return {'total': 0, 'compressed': 0, 'skipped': 0, 'saved_bytes': 0,
+                'size_before_bytes': 0, 'size_after_bytes': 0}
+
+    # ── Before stats ──────────────────────────────────────────────────────
+    size_before = sum(fp.stat().st_size for fp in candidates)
+    emit(f'Before: {total:,} files, {_fmt(size_before)} total')
 
     compressed = skipped = 0
     total_saved = 0
@@ -247,18 +255,56 @@ def run_compress(
         _invalidate_phash(str(fp))
 
     elapsed = time.time() - t0
-    summary = (
-        f'Done in {elapsed:.1f}s — '
-        f'{compressed:,} compressed, {skipped:,} skipped, '
-        f'{_fmt(total_saved)} saved.'
-    )
-    emit(summary, total, total, total_saved)
+
+    # ── After stats ───────────────────────────────────────────────────────
+    size_after = sum(fp.stat().st_size for fp in candidates)
+    actual_saved = size_before - size_after
+
+    summary_lines = [
+        f'',
+        f'=== Compression Stats ===',
+        f'Run at      : {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+        f'Folder      : {folder}',
+        f'Threshold   : {_fmt(min_size_bytes)}',
+        f'Quality     : {quality}',
+        f'',
+        f'BEFORE',
+        f'  Files     : {total:,}',
+        f'  Disk used : {_fmt(size_before)}  ({size_before:,} bytes)',
+        f'',
+        f'AFTER',
+        f'  Files     : {total:,}',
+        f'  Disk used : {_fmt(size_after)}  ({size_after:,} bytes)',
+        f'',
+        f'RESULT',
+        f'  Compressed: {compressed:,}',
+        f'  Skipped   : {skipped:,}',
+        f'  Saved     : {_fmt(actual_saved)}  ({actual_saved:,} bytes)',
+        f'  Reduction : {100 * actual_saved / size_before:.1f}%' if size_before else '  Reduction : 0%',
+        f'  Time      : {elapsed:.1f}s',
+        f'',
+    ]
+
+    for line in summary_lines:
+        emit(line)
+
+    if stats_file:
+        try:
+            stats_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(stats_file, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(summary_lines) + '\n')
+            emit(f'Stats saved to {stats_file}')
+        except Exception as e:
+            print(f'[warn] Could not write stats file: {e}', file=sys.stderr)
+
     return {
         'total': total,
         'compressed': compressed,
         'skipped': skipped,
-        'saved_bytes': total_saved,
+        'saved_bytes': actual_saved,
         'elapsed_sec': round(elapsed, 1),
+        'size_before_bytes': size_before,
+        'size_after_bytes': size_after,
     }
 
 
@@ -285,6 +331,10 @@ def main():
         '--progress-json', action='store_true',
         help='Emit JSON progress lines (used by the web UI)',
     )
+    ap.add_argument(
+        '--stats-file', default=None,
+        help='Append before/after stats to this file (e.g. logs/compress_stats.txt)',
+    )
     args = ap.parse_args()
 
     folder = Path(args.folder).resolve()
@@ -297,6 +347,7 @@ def main():
         min_size_bytes=args.min_size_kb * 1024,
         quality=args.quality,
         progress_json=args.progress_json,
+        stats_file=Path(args.stats_file) if args.stats_file else None,
     )
 
 
