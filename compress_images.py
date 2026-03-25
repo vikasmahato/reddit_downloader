@@ -53,7 +53,8 @@ IMAGE_EXT   = {'.jpg', '.jpeg'}     # formats we re-encode
 PNG_EXT     = {'.png'}              # lossless-optimised separately
 SKIP_DIRS   = {'deleted', 'thumbs'} # never touch these sub-folders
 
-MOBILE_MAX_PX = 1080                # max dimension when downscaling for mobile
+# Progressive resize steps tried when file stays above threshold after quality compression
+MOBILE_RESIZE_STEPS = [1920, 1440, 1080, 720]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
