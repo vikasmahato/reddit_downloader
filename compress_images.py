@@ -53,6 +53,8 @@ IMAGE_EXT   = {'.jpg', '.jpeg'}     # formats we re-encode
 PNG_EXT     = {'.png'}              # lossless-optimised separately
 SKIP_DIRS   = {'deleted', 'thumbs'} # never touch these sub-folders
 
+MOBILE_MAX_PX = 1080                # max dimension when downscaling for mobile
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -120,10 +122,30 @@ def _invalidate_phash(file_path: str) -> None:
 
 # ── Compression ───────────────────────────────────────────────────────────
 
-def compress_file(path: Path, quality: int) -> Optional[int]:
+def _to_rgb(img):
+    """Convert any mode to RGB, compositing transparency onto white."""
+    if img.mode in ('RGBA', 'LA'):
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        bg.paste(img.convert('RGB'), mask=img.split()[-1])
+        return bg
+    if img.mode == 'P':
+        return img.convert('RGB')
+    if img.mode != 'RGB':
+        return img.convert('RGB')
+    return img
+
+
+def compress_file(path: Path, quality: int,
+                  min_size_bytes: int = DEFAULT_MIN_SIZE_KB * 1024) -> Optional[int]:
     """
     Compress a single image file in-place.
-    Returns bytes saved (positive) or None if skipped / failed.
+
+    Strategy:
+      1. Re-encode at the requested quality.
+      2. If the result is still >= min_size_bytes, downscale to MOBILE_MAX_PX
+         on the longest side and re-encode again.
+
+    Returns bytes saved (positive), 0 if nothing helped, or None if skipped/failed.
     """
     try:
         from PIL import Image
@@ -139,18 +161,7 @@ def compress_file(path: Path, quality: int) -> Optional[int]:
             fmt = img.format  # 'JPEG', 'PNG', …
 
             if ext in IMAGE_EXT or fmt == 'JPEG':
-                # Convert palette / RGBA → RGB before saving as JPEG
-                if img.mode in ('RGBA', 'P', 'LA'):
-                    bg = Image.new('RGB', img.size, (255, 255, 255))
-                    mask = img.split()[-1] if img.mode in ('RGBA', 'LA') else None
-                    if mask:
-                        bg.paste(img.convert('RGB'), mask=mask)
-                    else:
-                        bg.paste(img.convert('RGB'))
-                    img_out = bg
-                else:
-                    img_out = img.convert('RGB') if img.mode != 'RGB' else img
-
+                img_out = _to_rgb(img)
                 img_out.save(path, 'JPEG', quality=quality, optimize=True,
                              progressive=True)
 
@@ -159,6 +170,23 @@ def compress_file(path: Path, quality: int) -> Optional[int]:
 
             else:
                 return None  # unsupported format
+
+        # ── Step 2: if still too large, progressively downscale for mobile ──
+        if min_size_bytes and path.stat().st_size >= min_size_bytes \
+                and ext in (IMAGE_EXT | PNG_EXT):
+            with Image.open(path) as img2:
+                img_rgb = _to_rgb(img2)
+            for max_dim in MOBILE_RESIZE_STEPS:
+                w, h = img_rgb.size
+                if max(w, h) > max_dim:
+                    scale = max_dim / max(w, h)
+                    img_rgb = img_rgb.resize(
+                        (max(1, int(w * scale)), max(1, int(h * scale))),
+                        Image.LANCZOS)
+                img_rgb.save(path, 'JPEG', quality=quality, optimize=True,
+                             progressive=True)
+                if path.stat().st_size < min_size_bytes:
+                    break  # good enough
 
         new_size = path.stat().st_size
         saved = original_size - new_size
@@ -209,6 +237,9 @@ def run_compress(
             except OSError:
                 pass
 
+    # Sort largest first so biggest savings come early
+    candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+
     total = len(candidates)
     emit(f'Found {total:,} image(s) above {_fmt(min_size_bytes)} threshold.', 0, total)
 
@@ -230,7 +261,7 @@ def run_compress(
             emit(f'Stopped at {i-1}/{total}.', i - 1, total, total_saved)
             break
 
-        saved = compress_file(fp, quality)
+        saved = compress_file(fp, quality, min_size_bytes)
 
         if saved is None:
             skipped += 1
@@ -245,8 +276,9 @@ def run_compress(
         compressed += 1
         total_saved += saved
         new_size = fp.stat().st_size
+        still_large = ' [still >{} after downscale]'.format(_fmt(min_size_bytes)) if new_size >= min_size_bytes else ''
         emit(
-            f'[{i}/{total}] {fp.name}  −{_fmt(saved)}  → {_fmt(new_size)}',
+            f'[{i}/{total}] {fp.name}  −{_fmt(saved)}  → {_fmt(new_size)}{still_large}',
             i, total, total_saved,
         )
 
