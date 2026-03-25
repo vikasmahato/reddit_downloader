@@ -32,7 +32,8 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from PIL import Image as _PILImage
+    from PIL import Image as _PILImage, ImageFile as _PILImageFile
+    _PILImageFile.LOAD_TRUNCATED_IMAGES = True  # handle partially-downloaded files
 except ImportError:
     _PILImage = None
 
@@ -198,7 +199,7 @@ def compress_file(path: Path, quality: int,
 
     except Exception as e:
         msg = str(e)
-        silent = any(s in msg for s in ('cannot identify', 'NoneType', 'truncated', 'OSError'))
+        silent = any(s in msg for s in ('cannot identify', 'NoneType'))
         if not silent:
             print(f'[warn] Could not compress {path}: {e}', file=sys.stderr)
         return None
