@@ -469,15 +469,7 @@ function batchDelete(ids, reloadFlairs = false) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function buildThumbUrl(p) {
-    if (p.thumb) return '/thumbs/' + p.thumb;
-    if (!p.file_path) return null;
-    const norm = p.file_path.replace(/\\/g, '/');
-    const marker = 'reddit_downloads/';
-    const idx = norm.indexOf(marker);
-    if (idx === -1) return null;
-    const rel = norm.slice(idx + marker.length);
-    const withoutExt = rel.replace(/\.[^.]+$/, '');
-    return '/thumbs/' + withoutExt + '.jpg';
+    return p.thumb_url || null;
 }
 
 function escHtml(s) {

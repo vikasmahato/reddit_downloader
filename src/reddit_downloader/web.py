@@ -2262,7 +2262,11 @@ def api_flair_posts():
         result = []
         for row in rows:
             fp = row.get('file_path') or ''
-            thumb = ui_handler.make_thumb_path(fp) if fp else None
+            thumb_url = None
+            if fp:
+                wp = ui_handler.make_web_path(fp)
+                if wp:
+                    thumb_url = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
             result.append({
                 'post_id':     row['post_id'],
                 'title':       row.get('title') or '',
@@ -2273,8 +2277,7 @@ def api_flair_posts():
                 'created_utc': row['created_utc'].isoformat() if row.get('created_utc') and hasattr(row['created_utc'], 'isoformat') else str(row.get('created_utc') or ''),
                 'permalink':   row.get('permalink') or '',
                 'image_count': row.get('image_count') or 0,
-                'thumb':       thumb,
-                'file_path':   fp,
+                'thumb_url':   thumb_url,
             })
         return jsonify({'success': True, 'posts': result, 'total': total, 'page': page, 'per_page': per_page})
     except Exception as e:
