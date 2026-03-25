@@ -230,7 +230,7 @@ def run_compress(
 
     # Collect candidate files
     emit(f'Scanning {folder} …')
-    candidates = []
+    candidates = []  # list of (size, path)
     for root, dirs, files in os.walk(folder):
         # Skip special sub-directories
         dirs[:] = [d for d in dirs if d.lower() not in SKIP_DIRS]
@@ -239,13 +239,16 @@ def run_compress(
             if fp.suffix.lower() not in COMPRESSIBLE:
                 continue
             try:
-                if fp.stat().st_size >= min_size_bytes:
-                    candidates.append(fp)
+                sz = fp.stat().st_size
+                if sz >= min_size_bytes:
+                    candidates.append((sz, fp))
             except OSError:
                 pass
 
-    # Sort largest first so biggest savings come early
-    candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+    # Sort largest first so biggest savings come early (size already cached)
+    candidates.sort(key=lambda t: t[0], reverse=True)
+    size_before = sum(sz for sz, _ in candidates)
+    candidates = [fp for _, fp in candidates]
 
     total = len(candidates)
     emit(f'Found {total:,} image(s) above {_fmt(min_size_bytes)} threshold.', 0, total)
@@ -255,8 +258,7 @@ def run_compress(
         return {'total': 0, 'compressed': 0, 'skipped': 0, 'saved_bytes': 0,
                 'size_before_bytes': 0, 'size_after_bytes': 0}
 
-    # ── Before stats ──────────────────────────────────────────────────────
-    size_before = sum(fp.stat().st_size for fp in candidates)
+    # ── Before stats (sizes already cached from scan) ─────────────────────
     emit(f'Before: {total:,} files, {_fmt(size_before)} total')
 
     compressed = skipped = 0
