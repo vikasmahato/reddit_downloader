@@ -31,6 +31,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+_FILE_TIMEOUT_SECS = 30  # kill any PIL operation that hangs longer than this
+
 try:
     from PIL import Image as _PILImage, ImageFile as _PILImageFile
     _PILImageFile.LOAD_TRUNCATED_IMAGES = True  # handle partially-downloaded files
@@ -161,7 +163,12 @@ def compress_file(path: Path, quality: int,
     original_size = path.stat().st_size
     ext = path.suffix.lower()
 
+    def _alarm(signum, frame):
+        raise TimeoutError(f'PIL timed out after {_FILE_TIMEOUT_SECS}s')
+
     try:
+        signal.signal(signal.SIGALRM, _alarm)
+        signal.alarm(_FILE_TIMEOUT_SECS)
         with _PILImage.open(path) as img:
             fmt = img.format  # 'JPEG', 'PNG', …
 
@@ -197,11 +204,17 @@ def compress_file(path: Path, quality: int,
                 if path.stat().st_size < min_size_bytes:
                     break  # good enough
 
+        signal.alarm(0)  # cancel timeout
         new_size = path.stat().st_size
         saved = original_size - new_size
         return saved  # may be negative if already well-compressed
 
+    except TimeoutError as e:
+        signal.alarm(0)
+        print(f'[warn] Skipped (timeout): {path.name}', file=sys.stderr)
+        return None
     except Exception as e:
+        signal.alarm(0)
         msg = str(e)
         silent = any(s in msg for s in ('cannot identify', 'NoneType'))
         if not silent:
