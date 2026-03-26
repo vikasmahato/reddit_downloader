@@ -518,6 +518,15 @@ class RedditImageDownloader:
             else:
                 # Save metadata for non-GIF files
 
+                # ── PNG→JPEG conversion + size optimisation ──────────────
+                orig_filepath = filepath
+                filepath = self._compress_image(filepath)
+                if filepath != orig_filepath:
+                    filename = filepath.name
+                # Recompute size and hash after optimisation
+                downloaded = filepath.stat().st_size
+                file_hash = hashlib.md5(filepath.read_bytes())
+
                 # ── Perceptual-hash deduplication ────────────────────────
                 # Check for near-duplicates using pHash (same algorithm as the
                 # Duplicates page).  Falls back gracefully if cv2 is unavailable
@@ -1426,6 +1435,79 @@ class RedditImageDownloader:
                 url += '/'
             return url + '.jpg'
         return url
+
+    # ── Image optimisation ────────────────────────────────────────────────
+
+    _COMPRESS_TARGET_BYTES = 1 * 1024 * 1024   # 1 MB
+    _COMPRESS_QUALITY      = 85
+    _RESIZE_STEPS          = [1920, 1440, 1080, 720]
+    _IMAGE_EXTS            = {'.jpg', '.jpeg', '.png'}
+
+    def _compress_image(self, filepath: Path) -> Path:
+        """Convert PNG→JPEG and/or compress/resize until file is < 1 MB.
+
+        Returns the (possibly renamed) final Path.
+        If PIL is unavailable or the file is not a supported image, returns
+        the original path unchanged.
+        """
+        try:
+            from PIL import Image as _Img, ImageFile as _ImgFile
+            _ImgFile.LOAD_TRUNCATED_IMAGES = True
+        except ImportError:
+            return filepath
+
+        ext = filepath.suffix.lower()
+        if ext not in self._IMAGE_EXTS:
+            return filepath
+
+        try:
+            with _Img.open(filepath) as img:
+                # Convert to RGB (handles RGBA, P, LA modes and PNG)
+                if img.mode in ('RGBA', 'LA'):
+                    bg = _Img.new('RGB', img.size, (255, 255, 255))
+                    bg.paste(img.convert('RGB'), mask=img.split()[-1])
+                    img_rgb = bg
+                elif img.mode != 'RGB':
+                    img_rgb = img.convert('RGB')
+                else:
+                    img_rgb = img.copy()
+
+            # Determine output path (PNG → rename to .jpg)
+            out_path = filepath.with_suffix('.jpg')
+
+            # Step 1: re-encode at target quality
+            img_rgb.save(out_path, 'JPEG', quality=self._COMPRESS_QUALITY,
+                         optimize=True, progressive=True)
+
+            # Remove original PNG only after successful JPEG write
+            if ext == '.png' and out_path != filepath:
+                try:
+                    filepath.unlink()
+                except OSError:
+                    pass
+                filepath = out_path
+
+            # Step 2: progressively downscale if still >= 1 MB
+            if filepath.stat().st_size >= self._COMPRESS_TARGET_BYTES:
+                with _Img.open(filepath) as img2:
+                    img_rgb = img2.convert('RGB')
+                for max_dim in self._RESIZE_STEPS:
+                    w, h = img_rgb.size
+                    if max(w, h) > max_dim:
+                        scale = max_dim / max(w, h)
+                        img_rgb = img_rgb.resize(
+                            (max(1, int(w * scale)), max(1, int(h * scale))),
+                            _Img.LANCZOS)
+                    img_rgb.save(filepath, 'JPEG', quality=self._COMPRESS_QUALITY,
+                                 optimize=True, progressive=True)
+                    if filepath.stat().st_size < self._COMPRESS_TARGET_BYTES:
+                        break
+
+            return filepath
+
+        except Exception as e:
+            logger.warning(f"⚠️  Image optimisation failed for {filepath.name}: {e}")
+            return filepath
 
     def _generate_thumbnail(self, source_path: Path, subreddit: str = "") -> Optional[Path]:
         """Generate a thumbnail for an image or video file.
