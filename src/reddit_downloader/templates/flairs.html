@@ -319,9 +319,21 @@ function renderPosts(posts) {
         card.dataset.postId = p.post_id;
 
         const thumbUrl = buildThumbUrl(p);
-        const imgHtml = thumbUrl
-            ? `<img src="${thumbUrl}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-image\\'></i></div>'">`
-            : `<div class="post-card-no-thumb"><i class="fas fa-image"></i></div>`;
+        const fullUrl = p.web_path ? `/reddit_downloads/${p.web_path}` : null;
+        let imgHtml;
+        if (p.is_video) {
+            if (thumbUrl) {
+                imgHtml = `<img src="${thumbUrl}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-film\\'></i></div>'">`;
+            } else {
+                imgHtml = `<div class="post-card-no-thumb"><i class="fas fa-film"></i></div>`;
+            }
+        } else if (thumbUrl) {
+            imgHtml = `<img src="${thumbUrl}" loading="lazy" data-fallback="${fullUrl || ''}" onerror="flairThumbErr(this)">`;
+        } else if (fullUrl) {
+            imgHtml = `<img src="${fullUrl}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-image\\'></i></div>'">`;
+        } else {
+            imgHtml = `<div class="post-card-no-thumb"><i class="fas fa-image"></i></div>`;
+        }
 
         const date = p.created_utc ? p.created_utc.slice(0,10) : '';
         card.innerHTML = `
@@ -470,6 +482,19 @@ function batchDelete(ids, reloadFlairs = false) {
 // ── Helpers ───────────────────────────────────────────────────────────────
 function buildThumbUrl(p) {
     return p.thumb_url || null;
+}
+
+function flairThumbErr(img) {
+    img.onerror = null;
+    const fallback = img.dataset.fallback;
+    if (fallback) {
+        img.src = fallback;
+    } else {
+        const ph = document.createElement('div');
+        ph.className = 'post-card-no-thumb';
+        ph.innerHTML = '<i class="fas fa-image"></i>';
+        img.replaceWith(ph);
+    }
 }
 
 function escHtml(s) {

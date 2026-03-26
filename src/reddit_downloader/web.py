@@ -2263,10 +2263,15 @@ def api_flair_posts():
         for row in rows:
             fp = row.get('file_path') or ''
             thumb_url = None
+            web_path = None
+            is_video = False
             if fp:
                 wp = ui_handler.make_web_path(fp)
                 if wp:
+                    web_path = wp
                     thumb_url = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/')
+                ext = Path(fp).suffix.lower()
+                is_video = ext in ('.mp4', '.webm', '.mov', '.avi', '.mkv', '.gif')
             result.append({
                 'post_id':     row['post_id'],
                 'title':       row.get('title') or '',
@@ -2278,6 +2283,8 @@ def api_flair_posts():
                 'permalink':   row.get('permalink') or '',
                 'image_count': row.get('image_count') or 0,
                 'thumb_url':   thumb_url,
+                'web_path':    web_path,
+                'is_video':    is_video,
             })
         return jsonify({'success': True, 'posts': result, 'total': total, 'page': page, 'per_page': per_page})
     except Exception as e:
