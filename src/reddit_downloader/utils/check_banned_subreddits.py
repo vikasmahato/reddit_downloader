@@ -71,10 +71,10 @@ def main():
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT id, name FROM scrape_lists WHERE type = 'subreddit' AND status = 'enabled' ORDER BY name"
+        "SELECT id, name FROM scrape_lists WHERE type = 'subreddit' AND status != 'banned' ORDER BY name"
     )
     rows = cursor.fetchall()
-    logger.info(f"Checking {len(rows)} enabled subreddit(s)...")
+    logger.info(f"Checking {len(rows)} subreddit(s) (enabled + disabled)...")
 
     newly_banned = []
     for item_id, name in rows:
