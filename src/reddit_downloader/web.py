@@ -1097,6 +1097,57 @@ def delete_posts_batch():
             conn.close()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+_SESSION_ID_RE = __import__('re').compile(r'05[0-9a-fA-F]{64}')
+
+
+def _extract_session_id(text: str):
+    if not text:
+        return None
+    m = _SESSION_ID_RE.search(text)
+    return m.group(0) if m else None
+
+
+@app.route('/socials')
+def socials():
+    """Page showing session IDs scraped from text-only subreddits."""
+    try:
+        import re as _re
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT p.id, p.title, p.subreddit, p.permalink, p.selftext,
+                   p.created_utc, p.score, p.author
+            FROM posts p
+            JOIN scrape_lists sl ON sl.name = p.subreddit AND sl.type = 'subreddit'
+            WHERE sl.media_types LIKE '%text%'
+              AND p.selftext IS NOT NULL AND p.selftext != ''
+            ORDER BY p.created_utc DESC
+            LIMIT 1000
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+
+        for row in rows:
+            combined = (row.get('title') or '') + ' ' + (row.get('selftext') or '')
+            row['session_id'] = _extract_session_id(combined)
+            if row.get('created_utc'):
+                try:
+                    from datetime import datetime as _dt
+                    row['created_at'] = _dt.fromtimestamp(float(row['created_utc'])).strftime('%Y-%m-%d %H:%M')
+                except Exception:
+                    row['created_at'] = str(row['created_utc'])
+            else:
+                row['created_at'] = ''
+
+        stats = ui_handler.get_stats()
+        subreddits = ui_handler.get_subreddits()
+        users = ui_handler.get_users()
+        return render_template('socials.html', rows=rows, stats=stats,
+                               subreddits=subreddits, users=users)
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
 @app.route('/scrape-lists')
 def scrape_lists():
     """Page for managing scrape lists."""

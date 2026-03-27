@@ -1422,21 +1422,119 @@ class RedditImageDownloader:
         logger.success(f"\n✅ Download complete: {successful}/{total} images downloaded")
         return successful
 
-    def download_from_subreddit(self, subreddit: str, limit: int = 25, media_types: set = None):
-        """Download images from a subreddit."""
-        logger.info(f"\n🔍 Fetching images from r/{subreddit}...")
-        image_posts = self.get_image_urls_from_subreddit(subreddit, limit, media_types=media_types)
-        
-        if not image_posts:
-            logger.warning("❌ No images found")
+    def get_text_posts_from_subreddit(self, subreddit: str, limit: int = 25) -> List[Dict]:
+        """Fetch self/text posts from a subreddit."""
+        if not self.reddit:
+            return []
+        try:
+            sub = self.reddit.subreddit(subreddit)
+            text_posts = []
+            for post in sub.new(limit=limit):
+                if not post.is_self:
+                    continue
+                if self._is_post_downloaded(post.permalink):
+                    continue
+                post_username = str(post.author) if post.author else ''
+                comments_list = []
+                try:
+                    post.comments.replace_more(limit=0)
+                    for c in post.comments[:10]:
+                        comments_list.append({
+                            'author': str(c.author) if c.author else '',
+                            'body': c.body,
+                            'score': c.score,
+                            'created_utc': c.created_utc,
+                        })
+                except Exception:
+                    pass
+                flair_text = post.link_flair_text if hasattr(post, 'link_flair_text') and post.link_flair_text else None
+                text_posts.append({
+                    'reddit_id': post.id,
+                    'title': post.title,
+                    'selftext': post.selftext,
+                    'author': str(post.author),
+                    'subreddit': subreddit,
+                    'permalink': post.permalink,
+                    'created_utc': post.created_utc,
+                    'score': post.score,
+                    'post_username': post_username,
+                    'comments': json.dumps(comments_list),
+                    'flair': flair_text,
+                })
+            return text_posts
+        except Exception as e:
+            logger.error(f"❌ Error fetching text posts from r/{subreddit}: {e}")
+            return []
+
+    def save_text_posts_to_db(self, text_posts: List[Dict]) -> int:
+        """Save text posts to the posts table (no media download)."""
+        if not text_posts:
             return 0
-        
-        logger.info(f"📸 Found {len(image_posts)} image posts")
-        
-        # For gallery posts, we'll pass the full image_posts list to download_from_urls
-        # which will handle downloading all images from each gallery
-        urls = [post['url'] for post in image_posts]
-        return self.download_from_urls(urls, subreddit, image_posts)
+        conn = self._get_db_connection()
+        cursor = conn.cursor()
+        saved = 0
+        for post in text_posts:
+            try:
+                created_utc = post.get('created_utc', 0)
+                if isinstance(created_utc, (int, float)):
+                    created_utc_dt = datetime.fromtimestamp(created_utc)
+                else:
+                    created_utc_dt = created_utc or datetime.now()
+                cursor.execute('''
+                    INSERT INTO posts
+                        (reddit_id, title, author, subreddit, permalink, created_utc,
+                         score, post_username, comments, flair, selftext)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        title=VALUES(title), score=VALUES(score),
+                        selftext=VALUES(selftext)
+                ''', (
+                    post.get('reddit_id'), post.get('title'), post.get('author'),
+                    post.get('subreddit'), post.get('permalink'), created_utc_dt,
+                    post.get('score', 0), post.get('post_username'),
+                    post.get('comments'), post.get('flair'), post.get('selftext'),
+                ))
+                if cursor.lastrowid:
+                    # Track permalink to prevent re-scraping
+                    permalink = post.get('permalink')
+                    if permalink:
+                        cursor.execute('INSERT IGNORE INTO permalinks (permalink) VALUES (%s)', (permalink,))
+                    saved += 1
+            except Exception as e:
+                logger.error(f"Error saving text post: {e}")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return saved
+
+    def download_from_subreddit(self, subreddit: str, limit: int = 25, media_types: set = None):
+        """Download images/videos/text from a subreddit."""
+        if media_types is None:
+            media_types = {'image', 'video'}
+        downloaded = 0
+
+        if 'text' in media_types:
+            logger.info(f"\n📝 Fetching text posts from r/{subreddit}...")
+            text_posts = self.get_text_posts_from_subreddit(subreddit, limit)
+            if text_posts:
+                saved = self.save_text_posts_to_db(text_posts)
+                logger.info(f"📝 Saved {saved} text posts from r/{subreddit}")
+                downloaded += saved
+            else:
+                logger.info("📝 No new text posts")
+
+        media_types_no_text = media_types - {'text'}
+        if media_types_no_text:
+            logger.info(f"\n🔍 Fetching media from r/{subreddit}...")
+            image_posts = self.get_image_urls_from_subreddit(subreddit, limit, media_types=media_types_no_text)
+            if image_posts:
+                logger.info(f"📸 Found {len(image_posts)} media posts")
+                urls = [post['url'] for post in image_posts]
+                downloaded += self.download_from_urls(urls, subreddit, image_posts)
+            else:
+                logger.info("📸 No new media posts")
+
+        return downloaded
 
     def resolve_imgur_url(self, url: str) -> str:
         """Resolve imgur URLs to direct image links."""

@@ -55,6 +55,7 @@ CREATE TABLE `scrape_lists` (
   UNIQUE KEY `unique_type_name` (`type`,`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ALTER TABLE posts ADD COLUMN IF NOT EXISTS selftext TEXT NULL;
 -- ALTER TABLE scrape_lists ADD COLUMN IF NOT EXISTS media_types VARCHAR(50) NOT NULL DEFAULT 'image,video' AFTER zero_result_count;
 -- UPDATE scrape_lists SET media_types = 'image,video' WHERE media_types IS NULL OR media_types = '';
 -- ALTER TABLE scrape_lists ADD COLUMN IF NOT EXISTS description TEXT NULL AFTER media_types;

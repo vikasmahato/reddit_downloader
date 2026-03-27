@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}Socials — Reddit Vault{% endblock %}
+
+{% block content %}
+<div class="socials-header">
+    <h2><i class="fas fa-id-card me-2"></i>Socials</h2>
+    <span class="ms-3 count-badge">{{ rows|length }} posts</span>
+</div>
+
+<div class="card section-card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0" id="socialsTable">
+                <thead>
+                    <tr>
+                        <th>Header</th>
+                        <th>Subreddit</th>
+                        <th>Session ID</th>
+                        <th>Description</th>
+                        <th>Post</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td class="col-header">{{ row.title }}</td>
+                        <td>
+                            <a href="/?subreddit={{ row.subreddit }}" class="sub-link">r/{{ row.subreddit }}</a>
+                        </td>
+                        <td class="col-session">
+                            {% if row.session_id %}
+                            <div class="session-wrap">
+                                <span class="session-id" title="{{ row.session_id }}">{{ row.session_id[:12] }}…</span>
+                                <button class="copy-btn" onclick="copySession(this, '{{ row.session_id }}')" title="Copy Session ID">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="col-desc">
+                            {% if row.selftext %}
+                            <div class="desc-text" title="{{ row.selftext | e }}">{{ row.selftext | truncate(120) }}</div>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="https://www.reddit.com{{ row.permalink }}" target="_blank" rel="noopener noreferrer" class="post-link" title="Open on Reddit">
+                                <i class="fab fa-reddit"></i>
+                            </a>
+                        </td>
+                        <td class="col-date">{{ row.created_at }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if rows|length == 0 %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">No text posts scraped yet.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="copyToast" class="copy-toast">Copied!</div>
+
+<script>
+function copySession(btn, sessionId) {
+    navigator.clipboard.writeText(sessionId).then(() => {
+        const icon = btn.querySelector('i');
+        icon.className = 'fas fa-check';
+        btn.classList.add('copied');
+        const toast = document.getElementById('copyToast');
+        toast.classList.add('show');
+        setTimeout(() => {
+            icon.className = 'fas fa-copy';
+            btn.classList.remove('copied');
+            toast.classList.remove('show');
+        }, 1500);
+    });
+}
+</script>
+
+<style>
+.socials-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+.socials-header h2 {
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0;
+}
+.count-badge {
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--surface-2);
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+.section-card { margin-bottom: 1rem; }
+.table-dark { background: transparent !important; }
+.table-dark th {
+    background: var(--surface-2) !important;
+    border-color: var(--border) !important;
+    color: var(--text-muted) !important;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0.55rem 0.75rem;
+    white-space: nowrap;
+}
+.table-dark td {
+    border-color: var(--border) !important;
+    padding: 0.5rem 0.75rem;
+    vertical-align: top;
+    font-size: 0.75rem;
+}
+.table-dark tbody tr:hover > td { background: rgba(255,69,0,0.04) !important; }
+.col-header {
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+}
+.sub-link { color: var(--accent) !important; text-decoration: none; }
+.sub-link:hover { color: var(--accent-hi) !important; }
+.col-session { white-space: nowrap; }
+.session-wrap { display: flex; align-items: center; gap: 6px; }
+.session-id {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    cursor: default;
+}
+.copy-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 0.65rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    line-height: 1.6;
+}
+.copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+.copy-btn.copied { color: var(--success); border-color: var(--success); }
+.col-desc { max-width: 360px; }
+.desc-text {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.post-link { color: var(--accent) !important; font-size: 0.9rem; }
+.post-link:hover { color: var(--accent-hi) !important; }
+.col-date {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.copy-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--surface-2);
+    color: var(--success);
+    border: 1px solid var(--success);
+    border-radius: 6px;
+    padding: 6px 18px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    z-index: 9999;
+}
+.copy-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+</style>
+{% endblock %}
