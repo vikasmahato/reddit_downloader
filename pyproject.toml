@@ -17,6 +17,7 @@ dependencies = [
     "python-telegram-bot>=20.5,<21",
     "loguru>=0.7.0",
     "nudenet>=3.4.2",
+    "flask-compress>=1.14",
 ]
 
 [project.scripts]

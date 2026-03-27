@@ -9,6 +9,7 @@ Provides search, filtering, and gallery view capabilities.
 import os
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests as http_requests
 from flask import Flask, render_template, request, jsonify, send_file, url_for, send_from_directory, redirect
@@ -21,6 +22,40 @@ from PIL import Image, ExifTags
 import mysql.connector
 from mysql.connector import pooling
 import configparser
+
+try:
+    from flask_compress import Compress as _FlaskCompress
+    _HAS_COMPRESS = True
+except ImportError:
+    _HAS_COMPRESS = False
+
+
+class _TTLCache:
+    """Simple thread-safe in-memory TTL cache."""
+    def __init__(self):
+        self._store: dict = {}
+        self._lock = threading.Lock()
+
+    def get(self, key, ttl):
+        with self._lock:
+            entry = self._store.get(key)
+            if entry and time.monotonic() - entry[0] < ttl:
+                return entry[1], True
+        return None, False
+
+    def set(self, key, value):
+        with self._lock:
+            self._store[key] = (time.monotonic(), value)
+
+    def invalidate(self, key=None):
+        with self._lock:
+            if key:
+                self._store.pop(key, None)
+            else:
+                self._store.clear()
+
+
+_cache = _TTLCache()
 
 # File-backed cache for related subreddits (name_lower -> list of related names).
 # Loaded from disk at startup; written back whenever new entries are fetched.
@@ -103,10 +138,19 @@ _current_dir = Path(__file__).parent
 _template_dir = _current_dir / 'templates'
 _static_folder = Path.cwd() / 'reddit_downloads'
 
-app = Flask(__name__, 
+app = Flask(__name__,
             template_folder=str(_template_dir),
-            static_url_path='/reddit_downloads', 
+            static_url_path='/reddit_downloads',
             static_folder=str(_static_folder))
+
+if _HAS_COMPRESS:
+    app.config['COMPRESS_MIMETYPES'] = [
+        'text/html', 'text/css', 'application/json',
+        'application/javascript', 'text/javascript',
+    ]
+    app.config['COMPRESS_LEVEL'] = 6
+    app.config['COMPRESS_MIN_SIZE'] = 500
+    _FlaskCompress(app)
 
 # Setup thumbs folder
 _thumbs_folder = Path.cwd() / 'reddit_downloads_thumbs'
@@ -481,7 +525,10 @@ class RedditImageUI:
 
 
     def get_stats(self):
-        """Get download statistics from MySQL."""
+        """Get download statistics from MySQL (cached 60 s)."""
+        cached, hit = _cache.get('stats', ttl=60)
+        if hit:
+            return cached
         try:
             conn = _get_db_connection()
             cursor = conn.cursor()
@@ -509,7 +556,7 @@ class RedditImageUI:
             cursor.execute("SELECT COALESCE(SUM(file_size), 0) FROM images WHERE file_size > 0")
             total_size = cursor.fetchone()[0] or 0
             conn.close()
-            return {
+            result = {
                 'total_images': total_images,
                 'total_size_mb': round(total_size / (1024 * 1024), 2),
                 'subreddit_counts': subreddit_counts,
@@ -517,16 +564,18 @@ class RedditImageUI:
                 'total_subreddits': len(subreddit_counts),
                 'total_users': total_users
             }
+            _cache.set('stats', result)
+            return result
         except Exception as e:
             print(f"Stats error: {e}")
             return {}
 
     def get_subreddits(self, only_enabled=True):
-        """Get list of subreddits from scrape_lists table for fast loading.
-        
-        Args:
-            only_enabled: If True, only return enabled subreddits. If False, return all subreddits.
-        """
+        """Get list of subreddits from scrape_lists table (cached 5 min)."""
+        cache_key = 'subreddits_enabled' if only_enabled else 'subreddits_all'
+        cached, hit = _cache.get(cache_key, ttl=300)
+        if hit:
+            return cached
         try:
             conn = _get_db_connection()
             cursor = conn.cursor()
@@ -536,19 +585,28 @@ class RedditImageUI:
                 cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' ORDER BY FIELD(status, 'enabled', 'disabled', 'banned'), name")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
+            _cache.set(cache_key, results)
             return results
         except Exception as e:
             print(f"Subreddits error: {e}")
             return []
 
     def get_users(self):
-        """Get list of unique users from MySQL."""
+        """Get top authors by post count (cached 5 min)."""
+        cached, hit = _cache.get('users', ttl=300)
+        if hit:
+            return cached
         try:
             conn = _get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT author FROM posts WHERE author IS NOT NULL AND author != '' ORDER BY author")
+            cursor.execute("""
+                SELECT author FROM posts
+                WHERE author IS NOT NULL AND author != ''
+                GROUP BY author ORDER BY COUNT(*) DESC LIMIT 200
+            """)
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
+            _cache.set('users', results)
             return results
         except Exception as e:
             print(f"Users error: {e}")
@@ -600,7 +658,7 @@ def index():
         deleted_filter = True
     elif deleted == '0':
         deleted_filter = False
-    per_page = 200
+    per_page = 60
     offset = (page - 1) * per_page
     images = ui_handler.get_all_images(
         limit=per_page,
@@ -610,9 +668,6 @@ def index():
         user=user if user else None,
         deleted=deleted_filter
     )
-    for img in images:
-        if img.get('file_path'):
-            img['exif'] = extract_exif_data(img['file_path'])
     stats = ui_handler.get_stats()
     subreddits = ui_handler.get_subreddits(only_enabled=only_enabled)
     users = ui_handler.get_users()
@@ -677,7 +732,9 @@ def serve_image(filename):
 def serve_thumbnail(filename):
     """Serve thumbnail images."""
     try:
-        return send_from_directory(str(_thumbs_folder), filename)
+        resp = send_from_directory(str(_thumbs_folder), filename)
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
     except Exception:
         return "Thumbnail not found", 404
 
