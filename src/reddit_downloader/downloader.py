@@ -838,24 +838,12 @@ class RedditImageDownloader:
         cursor = conn.cursor()
         
         # Get items with zero_result_count
-        try:
-            cursor.execute("""
-                SELECT name, COALESCE(zero_result_count, 0) as zero_result_count 
-                FROM scrape_lists
-                WHERE type = %s AND enabled = TRUE
-                ORDER BY last_scraped_at ASC, name ASC
-            """, (list_type,))
-        except mysql.connector.Error:
-            # Fallback if column doesn't exist yet
-            cursor.execute("""
-                SELECT name FROM scrape_lists
-                WHERE type = %s AND enabled = TRUE
-                ORDER BY last_scraped_at ASC, name ASC
-            """, (list_type,))
-            results = cursor.fetchall()
-            items = [row[0] for row in results]
-            conn.close()
-            return items
+        cursor.execute("""
+            SELECT name, COALESCE(zero_result_count, 0) as zero_result_count
+            FROM scrape_lists
+            WHERE type = %s AND status = 'enabled'
+            ORDER BY last_scraped_at ASC, name ASC
+        """, (list_type,))
         
         results = cursor.fetchall()
         items = []
@@ -935,6 +923,22 @@ class RedditImageDownloader:
         except mysql.connector.Error as e:
             logger.debug(f"Error resetting zero result count: {e}")
 
+    def mark_as_banned(self, list_type: str, name: str):
+        """Mark a subreddit or user as banned in the scrape list."""
+        try:
+            conn = self._get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE scrape_lists
+                SET status = 'banned'
+                WHERE type = %s AND name = %s
+            """, (list_type, name))
+            conn.commit()
+            conn.close()
+            logger.warning(f"🚫 Marked {list_type} '{name}' as banned in scrape list")
+        except Exception as e:
+            logger.debug(f"Error marking {list_type} '{name}' as banned: {e}")
+
     def _is_newly_added_subreddit(self, subreddit_name: str) -> bool:
         """Check if a subreddit has never been scraped before (last_scraped_at is NULL)."""
         try:
@@ -1008,6 +1012,7 @@ class RedditImageDownloader:
                     except SubredditAccessError as err:
                         forbidden_subreddits.append(clean_name)
                         logger.warning(f"🚫 Skipping r/{clean_name}: {err}")
+                        self.mark_as_banned('subreddit', clean_name)
         
         # Scrape user posts
         if scrape_type in ["all", "users"]:

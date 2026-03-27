@@ -531,9 +531,9 @@ class RedditImageUI:
             conn = _get_db_connection()
             cursor = conn.cursor()
             if only_enabled:
-                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND enabled = TRUE ORDER BY name")
+                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND status = 'enabled' ORDER BY name")
             else:
-                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' ORDER BY enabled DESC, name")
+                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' ORDER BY FIELD(status, 'enabled', 'disabled', 'banned'), name")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
             return results
@@ -1105,17 +1105,17 @@ def scrape_lists():
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
-            SELECT sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at,
+            SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at
-            ORDER BY sl.type, sl.enabled DESC, sl.name
+            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at
+            ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
         """)
-        
+
         items = cursor.fetchall()
         conn.close()
-        
+
         # Convert datetime objects to strings for template
         for item in items:
             for key in ['created_at', 'updated_at', 'last_scraped_at']:
@@ -1123,14 +1123,14 @@ def scrape_lists():
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
             # Ensure post_count is an integer
             item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
-        
+
         stats = ui_handler.get_stats()
         subreddits = ui_handler.get_subreddits()
         users = ui_handler.get_users()
-        return render_template('scrape_lists.html', 
-                             items=items, 
-                             stats=stats, 
-                             subreddits=subreddits, 
+        return render_template('scrape_lists.html',
+                             items=items,
+                             stats=stats,
+                             subreddits=subreddits,
                              users=users)
     except Exception as e:
         return f"Error: {e}", 500
@@ -1143,17 +1143,17 @@ def api_get_scrape_lists():
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
-            SELECT sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at,
+            SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.enabled, sl.created_at, sl.updated_at, sl.last_scraped_at
-            ORDER BY sl.type, sl.enabled DESC, sl.name
+            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at
+            ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
         """)
-        
+
         items = cursor.fetchall()
         conn.close()
-        
+
         # Convert datetime objects to strings
         for item in items:
             for key in ['created_at', 'updated_at', 'last_scraped_at']:
@@ -1161,7 +1161,7 @@ def api_get_scrape_lists():
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
             # Ensure post_count is an integer
             item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
-        
+
         return jsonify({'success': True, 'items': items})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1188,8 +1188,8 @@ def api_add_scrape_list():
         
         try:
             cursor.execute("""
-                INSERT INTO scrape_lists (type, name, enabled)
-                VALUES (%s, %s, TRUE)
+                INSERT INTO scrape_lists (type, name, status)
+                VALUES (%s, %s, 'enabled')
             """, (list_type, name))
             conn.commit()
             item_id = cursor.lastrowid
@@ -1208,27 +1208,30 @@ def api_update_scrape_list(item_id):
     try:
         data = request.get_json()
         name = data.get('name', '').strip()
-        enabled = data.get('enabled')
-        
+        status = data.get('status')
+
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
-        
+
+        if status is not None and status not in ('enabled', 'disabled', 'banned'):
+            return jsonify({'success': False, 'error': 'Invalid status. Must be "enabled", "disabled", or "banned"'}), 400
+
         # Clean name (remove r/ or u/ prefix if present)
         name = name.replace('r/', '').replace('u/', '').strip()
-        
+
         conn = _get_db_connection()
         cursor = conn.cursor()
-        
+
         # Build update query dynamically
         updates = ['name = %s']
         params = [name]
-        
-        if enabled is not None:
-            updates.append('enabled = %s')
-            params.append(bool(enabled))
-        
+
+        if status is not None:
+            updates.append('status = %s')
+            params.append(status)
+
         params.append(item_id)
-        
+
         cursor.execute(f"""
             UPDATE scrape_lists
             SET {', '.join(updates)}
@@ -1265,22 +1268,23 @@ def api_delete_scrape_list(item_id):
 
 @app.route('/api/scrape-lists/<int:item_id>/toggle', methods=['POST'])
 def api_toggle_scrape_list(item_id):
-    """API endpoint to toggle enabled status of a scrape list item."""
+    """API endpoint to toggle status of a scrape list item (enabled↔disabled; banned→enabled)."""
     try:
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT enabled FROM scrape_lists WHERE id = %s", (item_id,))
+        cursor.execute("SELECT status FROM scrape_lists WHERE id = %s", (item_id,))
         result = cursor.fetchone()
-        
+
         if not result:
             conn.close()
             return jsonify({'success': False, 'error': 'Item not found'}), 404
-        
-        new_enabled = not result['enabled']
-        cursor.execute("UPDATE scrape_lists SET enabled = %s WHERE id = %s", (new_enabled, item_id))
+
+        current = result['status']
+        new_status = 'disabled' if current == 'enabled' else 'enabled'
+        cursor.execute("UPDATE scrape_lists SET status = %s WHERE id = %s", (new_status, item_id))
         conn.commit()
         conn.close()
-        return jsonify({'success': True, 'enabled': new_enabled, 'message': 'Status updated successfully'})
+        return jsonify({'success': True, 'status': new_status, 'message': 'Status updated successfully'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1313,12 +1317,12 @@ def api_subreddit_map_data():
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
-            SELECT sl.id, sl.name, sl.enabled,
+            SELECT sl.id, sl.name, sl.status,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
             WHERE sl.type = 'subreddit'
-            GROUP BY sl.id, sl.name, sl.enabled
+            GROUP BY sl.id, sl.name, sl.status
             ORDER BY sl.name
         """)
         scraped = cursor.fetchall()
@@ -1394,7 +1398,7 @@ def api_subreddit_map_data():
             nodes.append({
                 'id': sub['name'],
                 'name': sub['name'],
-                'status': 'enabled' if sub['enabled'] else 'disabled',
+                'status': sub['status'],
                 'db_id': sub['id'],
                 'post_count': int(sub.get('post_count') or 0),
                 'in_list': True,
@@ -1530,7 +1534,7 @@ def api_add_scrape_list_by_name(name):
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO scrape_lists (type, name, enabled) VALUES ('subreddit', %s, TRUE)",
+                "INSERT INTO scrape_lists (type, name, status) VALUES ('subreddit', %s, 'enabled')",
                 (name,)
             )
             conn.commit()
@@ -1552,18 +1556,18 @@ def api_toggle_scrape_list_by_name(name):
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            "SELECT id, enabled FROM scrape_lists WHERE name = %s AND type = 'subreddit'",
+            "SELECT id, status FROM scrape_lists WHERE name = %s AND type = 'subreddit'",
             (name,)
         )
         result = cursor.fetchone()
         if not result:
             conn.close()
             return jsonify({'success': False, 'error': 'Not found in scrape list'}), 404
-        new_enabled = not result['enabled']
-        cursor.execute("UPDATE scrape_lists SET enabled = %s WHERE id = %s", (new_enabled, result['id']))
+        new_status = 'disabled' if result['status'] == 'enabled' else 'enabled'
+        cursor.execute("UPDATE scrape_lists SET status = %s WHERE id = %s", (new_status, result['id']))
         conn.commit()
         conn.close()
-        return jsonify({'success': True, 'enabled': new_enabled, 'id': result['id']})
+        return jsonify({'success': True, 'status': new_status, 'id': result['id']})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

@@ -42,8 +42,8 @@
                                     </strong>
                                 </td>
                                 <td>
-                                    <span class="status-dot {% if item.enabled %}status-enabled{% else %}status-disabled{% endif %}" id="status-{{ item.id }}">
-                                        {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
+                                    <span class="status-dot status-{{ item.status }}" id="status-{{ item.id }}">
+                                        {{ item.status|capitalize }}
                                     </span>
                                 </td>
                                 <td>
@@ -62,11 +62,11 @@
                                         <a href="/?subreddit={{ item.name }}" class="btn btn-outline-success" title="View Gallery">
                                             <i class="fas fa-images"></i>
                                         </a>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', {% if item.enabled %}true{% else %}false{% endif %})">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})">
-                                            <i class="fas fa-toggle-{% if item.enabled %}on{% else %}off{% endif %}"></i>
+                                        <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
+                                            <i class="fas fa-toggle-{% if item.status == 'enabled' %}on{% else %}off{% endif %}"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-danger" onclick="deleteItem({{ item.id }}, 'r/{{ item.name }}')">
                                             <i class="fas fa-trash"></i>
@@ -116,8 +116,8 @@
                                     <strong>u/{{ item.name }}</strong>
                                 </td>
                                 <td>
-                                    <span class="status-dot {% if item.enabled %}status-enabled{% else %}status-disabled{% endif %}" id="status-{{ item.id }}">
-                                        {% if item.enabled %}Enabled{% else %}Disabled{% endif %}
+                                    <span class="status-dot status-{{ item.status }}" id="status-{{ item.id }}">
+                                        {{ item.status|capitalize }}
                                     </span>
                                 </td>
                                 <td>
@@ -133,11 +133,11 @@
                                         <a href="/?user={{ item.name }}" class="btn btn-outline-success" title="View posts by this user">
                                             <i class="fas fa-images"></i>
                                         </a>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', {% if item.enabled %}true{% else %}false{% endif %})">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})">
-                                            <i class="fas fa-toggle-{% if item.enabled %}on{% else %}off{% endif %}"></i>
+                                        <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
+                                            <i class="fas fa-toggle-{% if item.status == 'enabled' %}on{% else %}off{% endif %}"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-danger" onclick="deleteItem({{ item.id }}, 'u/{{ item.name }}')">
                                             <i class="fas fa-trash"></i>
@@ -213,12 +213,12 @@
                         <input type="text" class="form-control" id="editName" required>
                     </div>
                     <div class="mb-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="editEnabled">
-                            <label class="form-check-label" for="editEnabled">
-                                Enabled
-                            </label>
-                        </div>
+                        <label for="editStatus" class="form-label">Status</label>
+                        <select class="form-select" id="editStatus">
+                            <option value="enabled">Enabled</option>
+                            <option value="disabled">Disabled</option>
+                            <option value="banned">Banned</option>
+                        </select>
                     </div>
                 </form>
             </div>
@@ -236,12 +236,12 @@ let currentEditId = null;
 function addItem() {
     const type = document.getElementById('addType').value;
     const name = document.getElementById('addName').value.trim();
-    
+
     if (!type || !name) {
         alert('Please fill in all fields');
         return;
     }
-    
+
     fetch('/api/scrape-lists', {
         method: 'POST',
         headers: {
@@ -262,13 +262,13 @@ function addItem() {
     });
 }
 
-function editItem(id, type, name, enabled) {
+function editItem(id, type, name, status) {
     currentEditId = id;
     document.getElementById('editId').value = id;
     document.getElementById('editType').value = type === 'subreddit' ? 'Subreddit' : 'User';
     document.getElementById('editName').value = name;
-    document.getElementById('editEnabled').checked = enabled;
-    
+    document.getElementById('editStatus').value = status;
+
     const editModal = new bootstrap.Modal(document.getElementById('editModal'));
     editModal.show();
 }
@@ -276,19 +276,19 @@ function editItem(id, type, name, enabled) {
 function updateItem() {
     const id = currentEditId;
     const name = document.getElementById('editName').value.trim();
-    const enabled = document.getElementById('editEnabled').checked;
-    
+    const status = document.getElementById('editStatus').value;
+
     if (!name) {
         alert('Name is required');
         return;
     }
-    
+
     fetch(`/api/scrape-lists/${id}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, enabled })
+        body: JSON.stringify({ name, status })
     })
     .then(response => response.json())
     .then(data => {
@@ -304,10 +304,6 @@ function updateItem() {
 }
 
 function toggleItem(id) {
-    if (!confirm('Are you sure you want to toggle this item?')) {
-        return;
-    }
-    
     fetch(`/api/scrape-lists/${id}/toggle`, {
         method: 'POST',
         headers: {
@@ -318,14 +314,14 @@ function toggleItem(id) {
     .then(data => {
         if (data.success) {
             const statusBadge = document.getElementById(`status-${id}`);
-            statusBadge.textContent = data.enabled ? 'Enabled' : 'Disabled';
-            statusBadge.className = `status-dot ${data.enabled ? 'status-enabled' : 'status-disabled'}`;
-            
+            statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            statusBadge.className = `status-dot status-${data.status}`;
+
             // Update toggle button icon
             const row = document.getElementById(`row-${id}`);
             const toggleBtn = row.querySelector('button[onclick*="toggleItem"]');
             const icon = toggleBtn.querySelector('i');
-            icon.className = `fas fa-toggle-${data.enabled ? 'on' : 'off'}`;
+            icon.className = `fas fa-toggle-${data.status === 'enabled' ? 'on' : 'off'}`;
         } else {
             alert('Error: ' + (data.error || 'Failed to toggle item'));
         }
@@ -339,7 +335,7 @@ function deleteItem(id, name) {
     if (!confirm(`Are you sure you want to delete ${name}? This action cannot be undone.`)) {
         return;
     }
-    
+
     fetch(`/api/scrape-lists/${id}`, {
         method: 'DELETE',
         headers: {
@@ -428,6 +424,8 @@ document.getElementById('addModal').addEventListener('hidden.bs.modal', function
 .status-enabled::before { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .status-disabled { color: var(--text-muted); }
 .status-disabled::before { background: var(--text-muted); }
+.status-banned { color: #e74c3c; }
+.status-banned::before { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
 </style>
 
 {% endblock %}
