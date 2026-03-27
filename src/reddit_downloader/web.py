@@ -1184,24 +1184,33 @@ def api_add_scrape_list():
         data = request.get_json()
         list_type = data.get('type')
         name = data.get('name', '').strip()
-        
+        media_types = data.get('media_types', 'image,video')
+        description = data.get('description', '').strip() or None
+
         if not list_type or list_type not in ['subreddit', 'user']:
             return jsonify({'success': False, 'error': 'Invalid type. Must be "subreddit" or "user"'}), 400
-        
+
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
-        
+
+        valid_types = {'image', 'video', 'text'}
+        parts = [t.strip() for t in media_types.split(',') if t.strip()]
+        if not parts or not all(t in valid_types for t in parts):
+            media_types = 'image,video'
+        else:
+            media_types = ','.join(parts)
+
         # Clean name (remove r/ or u/ prefix if present)
         name = name.replace('r/', '').replace('u/', '').strip()
-        
+
         conn = _get_db_connection()
         cursor = conn.cursor()
-        
+
         try:
             cursor.execute("""
-                INSERT INTO scrape_lists (type, name, status)
-                VALUES (%s, %s, 'enabled')
-            """, (list_type, name))
+                INSERT INTO scrape_lists (type, name, status, media_types, description)
+                VALUES (%s, %s, 'enabled', %s, %s)
+            """, (list_type, name, media_types, description))
             conn.commit()
             item_id = cursor.lastrowid
             conn.close()

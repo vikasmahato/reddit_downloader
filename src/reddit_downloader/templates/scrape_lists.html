@@ -83,7 +83,14 @@
                                         <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}', {{ item.description | tojson }})">
+                                        <button type="button" class="btn btn-outline-primary edit-btn"
+                                            data-id="{{ item.id }}"
+                                            data-type="{{ item.type }}"
+                                            data-name="{{ item.name }}"
+                                            data-status="{{ item.status }}"
+                                            data-media-types="{{ item.media_types or 'image,video' }}"
+                                            data-description="{{ item.description or '' }}"
+                                            onclick="editItem(this)">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
@@ -170,7 +177,14 @@
                                         <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}', {{ item.description | tojson }})">
+                                        <button type="button" class="btn btn-outline-primary edit-btn"
+                                            data-id="{{ item.id }}"
+                                            data-type="{{ item.type }}"
+                                            data-name="{{ item.name }}"
+                                            data-status="{{ item.status }}"
+                                            data-media-types="{{ item.media_types or 'image,video' }}"
+                                            data-description="{{ item.description or '' }}"
+                                            onclick="editItem(this)">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
@@ -219,6 +233,27 @@
                         <label for="addName" class="form-label">Name</label>
                         <input type="text" class="form-control" id="addName" placeholder="e.g., BarelyLegalTeens or u/username" required>
                         <small class="text-muted">You can include r/ or u/ prefix, it will be cleaned automatically</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Media Types</label>
+                        <div class="d-flex gap-3 mt-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="addMediaImage" value="image" checked>
+                                <label class="form-check-label" for="addMediaImage"><i class="fas fa-image me-1"></i>Images</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="addMediaVideo" value="video" checked>
+                                <label class="form-check-label" for="addMediaVideo"><i class="fas fa-film me-1"></i>Videos</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="addMediaText" value="text">
+                                <label class="form-check-label" for="addMediaText"><i class="fas fa-align-left me-1"></i>Text</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="addDescription" class="form-label">Description <small class="text-muted">(optional)</small></label>
+                        <input type="text" class="form-control" id="addDescription" placeholder="e.g. Found via r/…">
                     </div>
                 </form>
             </div>
@@ -295,18 +330,21 @@ let currentEditId = null;
 function addItem() {
     const type = document.getElementById('addType').value;
     const name = document.getElementById('addName').value.trim();
+    const selectedTypes = ['image', 'video', 'text'].filter(t =>
+        document.getElementById('addMedia' + t.charAt(0).toUpperCase() + t.slice(1)).checked
+    );
+    const description = document.getElementById('addDescription').value.trim();
 
-    if (!type || !name) {
-        alert('Please fill in all fields');
-        return;
-    }
+    if (!type || !name) { alert('Please fill in all fields'); return; }
+    if (selectedTypes.length === 0) { alert('Select at least one media type'); return; }
+    const media_types = selectedTypes.join(',');
 
     fetch('/api/scrape-lists', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ type, name })
+        body: JSON.stringify({ type, name, media_types, description })
     })
     .then(response => response.json())
     .then(data => {
@@ -321,15 +359,16 @@ function addItem() {
     });
 }
 
-function editItem(id, type, name, status, mediaTypes, description) {
-    currentEditId = id;
-    document.getElementById('editId').value = id;
-    document.getElementById('editType').value = type === 'subreddit' ? 'Subreddit' : 'User';
-    document.getElementById('editName').value = name;
-    document.getElementById('editStatus').value = status;
-    document.getElementById('editDescription').value = description || '';
+function editItem(btn) {
+    const d = btn.dataset;
+    currentEditId = d.id;
+    document.getElementById('editId').value = d.id;
+    document.getElementById('editType').value = d.type === 'subreddit' ? 'Subreddit' : 'User';
+    document.getElementById('editName').value = d.name;
+    document.getElementById('editStatus').value = d.status;
+    document.getElementById('editDescription').value = d.description || '';
 
-    const types = (mediaTypes || 'image,video').split(',');
+    const types = (d.mediaTypes || 'image,video').split(',');
     document.getElementById('editMediaImage').checked = types.includes('image');
     document.getElementById('editMediaVideo').checked = types.includes('video');
     document.getElementById('editMediaText').checked = types.includes('text');
@@ -426,6 +465,9 @@ function deleteItem(id, name) {
 // Reset add form when modal is closed
 document.getElementById('addModal').addEventListener('hidden.bs.modal', function () {
     document.getElementById('addForm').reset();
+    document.getElementById('addMediaImage').checked = true;
+    document.getElementById('addMediaVideo').checked = true;
+    document.getElementById('addMediaText').checked = false;
 });
 
 function scrapeNow(id, btn) {
