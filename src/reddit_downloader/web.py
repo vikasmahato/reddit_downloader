@@ -1107,10 +1107,11 @@ def scrape_lists():
         cursor.execute("""
             SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
                    COALESCE(sl.media_types, 'image,video') as media_types,
+                   sl.description,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types
+            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types, sl.description
             ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
         """)
 
@@ -1124,6 +1125,12 @@ def scrape_lists():
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
             item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
             item['media_types'] = item.get('media_types') or 'image,video'
+            # Extract source URL from description for template convenience
+            desc = item.get('description') or ''
+            import re as _re
+            m = _re.search(r'https?://\S+', desc)
+            item['source_url'] = m.group(0) if m else None
+            item['description_text'] = desc[:desc.index('http')].rstrip(' —') if m and 'http' in desc else desc
 
         stats = ui_handler.get_stats()
         subreddits = ui_handler.get_subreddits()
@@ -1146,10 +1153,11 @@ def api_get_scrape_lists():
         cursor.execute("""
             SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
                    COALESCE(sl.media_types, 'image,video') as media_types,
+                   sl.description,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types
+            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types, sl.description
             ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
         """)
 
@@ -1163,6 +1171,7 @@ def api_get_scrape_lists():
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
             item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
             item['media_types'] = item.get('media_types') or 'image,video'
+            item['description'] = item.get('description') or ''
 
         return jsonify({'success': True, 'items': items})
     except Exception as e:
@@ -1212,6 +1221,7 @@ def api_update_scrape_list(item_id):
         name = data.get('name', '').strip()
         status = data.get('status')
         media_types = data.get('media_types')
+        description = data.get('description')
 
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
@@ -1243,6 +1253,10 @@ def api_update_scrape_list(item_id):
         if media_types is not None:
             updates.append('media_types = %s')
             params.append(media_types)
+
+        if description is not None:
+            updates.append('description = %s')
+            params.append(description if description.strip() else None)
 
         params.append(item_id)
 

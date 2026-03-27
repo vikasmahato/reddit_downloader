@@ -41,6 +41,11 @@
                                             r/{{ item.name }}
                                         </a>
                                     </strong>
+                                    {% if item.description %}
+                                    <div class="item-description">
+                                        {{ item.description_text }}{% if item.source_url %}<a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer" class="desc-link">post ↗</a>{% endif %}
+                                    </div>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <span class="status-dot status-{{ item.status }}" id="status-{{ item.id }}">
@@ -78,7 +83,7 @@
                                         <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}')">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}', {{ item.description | tojson }})">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
@@ -165,7 +170,7 @@
                                         <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}')">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}', {{ item.description | tojson }})">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
@@ -270,6 +275,10 @@
                         </div>
                         <small class="text-muted">At least one type must be selected.</small>
                     </div>
+                    <div class="mb-3">
+                        <label for="editDescription" class="form-label">Description <small class="text-muted">(optional)</small></label>
+                        <input type="text" class="form-control" id="editDescription" placeholder="e.g. Discovered in r/…">
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -312,12 +321,13 @@ function addItem() {
     });
 }
 
-function editItem(id, type, name, status, mediaTypes) {
+function editItem(id, type, name, status, mediaTypes, description) {
     currentEditId = id;
     document.getElementById('editId').value = id;
     document.getElementById('editType').value = type === 'subreddit' ? 'Subreddit' : 'User';
     document.getElementById('editName').value = name;
     document.getElementById('editStatus').value = status;
+    document.getElementById('editDescription').value = description || '';
 
     const types = (mediaTypes || 'image,video').split(',');
     document.getElementById('editMediaImage').checked = types.includes('image');
@@ -339,13 +349,14 @@ function updateItem() {
     if (!name) { alert('Name is required'); return; }
     if (selectedTypes.length === 0) { alert('Select at least one media type'); return; }
     const media_types = selectedTypes.join(',');
+    const description = document.getElementById('editDescription').value.trim();
 
     fetch(`/api/scrape-lists/${id}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, status, media_types })
+        body: JSON.stringify({ name, status, media_types, description })
     })
     .then(response => response.json())
     .then(data => {
@@ -534,6 +545,11 @@ function showScrapeResult(btn, status, message) {
     padding: 1px 5px; border-radius: 3px; margin-right: 2px;
     text-transform: lowercase; letter-spacing: 0.04em;
 }
+.item-description {
+    font-size: 0.6rem; color: var(--text-muted); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+}
+.desc-link { color: var(--accent) !important; margin-left: 2px; }
 .media-image { background: rgba(52,152,219,0.15); color: #3498db; border: 1px solid rgba(52,152,219,0.3); }
 .media-video { background: rgba(155,89,182,0.15); color: #9b59b6; border: 1px solid rgba(155,89,182,0.3); }
 .media-text  { background: rgba(149,165,166,0.15); color: #95a5a6; border: 1px solid rgba(149,165,166,0.3); }
