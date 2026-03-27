@@ -536,7 +536,29 @@
         <strong id="image-count">{{ stats.total_images if stats is defined else 0 }}</strong>
         <span>images</span>
     </div>
+    <button class="nav-hamburger" id="navHamburger" aria-label="Toggle menu">
+        <i class="fas fa-bars"></i>
+    </button>
 </nav>
+
+<div class="nav-drawer" id="navDrawer">
+    <a class="nav-item-link" href="/scrape-lists"><i class="fas fa-list-ul"></i> Scrape Lists</a>
+    <a class="nav-item-link" href="/socials"><i class="fas fa-id-card"></i> Socials</a>
+    <a class="nav-item-link" href="/subreddit-map"><i class="fas fa-project-diagram"></i> Sub Map</a>
+    <a class="nav-item-link" href="/duplicates"><i class="fas fa-copy"></i> Duplicates</a>
+    <a class="nav-item-link" href="/compress"><i class="fas fa-compress-alt"></i> Compress</a>
+    <a class="nav-item-link" href="/cleanup"><i class="fas fa-broom"></i> Cleanup</a>
+    <a class="nav-item-link" href="/blocked-users"><i class="fas fa-user-slash"></i> Blocked</a>
+    <a class="nav-item-link" href="/deleted"><i class="fas fa-trash-alt"></i> Deleted</a>
+    <a class="nav-item-link" href="/flairs"><i class="fas fa-tags"></i> Flairs</a>
+    <a class="nav-item-link" href="/files"><i class="fas fa-folder-open"></i> Files</a>
+    <a class="nav-item-link" href="/favourites"><i class="fas fa-heart"></i> Favourites</a>
+    <a class="nav-item-link" href="/reddit-deleted"><i class="fas fa-ghost"></i> Reddit Deleted</a>
+    <a class="nav-item-link" href="/update-posts"><i class="fas fa-sync-alt"></i> Sync Posts</a>
+    <div class="nav-drawer-counter">
+        <strong id="image-count-drawer">—</strong> images
+    </div>
+</div>
 
 <div class="page-wrap">
     {% block content %}{% endblock %}
@@ -554,11 +576,38 @@ function formatFileSize(bytes) {
 
 document.addEventListener('DOMContentLoaded', function() {
     const imageCount = document.getElementById('image-count');
+    const imageCountDrawer = document.getElementById('image-count-drawer');
     if (imageCount) {
         fetch('/api/stats')
             .then(r => r.json())
-            .then(data => { if (imageCount) imageCount.textContent = (data.total_images || 0).toLocaleString(); })
+            .then(data => {
+                const val = (data.total_images || 0).toLocaleString();
+                if (imageCount) imageCount.textContent = val;
+                if (imageCountDrawer) imageCountDrawer.textContent = val;
+            })
             .catch(() => {});
+    }
+
+    const hamburger = document.getElementById('navHamburger');
+    const drawer = document.getElementById('navDrawer');
+    if (hamburger && drawer) {
+        hamburger.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const open = drawer.classList.toggle('open');
+            hamburger.querySelector('i').className = open ? 'fas fa-times' : 'fas fa-bars';
+        });
+        drawer.querySelectorAll('.nav-item-link').forEach(link => {
+            link.addEventListener('click', () => {
+                drawer.classList.remove('open');
+                hamburger.querySelector('i').className = 'fas fa-bars';
+            });
+        });
+        document.addEventListener('click', function(e) {
+            if (drawer.classList.contains('open') && !drawer.contains(e.target) && e.target !== hamburger) {
+                drawer.classList.remove('open');
+                hamburger.querySelector('i').className = 'fas fa-bars';
+            }
+        });
     }
 });
 
