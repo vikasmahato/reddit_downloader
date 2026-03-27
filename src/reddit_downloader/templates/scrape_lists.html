@@ -36,7 +36,7 @@
                             <tr id="row-{{ item.id }}">
                                 <td>
                                     <strong>
-                                        <a href="https://www.reddit.com/r/{{ item.name }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+                                        <a href="/?subreddit={{ item.name }}" class="text-decoration-none">
                                             r/{{ item.name }}
                                         </a>
                                     </strong>
@@ -62,6 +62,12 @@
                                         <a href="/?subreddit={{ item.name }}" class="btn btn-outline-success" title="View Gallery">
                                             <i class="fas fa-images"></i>
                                         </a>
+                                        <a href="https://www.reddit.com/r/{{ item.name }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary" title="Open on Reddit">
+                                            <i class="fab fa-reddit"></i>
+                                        </a>
+                                        <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
                                         <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
@@ -133,6 +139,12 @@
                                         <a href="/?user={{ item.name }}" class="btn btn-outline-success" title="View posts by this user">
                                             <i class="fas fa-images"></i>
                                         </a>
+                                        <a href="https://www.reddit.com/u/{{ item.name }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-secondary" title="Open on Reddit">
+                                            <i class="fab fa-reddit"></i>
+                                        </a>
+                                        <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
                                         <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
@@ -359,6 +371,51 @@ function deleteItem(id, name) {
 document.getElementById('addModal').addEventListener('hidden.bs.modal', function () {
     document.getElementById('addForm').reset();
 });
+
+function scrapeNow(id, btn) {
+    btn.disabled = true;
+    const icon = btn.querySelector('i');
+    icon.className = 'fas fa-sync-alt fa-spin';
+
+    fetch(`/api/scrape-lists/${id}/scrape`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                showScrapeResult(btn, 'error', data.error || 'Failed to start');
+                return;
+            }
+            pollScrapeStatus(id, btn);
+        })
+        .catch(err => showScrapeResult(btn, 'error', err.toString()));
+}
+
+function pollScrapeStatus(id, btn) {
+    const interval = setInterval(() => {
+        fetch(`/api/scrape-lists/${id}/scrape-status`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'running') return;
+                clearInterval(interval);
+                showScrapeResult(btn, data.status, data.message || '');
+            })
+            .catch(() => { clearInterval(interval); showScrapeResult(btn, 'error', 'Status check failed'); });
+    }, 2000);
+}
+
+function showScrapeResult(btn, status, message) {
+    const icon = btn.querySelector('i');
+    icon.className = status === 'done' ? 'fas fa-check' : 'fas fa-exclamation-triangle';
+    btn.title = message || status;
+    btn.classList.remove('btn-outline-info');
+    btn.classList.add(status === 'done' ? 'btn-outline-success' : 'btn-outline-danger');
+    setTimeout(() => {
+        btn.disabled = false;
+        icon.className = 'fas fa-sync-alt';
+        btn.classList.remove('btn-outline-success', 'btn-outline-danger');
+        btn.classList.add('btn-outline-info');
+        btn.title = 'Scrape Now';
+    }, 3000);
+}
 </script>
 
 <style>

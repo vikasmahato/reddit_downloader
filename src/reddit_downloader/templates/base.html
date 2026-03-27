@@ -93,11 +93,7 @@
             flex-shrink: 0;
         }
 
-        .nav-brand-icon {
-            color: var(--accent);
-            font-size: 1.3rem;
-            line-height: 1;
-        }
+        .nav-brand-icon { color: var(--accent); font-size: 1.3rem; line-height: 1; }
 
         .nav-brand-text {
             font-family: var(--font-head);
@@ -129,10 +125,11 @@
             border-right: 1px solid var(--border);
             transition: color 0.15s, background 0.15s;
             gap: 7px;
+            white-space: nowrap;
         }
-
         .nav-item-link:hover { color: var(--text); background: var(--surface); }
         .nav-item-link i { font-size: 0.8rem; }
+        .nav-item-link.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
 
         .nav-counter {
             display: flex;
@@ -143,13 +140,69 @@
             gap: 8px;
             font-size: 0.7rem;
             color: var(--text-muted);
+            flex-shrink: 0;
         }
-
         .nav-counter strong {
             font-family: var(--font-head);
             font-size: 1rem;
             font-weight: 700;
             color: var(--accent);
+        }
+
+        /* ── HAMBURGER (mobile only) ─────────────────── */
+        .nav-hamburger {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            margin-left: auto;
+            width: 40px; height: 40px;
+            background: none; border: none;
+            color: var(--text-dim); font-size: 1.1rem;
+            cursor: pointer; flex-shrink: 0;
+            transition: color 0.15s;
+        }
+        .nav-hamburger:hover { color: var(--text); }
+
+        /* ── MOBILE DRAWER ───────────────────────────── */
+        .nav-drawer {
+            display: none;
+            position: fixed;
+            top: 50px; left: 0; right: 0;
+            z-index: 999;
+            background: rgba(8,8,8,0.98);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            flex-direction: column;
+            padding: 8px 0 16px;
+            max-height: calc(100vh - 50px);
+            overflow-y: auto;
+        }
+        .nav-drawer.open { display: flex; }
+
+        .nav-drawer .nav-item-link {
+            padding: 12px 20px;
+            border-right: none;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+        }
+        .nav-drawer .nav-item-link:last-child { border-bottom: none; }
+        .nav-drawer .nav-item-link i { width: 18px; text-align: center; }
+
+        .nav-drawer-counter {
+            padding: 10px 20px 4px;
+            font-size: 0.65rem; color: var(--text-muted);
+            border-top: 1px solid var(--border);
+            margin-top: 4px;
+        }
+        .nav-drawer-counter strong { color: var(--accent); font-family: var(--font-head); font-size: 0.9rem; }
+
+        @media (max-width: 767px) {
+            .site-nav { padding: 0 1rem; }
+            .nav-links { display: none; }
+            .nav-counter { display: none; }
+            .nav-hamburger { display: flex; }
+            .page-wrap { padding: 1rem 0.75rem; }
         }
 
         /* ── PAGE WRAPPER ───────────────────────────── */

@@ -1288,6 +1288,75 @@ def api_toggle_scrape_list(item_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+_scrape_jobs: dict = {}  # item_id -> {'status': 'running'|'done'|'error', 'message': str}
+_scrape_jobs_lock = __import__('threading').Lock()
+
+
+@app.route('/api/scrape-lists/<int:item_id>/scrape', methods=['POST'])
+def api_scrape_now(item_id):
+    """Trigger an on-demand scrape for a single scrape-list item in a background thread."""
+    import threading
+
+    with _scrape_jobs_lock:
+        if _scrape_jobs.get(item_id, {}).get('status') == 'running':
+            return jsonify({'success': False, 'error': 'Already running'}), 409
+        _scrape_jobs[item_id] = {'status': 'running', 'message': ''}
+
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT type, name FROM scrape_lists WHERE id = %s", (item_id,))
+        row = cursor.fetchone()
+        conn.close()
+    except Exception as e:
+        with _scrape_jobs_lock:
+            _scrape_jobs[item_id] = {'status': 'error', 'message': str(e)}
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    if not row:
+        with _scrape_jobs_lock:
+            _scrape_jobs[item_id] = {'status': 'error', 'message': 'Not found'}
+        return jsonify({'success': False, 'error': 'Item not found'}), 404
+
+    list_type = row['type']
+    name = row['name']
+
+    def _run():
+        try:
+            from reddit_downloader.downloader import RedditImageDownloader
+            rid = RedditImageDownloader()
+            if list_type == 'subreddit':
+                is_new = rid._is_newly_added_subreddit(name)
+                limit = 10000 if is_new else rid.config.getint('general', 'max_images_per_subreddit', fallback=25)
+                downloaded = rid.download_from_subreddit(name, limit)
+            else:
+                limit = rid.config.getint('general', 'max_images_per_subreddit', fallback=25)
+                downloaded = rid.download_from_user(name, limit)
+            rid.update_last_scraped_at(list_type, name)
+            if downloaded == 0:
+                rid.increment_zero_result_count(list_type, name)
+            else:
+                rid.reset_zero_result_count(list_type, name)
+            with _scrape_jobs_lock:
+                _scrape_jobs[item_id] = {'status': 'done', 'message': f'Downloaded {downloaded} new image(s)'}
+        except Exception as exc:
+            with _scrape_jobs_lock:
+                _scrape_jobs[item_id] = {'status': 'error', 'message': str(exc)}
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'success': True, 'status': 'running'})
+
+
+@app.route('/api/scrape-lists/<int:item_id>/scrape-status', methods=['GET'])
+def api_scrape_status(item_id):
+    """Check the status of an on-demand scrape job."""
+    with _scrape_jobs_lock:
+        job = _scrape_jobs.get(item_id)
+    if not job:
+        return jsonify({'success': True, 'status': 'idle'})
+    return jsonify({'success': True, 'status': job['status'], 'message': job['message']})
+
+
 @app.route('/subreddit-map')
 def subreddit_map():
     """Page showing a visual network map of tracked subreddits and related ones."""

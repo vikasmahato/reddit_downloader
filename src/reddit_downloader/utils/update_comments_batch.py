@@ -270,15 +270,27 @@ def run(config_path, mode='weekly', progress_json=False, skip_comments=False):
     conn   = mysql.connector.connect(**mysql_cfg)
     cursor = conn.cursor(dictionary=True)
 
+    # Exclude posts already marked deleted and posts from banned subreddits
+    base_where = """
+        WHERE p.is_deleted = 0
+          AND p.reddit_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM scrape_lists sl
+              WHERE sl.name = p.subreddit
+                AND sl.type = 'subreddit'
+                AND sl.status = 'banned'
+          )
+    """
     if limit:
         cursor.execute(
-            "SELECT id, reddit_id, comments FROM posts "
-            "ORDER BY created_utc DESC LIMIT %s",
+            f"SELECT p.id, p.reddit_id, p.comments FROM posts p {base_where}"
+            "ORDER BY p.created_utc DESC LIMIT %s",
             [limit]
         )
     else:
         cursor.execute(
-            "SELECT id, reddit_id, comments FROM posts ORDER BY created_utc DESC"
+            f"SELECT p.id, p.reddit_id, p.comments FROM posts p {base_where}"
+            "ORDER BY p.created_utc DESC"
         )
     rows = cursor.fetchall()
     cursor.close()
@@ -291,7 +303,7 @@ def run(config_path, mode='weekly', progress_json=False, skip_comments=False):
         return
 
     mode_label = f"{mode} (scores+deletions only)" if skip_comments else mode
-    logger.info(f"Mode={mode_label}  posts={total}")
+    logger.info(f"Mode={mode_label}  posts={total} (skipping already-deleted and banned-subreddit posts)")
     emit(progress_json, 0, total, f"Starting {mode_label} update for {total} posts…")
 
     done = updated_total = deleted_total = error_total = 0
