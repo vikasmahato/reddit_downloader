@@ -24,6 +24,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>Status</th>
+                                <th>Media</th>
                                 <th>Posts</th>
                                 <th>Last Scraped</th>
                                 <th>Created</th>
@@ -47,6 +48,15 @@
                                     </span>
                                 </td>
                                 <td>
+                                    {% set mt = (item.media_types or 'image,video').split(',') %}
+                                    {% for t in mt %}
+                                        {% if t == 'image' %}<span class="media-badge media-image"><i class="fas fa-image"></i> img</span>
+                                        {% elif t == 'video' %}<span class="media-badge media-video"><i class="fas fa-film"></i> vid</span>
+                                        {% elif t == 'text' %}<span class="media-badge media-text"><i class="fas fa-align-left"></i> txt</span>
+                                        {% endif %}
+                                    {% endfor %}
+                                </td>
+                                <td>
                                     <span class="badge bg-info">{{ item.post_count or 0 }}</span>
                                 </td>
                                 <td>
@@ -68,7 +78,7 @@
                                         <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}')">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
@@ -84,7 +94,7 @@
                             {% endfor %}
                             {% if items|selectattr('type', 'equalto', 'subreddit')|list|length == 0 %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted">No subreddits found</td>
+                                <td colspan="7" class="text-center text-muted">No subreddits found</td>
                             </tr>
                             {% endif %}
                         </tbody>
@@ -109,6 +119,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>Status</th>
+                                <th>Media</th>
                                 <th>Last Scraped</th>
                                 <th>Created</th>
                                 <th>Actions</th>
@@ -125,6 +136,15 @@
                                     <span class="status-dot status-{{ item.status }}" id="status-{{ item.id }}">
                                         {{ item.status|capitalize }}
                                     </span>
+                                </td>
+                                <td>
+                                    {% set mt = (item.media_types or 'image,video').split(',') %}
+                                    {% for t in mt %}
+                                        {% if t == 'image' %}<span class="media-badge media-image"><i class="fas fa-image"></i> img</span>
+                                        {% elif t == 'video' %}<span class="media-badge media-video"><i class="fas fa-film"></i> vid</span>
+                                        {% elif t == 'text' %}<span class="media-badge media-text"><i class="fas fa-align-left"></i> txt</span>
+                                        {% endif %}
+                                    {% endfor %}
                                 </td>
                                 <td>
                                     <small class="text-muted">
@@ -145,7 +165,7 @@
                                         <button type="button" class="btn btn-outline-info scrape-btn" data-id="{{ item.id }}" onclick="scrapeNow({{ item.id }}, this)" title="Scrape Now">
                                             <i class="fas fa-sync-alt"></i>
                                         </button>
-                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}')">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editItem({{ item.id }}, '{{ item.type }}', '{{ item.name }}', '{{ item.status }}', '{{ item.media_types or 'image,video' }}')">
                                             <i class="fas fa-edit"></i>
                                         </button>
                                         <button type="button" class="btn btn-outline-warning" onclick="toggleItem({{ item.id }})" title="{% if item.status == 'enabled' %}Disable{% elif item.status == 'banned' %}Unban{% else %}Enable{% endif %}">
@@ -161,7 +181,7 @@
                             {% endfor %}
                             {% if items|selectattr('type', 'equalto', 'user')|list|length == 0 %}
                             <tr>
-                                <td colspan="5" class="text-center text-muted">No users found</td>
+                                <td colspan="6" class="text-center text-muted">No users found</td>
                             </tr>
                             {% endif %}
                         </tbody>
@@ -232,6 +252,24 @@
                             <option value="banned">Banned</option>
                         </select>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Media Types</label>
+                        <div class="d-flex gap-3 mt-1">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editMediaImage" value="image">
+                                <label class="form-check-label" for="editMediaImage"><i class="fas fa-image me-1"></i>Images</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editMediaVideo" value="video">
+                                <label class="form-check-label" for="editMediaVideo"><i class="fas fa-film me-1"></i>Videos</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editMediaText" value="text">
+                                <label class="form-check-label" for="editMediaText"><i class="fas fa-align-left me-1"></i>Text</label>
+                            </div>
+                        </div>
+                        <small class="text-muted">At least one type must be selected.</small>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -274,12 +312,17 @@ function addItem() {
     });
 }
 
-function editItem(id, type, name, status) {
+function editItem(id, type, name, status, mediaTypes) {
     currentEditId = id;
     document.getElementById('editId').value = id;
     document.getElementById('editType').value = type === 'subreddit' ? 'Subreddit' : 'User';
     document.getElementById('editName').value = name;
     document.getElementById('editStatus').value = status;
+
+    const types = (mediaTypes || 'image,video').split(',');
+    document.getElementById('editMediaImage').checked = types.includes('image');
+    document.getElementById('editMediaVideo').checked = types.includes('video');
+    document.getElementById('editMediaText').checked = types.includes('text');
 
     const editModal = new bootstrap.Modal(document.getElementById('editModal'));
     editModal.show();
@@ -290,17 +333,19 @@ function updateItem() {
     const name = document.getElementById('editName').value.trim();
     const status = document.getElementById('editStatus').value;
 
-    if (!name) {
-        alert('Name is required');
-        return;
-    }
+    const selectedTypes = ['image', 'video', 'text'].filter(t =>
+        document.getElementById('editMedia' + t.charAt(0).toUpperCase() + t.slice(1)).checked
+    );
+    if (!name) { alert('Name is required'); return; }
+    if (selectedTypes.length === 0) { alert('Select at least one media type'); return; }
+    const media_types = selectedTypes.join(',');
 
     fetch(`/api/scrape-lists/${id}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, status })
+        body: JSON.stringify({ name, status, media_types })
     })
     .then(response => response.json())
     .then(data => {
@@ -483,6 +528,15 @@ function showScrapeResult(btn, status, message) {
 .status-disabled::before { background: var(--text-muted); }
 .status-banned { color: #e74c3c; }
 .status-banned::before { background: #e74c3c; box-shadow: 0 0 6px #e74c3c; }
+.media-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 0.6rem; font-family: var(--font-mono);
+    padding: 1px 5px; border-radius: 3px; margin-right: 2px;
+    text-transform: lowercase; letter-spacing: 0.04em;
+}
+.media-image { background: rgba(52,152,219,0.15); color: #3498db; border: 1px solid rgba(52,152,219,0.3); }
+.media-video { background: rgba(155,89,182,0.15); color: #9b59b6; border: 1px solid rgba(155,89,182,0.3); }
+.media-text  { background: rgba(149,165,166,0.15); color: #95a5a6; border: 1px solid rgba(149,165,166,0.3); }
 </style>
 
 {% endblock %}

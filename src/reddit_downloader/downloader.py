@@ -823,43 +823,37 @@ class RedditImageDownloader:
         return deleted_images
 
 
-    def get_scrape_lists_from_db(self, list_type: str, backoff_threshold: int = 3) -> List[str]:
+    def get_scrape_lists_from_db(self, list_type: str, backoff_threshold: int = 3) -> List[Dict]:
         """Get subreddits or users from the database, ordered by oldest scraped first.
         Applies backoff for items with too many consecutive zero results.
-        
+
         Args:
             list_type: 'subreddit' or 'user'
             backoff_threshold: Number of consecutive zero results before skipping (default: 3)
-        
+
         Returns:
-            List of names (subreddit names or usernames), ordered by last_scraped_at ASC (NULL first)
+            List of dicts with 'name' and 'media_types' keys, ordered by last_scraped_at ASC (NULL first)
         """
         conn = self._get_db_connection()
         cursor = conn.cursor()
-        
-        # Get items with zero_result_count
+
         cursor.execute("""
-            SELECT name, COALESCE(zero_result_count, 0) as zero_result_count
+            SELECT name, COALESCE(zero_result_count, 0) as zero_result_count,
+                   COALESCE(media_types, 'image,video') as media_types
             FROM scrape_lists
             WHERE type = %s AND status = 'enabled'
             ORDER BY last_scraped_at ASC, name ASC
         """, (list_type,))
-        
+
         results = cursor.fetchall()
         items = []
         skipped_count = 0
-        
+
         for row in results:
-            #if len(row) == 2:
-            #    name, zero_count = row
-            #    if zero_count >= backoff_threshold:
-            #        skipped_count += 1
-            #        logger.debug(f"⏭️  Skipping {list_type} '{name}' (backoff: {zero_count} consecutive zero results)")
-            #        continue
-            #else:
             name = row[0]
-            items.append(name)
-        
+            media_types = set(row[2].split(',')) if row[2] else {'image', 'video'}
+            items.append({'name': name, 'media_types': media_types})
+
         if skipped_count > 0:
             logger.info(f"⏭️  Skipped {skipped_count} {list_type}(s) due to backoff")
         
@@ -977,23 +971,22 @@ class RedditImageDownloader:
             subreddits = self.get_scrape_lists_from_db('subreddit', backoff_threshold)
             if subreddits:
                 logger.info(f"\n📂 Found {len(subreddits)} subreddits in database (backoff threshold: {backoff_threshold})")
-                for subreddit in subreddits:
-                    # Name is already cleaned from database
-                    clean_name = subreddit.strip()
-                    logger.info(f"\n🔍 Scraping r/{clean_name}...")
-                    
+                for entry in subreddits:
+                    clean_name = entry['name'].strip()
+                    media_types = entry['media_types']
+                    logger.info(f"\n🔍 Scraping r/{clean_name} (media: {','.join(sorted(media_types))})...")
+
                     # Check if this is a newly added subreddit (never scraped before)
                     is_new_subreddit = self._is_newly_added_subreddit(clean_name)
-                    
+
                     if is_new_subreddit:
-                        # For newly added subreddits, download all posts (use a very high limit)
-                        limit = 10000  # Effectively download all posts
+                        limit = 10000
                         logger.info(f"🆕 Newly added subreddit detected - downloading all posts from r/{clean_name}...")
                     else:
                         limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
-                    
+
                     try:
-                        downloaded = self.download_from_subreddit(clean_name, limit)
+                        downloaded = self.download_from_subreddit(clean_name, limit, media_types=media_types)
                         subreddit_counts[clean_name] = downloaded
                         total_downloads += 1
                         
@@ -1019,14 +1012,14 @@ class RedditImageDownloader:
             users = self.get_scrape_lists_from_db('user', backoff_threshold)
             if users:
                 logger.info(f"\n👤 Found {len(users)} users in database (backoff threshold: {backoff_threshold})")
-                for username in users:
-                    # Name is already cleaned from database
-                    clean_name = username.strip()
-                    logger.info(f"\n🔍 Scraping u/{clean_name}...")
-                    
+                for entry in users:
+                    clean_name = entry['name'].strip()
+                    media_types = entry['media_types']
+                    logger.info(f"\n🔍 Scraping u/{clean_name} (media: {','.join(sorted(media_types))})...")
+
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
                     try:
-                        downloaded = self.download_from_user(clean_name, limit)
+                        downloaded = self.download_from_user(clean_name, limit, media_types=media_types)
                         total_downloads += 1
                         
                         # Update last_scraped_at timestamp
@@ -1055,27 +1048,29 @@ class RedditImageDownloader:
             for name in sorted(set(forbidden_subreddits)):
                 logger.warning(f"   r/{name}")
 
-    def download_from_user(self, username: str, limit: int = 25):
+    def download_from_user(self, username: str, limit: int = 25, media_types: set = None):
         """Download images from a specific user's posts.
         
         Returns:
             Number of images downloaded
         """
+        if media_types is None:
+            media_types = {'image', 'video'}
         if not self.reddit:
             logger.error("❌ Reddit connection required to access user posts")
             return 0
-        
+
         try:
             # Remove u/ prefix if present
             username = username.replace('u/', '').strip()
-            
+
             user = self.reddit.redditor(username)
             post_data_list = []
-            
+
             logger.info(f"🔍 Fetching posts from u/{username}...")
-            
+
             submissions = user.submissions.new(limit=limit)
-            
+
             for submission in submissions:
                 if submission.is_self:
                     continue
@@ -1087,12 +1082,17 @@ class RedditImageDownloader:
 
                 gallery_urls = self._extract_gallery_urls(submission)
                 has_gallery = bool(gallery_urls)
-                
+
                 # Check for video posts
                 video_url = self._extract_video_url(submission)
                 has_video = bool(video_url)
-                
-                # Skip if not gallery, not image, and not video
+
+                # Skip based on media_types filter
+                is_image = has_gallery or self._is_image_url(submission.url)
+                if is_image and 'image' not in media_types:
+                    continue
+                if has_video and not is_image and 'video' not in media_types:
+                    continue
                 if not has_gallery and not self._is_image_url(submission.url) and not has_video:
                     continue
 
@@ -1165,9 +1165,11 @@ class RedditImageDownloader:
                     all_urls.append(url.replace('&amp;', '&'))
         return all_urls
 
-    def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25, 
-                                    time_filter: str = 'all') -> List[Dict]:
+    def get_image_urls_from_subreddit(self, subreddit: str, limit: int = 25,
+                                    time_filter: str = 'all', media_types: set = None) -> List[Dict]:
         """Get image URLs from a subreddit, saving gallery posts as a single record with all image URLs comma-separated."""
+        if media_types is None:
+            media_types = {'image', 'video'}
         if not self.reddit:
             logger.error("❌ Authentication required to access subreddit content")
             return []
@@ -1189,9 +1191,11 @@ class RedditImageDownloader:
                         logger.debug(f"⏭️  Post already downloaded (permalink: {post.permalink}), skipping...")
                         continue
 
-                    # Handle gallery posts
+                    # Handle gallery posts (counted as images)
                     all_urls = self._extract_gallery_urls(post)
                     if all_urls:
+                        if 'image' not in media_types:
+                            continue
                         post_username = str(post.author) if post.author else ''
                         comments_list = []
                         try:
@@ -1225,6 +1229,8 @@ class RedditImageDownloader:
                     # Handle video posts
                     video_url = self._extract_video_url(post)
                     if video_url:
+                        if 'video' not in media_types:
+                            continue
                         if self._get_image_record(video_url):
                             logger.warning(f"🛑 Already downloaded: {video_url}. Stopping further scraping for r/{subreddit}.")
                             break
@@ -1258,7 +1264,7 @@ class RedditImageDownloader:
                     
                     # Normal image handling
                     url = post.url
-                    if self._is_image_url(url):
+                    if self._is_image_url(url) and 'image' in media_types:
                         if self._get_image_record(url):
                             logger.warning(f"🛑 Already downloaded: {url}. Stopping further scraping for r/{subreddit}.")
                             break
@@ -1416,10 +1422,10 @@ class RedditImageDownloader:
         logger.success(f"\n✅ Download complete: {successful}/{total} images downloaded")
         return successful
 
-    def download_from_subreddit(self, subreddit: str, limit: int = 25):
+    def download_from_subreddit(self, subreddit: str, limit: int = 25, media_types: set = None):
         """Download images from a subreddit."""
         logger.info(f"\n🔍 Fetching images from r/{subreddit}...")
-        image_posts = self.get_image_urls_from_subreddit(subreddit, limit)
+        image_posts = self.get_image_urls_from_subreddit(subreddit, limit, media_types=media_types)
         
         if not image_posts:
             logger.warning("❌ No images found")

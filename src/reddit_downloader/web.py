@@ -1106,10 +1106,11 @@ def scrape_lists():
         
         cursor.execute("""
             SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
+                   COALESCE(sl.media_types, 'image,video') as media_types,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at
+            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types
             ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
         """)
 
@@ -1121,8 +1122,8 @@ def scrape_lists():
             for key in ['created_at', 'updated_at', 'last_scraped_at']:
                 if item.get(key):
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
-            # Ensure post_count is an integer
             item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
+            item['media_types'] = item.get('media_types') or 'image,video'
 
         stats = ui_handler.get_stats()
         subreddits = ui_handler.get_subreddits()
@@ -1144,10 +1145,11 @@ def api_get_scrape_lists():
         
         cursor.execute("""
             SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
+                   COALESCE(sl.media_types, 'image,video') as media_types,
                    COUNT(DISTINCT p.id) as post_count
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at
+            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types
             ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
         """)
 
@@ -1159,8 +1161,8 @@ def api_get_scrape_lists():
             for key in ['created_at', 'updated_at', 'last_scraped_at']:
                 if item.get(key):
                     item[key] = item[key].strftime('%Y-%m-%d %H:%M:%S') if hasattr(item[key], 'strftime') else str(item[key])
-            # Ensure post_count is an integer
             item['post_count'] = int(item.get('post_count', 0)) if item.get('post_count') is not None else 0
+            item['media_types'] = item.get('media_types') or 'image,video'
 
         return jsonify({'success': True, 'items': items})
     except Exception as e:
@@ -1209,12 +1211,20 @@ def api_update_scrape_list(item_id):
         data = request.get_json()
         name = data.get('name', '').strip()
         status = data.get('status')
+        media_types = data.get('media_types')
 
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
 
         if status is not None and status not in ('enabled', 'disabled', 'banned'):
             return jsonify({'success': False, 'error': 'Invalid status. Must be "enabled", "disabled", or "banned"'}), 400
+
+        if media_types is not None:
+            valid_types = {'image', 'video', 'text'}
+            parts = [t.strip() for t in media_types.split(',') if t.strip()]
+            if not parts or not all(t in valid_types for t in parts):
+                return jsonify({'success': False, 'error': 'Invalid media_types'}), 400
+            media_types = ','.join(parts)
 
         # Clean name (remove r/ or u/ prefix if present)
         name = name.replace('r/', '').replace('u/', '').strip()
@@ -1229,6 +1239,10 @@ def api_update_scrape_list(item_id):
         if status is not None:
             updates.append('status = %s')
             params.append(status)
+
+        if media_types is not None:
+            updates.append('media_types = %s')
+            params.append(media_types)
 
         params.append(item_id)
 
@@ -1305,7 +1319,7 @@ def api_scrape_now(item_id):
     try:
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT type, name FROM scrape_lists WHERE id = %s", (item_id,))
+        cursor.execute("SELECT type, name, COALESCE(media_types, 'image,video') as media_types FROM scrape_lists WHERE id = %s", (item_id,))
         row = cursor.fetchone()
         conn.close()
     except Exception as e:
@@ -1320,6 +1334,7 @@ def api_scrape_now(item_id):
 
     list_type = row['type']
     name = row['name']
+    media_types = set(row['media_types'].split(','))
 
     def _run():
         try:
@@ -1328,10 +1343,10 @@ def api_scrape_now(item_id):
             if list_type == 'subreddit':
                 is_new = rid._is_newly_added_subreddit(name)
                 limit = 10000 if is_new else rid.config.getint('general', 'max_images_per_subreddit', fallback=25)
-                downloaded = rid.download_from_subreddit(name, limit)
+                downloaded = rid.download_from_subreddit(name, limit, media_types=media_types)
             else:
                 limit = rid.config.getint('general', 'max_images_per_subreddit', fallback=25)
-                downloaded = rid.download_from_user(name, limit)
+                downloaded = rid.download_from_user(name, limit, media_types=media_types)
             rid.update_last_scraped_at(list_type, name)
             if downloaded == 0:
                 rid.increment_zero_result_count(list_type, name)
