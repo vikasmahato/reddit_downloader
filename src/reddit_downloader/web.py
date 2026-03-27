@@ -2965,6 +2965,7 @@ def file_browser():
     """Browse all downloaded files with filter by type and sort by size."""
     file_type = request.args.get('type', 'all')   # all | image | video
     sort      = request.args.get('sort', 'size_desc')
+    subreddit = request.args.get('subreddit', '').strip()
     page      = int(request.args.get('page', 1))
     per_page  = int(request.args.get('per_page', 24))
     per_page  = per_page if per_page in (10, 24, 50, 100) else 24
@@ -2996,9 +2997,19 @@ def file_browser():
         conn = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        base_where = f"(i.is_deleted = 0 OR i.is_deleted IS NULL) AND (i.is_ignored = 0 OR i.is_ignored IS NULL) {type_clause}"
+        subreddit_clause = ""
+        subreddit_params: list = []
+        if subreddit:
+            subreddit_clause = """AND EXISTS (
+                SELECT 1 FROM post_images pi2
+                JOIN posts p2 ON p2.id = pi2.post_id
+                WHERE pi2.image_id = i.id AND p2.subreddit = %s
+            )"""
+            subreddit_params = [subreddit]
 
-        cursor.execute(f"SELECT COUNT(*) as total FROM images i WHERE {base_where}")
+        base_where = f"(i.is_deleted = 0 OR i.is_deleted IS NULL) AND (i.is_ignored = 0 OR i.is_ignored IS NULL) {type_clause} {subreddit_clause}"
+
+        cursor.execute(f"SELECT COUNT(*) as total FROM images i WHERE {base_where}", subreddit_params)
         total = cursor.fetchone()['total']
 
         cursor.execute(f"""
@@ -3016,8 +3027,20 @@ def file_browser():
             WHERE {base_where}
             ORDER BY {order_by}
             LIMIT %s OFFSET %s
-        """, [per_page, offset])
+        """, subreddit_params + [per_page, offset])
         files = cursor.fetchall()
+
+        # Fetch subreddits that have at least one image for the filter dropdown
+        cursor.execute("""
+            SELECT DISTINCT p.subreddit
+            FROM posts p
+            JOIN post_images pi ON pi.post_id = p.id
+            JOIN images i ON i.id = pi.image_id
+            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+              AND p.subreddit IS NOT NULL AND p.subreddit != ''
+            ORDER BY p.subreddit
+        """)
+        subreddits = [row['subreddit'] for row in cursor.fetchall()]
         conn.close()
 
         for f in files:
@@ -3034,11 +3057,13 @@ def file_browser():
         total_pages = max(1, (total + per_page - 1) // per_page)
         return render_template('files.html',
                                files=files, file_type=file_type, sort=sort,
+                               subreddit=subreddit, subreddits=subreddits,
                                current_page=page, total_pages=total_pages, total=total,
                                per_page=per_page)
     except Exception as e:
         print(f"File browser error: {e}")
         return render_template('files.html', files=[], file_type=file_type, sort=sort,
+                               subreddit='', subreddits=[],
                                current_page=1, total_pages=1, total=0, per_page=24)
 
 

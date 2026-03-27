@@ -272,6 +272,13 @@
         <i class="fas fa-images"></i> Review Images
     </button>
 
+    <select class="sort-select" onchange="applySubreddit(this.value)" title="Filter by subreddit">
+        <option value="">All subreddits</option>
+        {% for sub in subreddits %}
+        <option value="{{ sub }}" {% if subreddit == sub %}selected{% endif %}>r/{{ sub }}</option>
+        {% endfor %}
+    </select>
+
     <select class="sort-select" onchange="applySort(this.value)">
         <option value="size_desc"  {% if sort == 'size_desc'  %}selected{% endif %}>Size ↓</option>
         <option value="size_asc"   {% if sort == 'size_asc'   %}selected{% endif %}>Size ↑</option>
@@ -486,6 +493,17 @@ const selected = new Set();
 let pollTimer = null;
 
 // ── Utilities ───────────────────────────────────────────────
+function applySubreddit(val) {
+    const url = new URL(window.location.href);
+    if (val) {
+        url.searchParams.set('subreddit', val);
+    } else {
+        url.searchParams.delete('subreddit');
+    }
+    url.searchParams.set('page', '1');
+    window.location.href = url.toString();
+}
+
 function applySort(val) {
     const url = new URL(window.location.href);
     url.searchParams.set('sort', val);
