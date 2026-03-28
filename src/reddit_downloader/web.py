@@ -405,6 +405,7 @@ class RedditImageUI:
                 AND (%s IS NULL OR author = %s)
                 AND (%s IS NULL OR title LIKE %s OR author LIKE %s)
                 AND (author IS NULL OR author NOT IN (SELECT username FROM blocked_users))
+                AND EXISTS (SELECT 1 FROM post_images WHERE post_id = posts.id)
                 ORDER BY created_utc DESC
                 LIMIT %s OFFSET %s
             ) paged_posts
