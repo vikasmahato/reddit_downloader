@@ -15,18 +15,18 @@
                 <thead>
                     <tr>
                         <th>Header</th>
-                        <th>Subreddit</th>
+                        <th class="col-sub">Subreddit</th>
                         <th>Session ID</th>
-                        <th>Description</th>
-                        <th>Post</th>
-                        <th>Date</th>
+                        <th class="col-desc">Description</th>
+                        <th class="col-post">Post</th>
+                        <th class="col-date">Date</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in rows %}
                     <tr>
                         <td class="col-header">{{ row.title }}</td>
-                        <td>
+                        <td class="col-sub">
                             <a href="/?subreddit={{ row.subreddit }}" class="sub-link">r/{{ row.subreddit }}</a>
                         </td>
                         <td class="col-session">
@@ -48,7 +48,7 @@
                             <span class="text-muted">—</span>
                             {% endif %}
                         </td>
-                        <td>
+                        <td class="col-post">
                             <a href="https://www.reddit.com{{ row.permalink }}" target="_blank" rel="noopener noreferrer" class="post-link" title="Open on Reddit">
                                 <i class="fab fa-reddit"></i>
                             </a>
@@ -71,7 +71,7 @@
 
 <script>
 function copySession(btn, sessionId) {
-    navigator.clipboard.writeText(sessionId).then(() => {
+    function doFeedback() {
         const icon = btn.querySelector('i');
         icon.className = 'fas fa-check';
         btn.classList.add('copied');
@@ -82,7 +82,23 @@ function copySession(btn, sessionId) {
             btn.classList.remove('copied');
             toast.classList.remove('show');
         }, 1500);
-    });
+    }
+    function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try { document.execCommand('copy'); } catch(e) {}
+        document.body.removeChild(ta);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sessionId).then(doFeedback).catch(() => { fallbackCopy(sessionId); doFeedback(); });
+    } else {
+        fallbackCopy(sessionId);
+        doFeedback();
+    }
 }
 </script>
 
@@ -198,6 +214,12 @@ function copySession(btn, sessionId) {
 .copy-toast.show {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+}
+@media (max-width: 767px) {
+    .col-sub, .col-desc, .col-post, .col-date,
+    th.col-sub, th.col-desc, th.col-post, th.col-date { display: none !important; }
+    .session-id { display: none !important; }
+    .col-session { white-space: normal; }
 }
 </style>
 {% endblock %}
