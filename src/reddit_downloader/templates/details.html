@@ -36,6 +36,15 @@
 .comment-author { font-size: 0.7rem; color: var(--accent); font-weight: 500; }
 .comment-meta   { font-size: 0.58rem; color: var(--text-muted); margin: 1px 0 3px; }
 .comment-body   { font-size: 0.72rem; color: var(--text); line-height: 1.45; }
+.comment-md p { margin: 0 0 0.3rem; }
+.comment-md p:last-child { margin-bottom: 0; }
+.comment-md a { color: var(--accent); }
+.comment-md code { font-size: 0.68rem; background: var(--surface-2); padding: 1px 4px; border-radius: 3px; border: 1px solid var(--border-2); }
+.comment-md pre { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 4px; padding: 0.5rem; overflow-x: auto; margin: 0.3rem 0; }
+.comment-md pre code { background: none; border: none; padding: 0; }
+.comment-md blockquote { border-left: 2px solid var(--border-2); margin: 0.3rem 0; padding: 0 0.6rem; color: var(--text-dim); }
+.comment-md ul, .comment-md ol { padding-left: 1.2rem; margin: 0.2rem 0; }
+.comment-md strong { color: var(--text); }
 .sidebar-section { margin-bottom: 0.75rem; }
 </style>
 <div class="row">
@@ -275,7 +284,7 @@
                 <div class="comment-item">
                     <div class="comment-author">{{ comment.author or 'Unknown' }}</div>
                     <div class="comment-meta">score {{ comment.score }} · {{ comment.created_utc | format_datetime }}</div>
-                    <div class="comment-body">{{ comment.body }}</div>
+                    <div class="comment-body comment-md" data-md="{{ comment.body | e }}"></div>
                 </div>
                 {% endfor %}
             </div>
@@ -342,21 +351,116 @@
     </div>
 </div>
 
-<!-- Raw JSON Data (for debugging) -->
+<!-- Post Metadata -->
 <div class="row mt-4">
     <div class="col-12">
         <div class="card">
-            <div class="card-header">
-                <h6><i class="fas fa-code"></i> Raw Metadata</h6>
+            <div class="card-header d-flex align-items-center gap-2">
+                <i class="fas fa-info-circle" style="color:var(--text-dim);font-size:0.75rem;"></i>
+                <span style="font-size:0.65rem;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.1em;color:var(--text-dim);">Post Metadata</span>
             </div>
-            <div class="card-body">
-                <pre><code>{{ image | tojson(indent=2) }}</code></pre>
+            <div class="card-body p-0">
+                <table class="table table-dark table-sm mb-0" style="font-size:0.72rem;">
+                    <tbody>
+                        {% if image.reddit_id %}
+                        <tr>
+                            <td class="meta-label">Reddit ID</td>
+                            <td><code style="font-size:0.68rem;">{{ image.reddit_id }}</code></td>
+                        </tr>
+                        {% endif %}
+                        {% if image.score is not none %}
+                        <tr>
+                            <td class="meta-label">Score</td>
+                            <td><span class="badge" style="background:var(--surface-3);color:var(--accent);border:1px solid var(--border-2);">▲ {{ image.score }}</span></td>
+                        </tr>
+                        {% endif %}
+                        {% if image.created_utc %}
+                        <tr>
+                            <td class="meta-label">Posted</td>
+                            <td style="color:var(--text);">{{ image.created_utc | format_datetime }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if image.flair %}
+                        <tr>
+                            <td class="meta-label">Flair</td>
+                            <td><span class="badge bg-info text-dark">{{ image.flair }}</span></td>
+                        </tr>
+                        {% endif %}
+                        {% if image.post_username %}
+                        <tr>
+                            <td class="meta-label">Username</td>
+                            <td style="color:var(--text);">{{ image.post_username }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td class="meta-label">Post ID</td>
+                            <td><code style="font-size:0.68rem;">{{ image.post_id }}</code></td>
+                        </tr>
+                        <tr>
+                            <td class="meta-label">Image ID</td>
+                            <td><code style="font-size:0.68rem;">{{ image.id }}</code></td>
+                        </tr>
+                        {% if image.file_hash %}
+                        <tr>
+                            <td class="meta-label">MD5</td>
+                            <td><code style="font-size:0.65rem;word-break:break-all;">{{ image.file_hash }}</code></td>
+                        </tr>
+                        {% endif %}
+                        {% if image.file_size %}
+                        <tr>
+                            <td class="meta-label">File Size</td>
+                            <td style="color:var(--text);">{{ "%.1f"|format(image.file_size/1024/1024) }} MB</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td class="meta-label">Downloaded</td>
+                            <td style="color:var(--text);">{{ image.download_date }} {{ image.download_time }}</td>
+                        </tr>
+                        {% if image.file_path %}
+                        <tr>
+                            <td class="meta-label">File Path</td>
+                            <td><code style="font-size:0.65rem;word-break:break-all;">{{ image.file_path }}</code></td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td class="meta-label">Status</td>
+                            <td><span class="badge bg-{% if image.is_deleted %}danger{% else %}success{% endif %}">{% if image.is_deleted %}Deleted{% else %}Active{% endif %}</span></td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 </div>
+<style>
+.meta-label {
+    width: 110px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0.4rem 0.75rem;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+</style>
 
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script>
+marked.setOptions({ breaks: true, gfm: true });
+function renderMd(text) {
+    if (!text) return '';
+    return marked.parse(String(text));
+}
+
+// Render any pre-rendered Jinja comment bodies
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.comment-md[data-md]').forEach(function(el) {
+        el.innerHTML = renderMd(el.getAttribute('data-md'));
+    });
+});
+
 // Auto-copy filename on click
 document.querySelectorAll('code').forEach(code => {
     code.addEventListener('click', function() {
@@ -407,7 +511,7 @@ if (_commentForm) _commentForm.addEventListener('submit', function(e) {
             newComment.className = 'comment-item';
             newComment.innerHTML = `<div class='comment-author'>${data.comment.author || 'You'}</div>
                 <div class='comment-meta'>score ${data.comment.score || 1} · just now</div>
-                <div class='comment-body'>${data.comment.body}</div>`;
+                <div class='comment-body comment-md'>${renderMd(data.comment.body)}</div>`;
             if (commentsList) {
                 commentsList.prepend(newComment);
             }
@@ -451,8 +555,8 @@ window.addEventListener('DOMContentLoaded', function() {
                         var li = document.createElement('div');
                         li.className = 'comment-item';
                         li.innerHTML = `<div class='comment-author'>${comment.author || 'Unknown'}</div>
-                            <div class='comment-meta'>score ${comment.score || 1} · ${comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : ''}</div>
-                            <div class='comment-body'>${comment.body}</div>`;
+                            <div class='comment-meta'>score ${comment.score || 0} · ${comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : ''}</div>
+                            <div class='comment-body comment-md'>${renderMd(comment.body)}</div>`;
                         commentsList.appendChild(li);
                     });
                 } else {
