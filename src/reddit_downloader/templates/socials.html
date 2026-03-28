@@ -24,7 +24,7 @@
                 </thead>
                 <tbody>
                     {% for row in rows %}
-                    <tr>
+                    <tr{% if row.is_deleted %} class="row-deleted"{% endif %}>
                         <td class="col-header">{{ row.title }}</td>
                         <td class="col-sub">
                             <a href="/?subreddit={{ row.subreddit }}" class="sub-link">r/{{ row.subreddit }}</a>
@@ -145,6 +145,8 @@ function copySession(btn, sessionId) {
     font-size: 0.75rem;
 }
 .table-dark tbody tr:hover > td { background: rgba(255,69,0,0.04) !important; }
+.row-deleted > td { background: rgba(220,38,38,0.12) !important; border-left: 2px solid rgba(220,38,38,0.6) !important; }
+.row-deleted:hover > td { background: rgba(220,38,38,0.2) !important; }
 .col-header {
     max-width: 220px;
     white-space: normal;

@@ -1174,7 +1174,7 @@ def socials():
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
             SELECT p.id, p.title, p.subreddit, p.permalink, p.selftext,
-                   p.created_utc, p.score, p.author
+                   p.created_utc, p.score, p.author, p.is_deleted
             FROM posts p
             JOIN scrape_lists sl ON sl.name = p.subreddit AND sl.type = 'subreddit'
             WHERE sl.media_types LIKE '%text%'
@@ -2852,7 +2852,10 @@ def reddit_deleted_page():
         conn   = _get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        where_parts = ["p.is_deleted = 1"]
+        where_parts = [
+            "p.is_deleted = 1",
+            "NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')",
+        ]
         params = []
         if subreddit:
             where_parts.append("p.subreddit = %s")
@@ -2888,17 +2891,21 @@ def reddit_deleted_page():
         rows = cursor.fetchall()
 
         # Subreddits for filter dropdown
-        cursor.execute(
-            "SELECT DISTINCT subreddit FROM posts WHERE is_deleted=1 "
-            "ORDER BY subreddit LIMIT 200"
-        )
+        cursor.execute("""
+            SELECT DISTINCT p.subreddit FROM posts p
+            WHERE p.is_deleted=1
+              AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')
+            ORDER BY p.subreddit LIMIT 200
+        """)
         subreddits = [r['subreddit'] for r in cursor.fetchall() if r['subreddit']]
 
         # Categories for filter dropdown
-        cursor.execute(
-            "SELECT removed_by_category, COUNT(*) AS cnt FROM posts "
-            "WHERE is_deleted=1 GROUP BY removed_by_category ORDER BY cnt DESC"
-        )
+        cursor.execute("""
+            SELECT p.removed_by_category, COUNT(*) AS cnt FROM posts p
+            WHERE p.is_deleted=1
+              AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')
+            GROUP BY p.removed_by_category ORDER BY cnt DESC
+        """)
         categories = [r['removed_by_category'] for r in cursor.fetchall()]
         conn.close()
 
