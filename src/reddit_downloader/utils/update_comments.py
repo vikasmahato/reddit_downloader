@@ -9,25 +9,19 @@ import os
 from configparser import ConfigParser
 from pathlib import Path
 import logging
-import mysql.connector
+import psycopg2
 import configparser
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-# Load MySQL config
-mysql_config = None
+# Load PostgreSQL config
+_PG_DSN = None
 try:
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    mysql_config = {
-        'host': config.get('mysql', 'host', fallback='localhost'),
-        'port': config.getint('mysql', 'port', fallback=3306),
-        'user': config.get('mysql', 'user', fallback='root'),
-        'password': config.get('mysql', 'password', fallback=''),
-        'database': config.get('mysql', 'database', fallback='reddit_images')
-    }
+    _cfg = __import__('configparser').ConfigParser()
+    _cfg.read('config.ini')
+    _PG_DSN = _cfg.get('postgresql', 'dsn', fallback=None)
 except Exception as e:
-    print(f"Error loading MySQL config: {e}")
+    print(f'Error loading PostgreSQL config: {e}')
 
 def parse_config_file(config_file: str) -> ConfigParser:
     config = ConfigParser()
@@ -105,7 +99,7 @@ def fetch_comments(reddit, post_id, limit=100):
 
 def update_comments(config_path):
     reddit = get_reddit_instance(config_path)
-    conn = mysql.connector.connect(**mysql_config)
+    conn = psycopg2.connect(_PG_DSN)
     cursor = conn.cursor()
     cursor.execute("SELECT id, reddit_id, permalink, comments FROM posts order by id desc limit 4000")
     rows = cursor.fetchall()

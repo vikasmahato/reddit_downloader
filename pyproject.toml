@@ -18,6 +18,7 @@ dependencies = [
     "loguru>=0.7.0",
     "nudenet>=3.4.2",
     "flask-compress>=1.14",
+    "psycopg2-binary>=2.9.11",
 ]
 
 [project.scripts]

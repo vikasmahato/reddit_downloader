@@ -19,8 +19,9 @@ from datetime import datetime
 import mimetypes
 import hashlib
 from PIL import Image, ExifTags
-import mysql.connector
-from mysql.connector import pooling
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
 import configparser
 
 try:
@@ -162,112 +163,79 @@ try:
 except Exception:
     pass
 
-# Load MySQL config
+# Load PostgreSQL config
 config = configparser.ConfigParser()
 config.read('config.ini')
-mysql_config = {
-    'host': config.get('mysql', 'host', fallback='localhost'),
-    'port': config.getint('mysql', 'port', fallback=3306),
-    'user': config.get('mysql', 'user', fallback='root'),
-    'password': config.get('mysql', 'password', fallback=''),
-    'database': config.get('mysql', 'database', fallback='reddit_images')
-}
+_PG_DSN = config.get('postgresql', 'dsn', fallback='')
 
-# Initialize MySQL connection pool (optional)
-mysql_pool = None
+# Initialize connection pool
+_pg_pool = None
 try:
-    pool_size = config.getint('mysql', 'pool_size', fallback=5)
-    mysql_pool = pooling.MySQLConnectionPool(pool_name='web_pool', pool_size=pool_size, **mysql_config)
-    print(f"MySQL connection pool created (size={pool_size})")
+    pool_size = config.getint('postgresql', 'pool_size', fallback=5)
+    _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, pool_size, _PG_DSN)
+    print(f"PostgreSQL connection pool created (size={pool_size})")
 except Exception as e:
-    # If pool creation fails, we'll fall back to direct connections
-    print(f"Warning: Could not create MySQL connection pool: {e}")
+    print(f"Warning: Could not create PostgreSQL connection pool: {e}")
+
+
+class _PooledConn:
+    """Wraps a psycopg2 connection so .close() returns it to the pool."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def cursor(self, **kw):
+        return self._conn.cursor(**kw)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        if _pg_pool:
+            _pg_pool.putconn(self._conn)
+        else:
+            self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
 
 
 def _get_db_connection():
-    """Return a MySQL connection from the pool if available, otherwise open a new connection.
-    Caller must close the connection when done.
-    """
+    """Return a PostgreSQL connection. Caller must close when done."""
     try:
-        if mysql_pool:
-            return mysql_pool.get_connection()
-        return mysql.connector.connect(**mysql_config)
+        if _pg_pool:
+            return _PooledConn(_pg_pool.getconn())
+        return psycopg2.connect(_PG_DSN)
     except Exception:
-        # Final fallback
-        return mysql.connector.connect(**mysql_config)
+        return psycopg2.connect(_PG_DSN)
 
 
 def _ensure_blocked_users_table():
-    """Create the blocked_users table if it doesn't exist."""
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS blocked_users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                username VARCHAR(255) NOT NULL UNIQUE,
-                blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Warning: Could not ensure blocked_users table: {e}")
+    """No-op: table already created in PostgreSQL schema."""
+    pass
 
 _ensure_blocked_users_table()
 
 
 def _ensure_favourite_column():
-    """Add is_favourite column to images table if it doesn't exist."""
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("ALTER TABLE images ADD COLUMN is_favourite TINYINT(1) NOT NULL DEFAULT 0")
-        conn.commit()
-        conn.close()
-    except Exception:
-        # Column already exists — ignore
-        pass
+    """No-op: column already exists in PostgreSQL schema."""
+    pass
 
 _ensure_favourite_column()
 
 
 def _ensure_ignored_column():
-    """Add is_ignored column to images table if it doesn't exist."""
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("ALTER TABLE images ADD COLUMN is_ignored TINYINT(1) NOT NULL DEFAULT 0")
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
+    """No-op: column already exists in PostgreSQL schema."""
+    pass
 
 _ensure_ignored_column()
 
 
 def _ensure_posts_deleted_column():
-    """Add is_deleted and removed_by_category columns to posts table if missing."""
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "ALTER TABLE posts ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0"
-        )
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass  # already exists
-    try:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "ALTER TABLE posts ADD COLUMN removed_by_category VARCHAR(50) NULL DEFAULT NULL"
-        )
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass  # already exists
+    """No-op: columns already exist in PostgreSQL schema."""
+    pass
 
 _ensure_posts_deleted_column()
 
@@ -381,7 +349,7 @@ class RedditImageUI:
         """
         try:
             conn = _get_db_connection()
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
             # Map provided username/user param
             effective_username = username or user
@@ -544,7 +512,7 @@ class RedditImageUI:
             subreddit_counts = dict(cursor.fetchall())
             # Top authors (for display) - optimized
             cursor.execute("""SELECT author, COUNT(1) as cnt
-                FROM posts GROUP BY subreddit 
+                FROM posts GROUP BY author 
                 ORDER BY cnt DESC
                 LIMIT 20""")
             user_counts = dict(cursor.fetchall())
@@ -583,7 +551,7 @@ class RedditImageUI:
             if only_enabled:
                 cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' AND status = 'enabled' ORDER BY name")
             else:
-                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' ORDER BY FIELD(status, 'enabled', 'disabled', 'banned'), name")
+                cursor.execute("SELECT name FROM scrape_lists WHERE type = 'subreddit' ORDER BY CASE status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, name")
             results = [row[0] for row in cursor.fetchall()]
             conn.close()
             _cache.set(cache_key, results)
@@ -748,7 +716,7 @@ def image_details(post_id):
             return f"Invalid post_id: {post_id}", 400
         
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         # Get post information
         cursor.execute("""SELECT 
             p.id as post_id, p.title, p.author, p.subreddit, p.permalink, p.created_utc, 
@@ -853,7 +821,7 @@ def post_comment():
         return jsonify({'success': False, 'error': 'Missing post ID or comment.'}), 400
     # Get post info from MySQL
     conn = _get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cursor.execute("""SELECT 
         id as post_id, reddit_id, permalink, comments
     FROM posts
@@ -913,7 +881,7 @@ def get_comments(post_id):
     """Return latest comments for a post from MySQL."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         # Get comments from posts table
         cursor.execute("""SELECT comments FROM posts WHERE id = %s""", (post_id,))
         row = cursor.fetchone()
@@ -934,7 +902,7 @@ def delete_post(post_id):
     try:
         
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         # Get image_id and file path from the first image linked to this post
         image_id = None
@@ -1050,7 +1018,7 @@ def delete_posts_batch():
             return jsonify({'success': False, 'error': 'No post IDs provided'}), 400
         
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         deleted_count = 0
         errors = []
@@ -1171,7 +1139,7 @@ def socials():
     try:
         import re as _re
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT p.id, p.title, p.subreddit, p.permalink, p.selftext,
                    p.created_utc, p.score, p.author, p.is_deleted
@@ -1211,7 +1179,7 @@ def scrape_lists():
     """Page for managing scrape lists."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         cursor.execute("""
             SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
@@ -1221,7 +1189,7 @@ def scrape_lists():
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
             GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types, sl.description
-            ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
+            ORDER BY sl.type, CASE sl.status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, sl.name
         """)
 
         items = cursor.fetchall()
@@ -1257,7 +1225,7 @@ def api_get_scrape_lists():
     """API endpoint to get all scrape lists."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         cursor.execute("""
             SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
@@ -1267,7 +1235,7 @@ def api_get_scrape_lists():
             FROM scrape_lists sl
             LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
             GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types, sl.description
-            ORDER BY sl.type, FIELD(sl.status, 'enabled', 'disabled', 'banned'), sl.name
+            ORDER BY sl.type, CASE sl.status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, sl.name
         """)
 
         items = cursor.fetchall()
@@ -1319,12 +1287,13 @@ def api_add_scrape_list():
             cursor.execute("""
                 INSERT INTO scrape_lists (type, name, status, media_types, description)
                 VALUES (%s, %s, 'enabled', %s, %s)
+                RETURNING id
             """, (list_type, name, media_types, description))
             conn.commit()
-            item_id = cursor.lastrowid
+            item_id = cursor.fetchone()[0]
             conn.close()
             return jsonify({'success': True, 'id': item_id, 'message': 'Item added successfully'})
-        except mysql.connector.IntegrityError:
+        except psycopg2.errors.UniqueViolation:
             conn.rollback()
             conn.close()
             return jsonify({'success': False, 'error': 'Item already exists'}), 400
@@ -1417,7 +1386,7 @@ def api_toggle_scrape_list(item_id):
     """API endpoint to toggle status of a scrape list item (enabled↔disabled; banned→enabled)."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT status FROM scrape_lists WHERE id = %s", (item_id,))
         result = cursor.fetchone()
 
@@ -1450,7 +1419,7 @@ def api_scrape_now(item_id):
 
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT type, name, COALESCE(media_types, 'image,video') as media_types FROM scrape_lists WHERE id = %s", (item_id,))
         row = cursor.fetchone()
         conn.close()
@@ -1531,7 +1500,7 @@ def api_subreddit_map_data():
     """Returns nodes and links for the subreddit map visualization."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT sl.id, sl.name, sl.status,
                    COUNT(DISTINCT p.id) as post_count
@@ -1750,14 +1719,14 @@ def api_add_scrape_list_by_name(name):
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO scrape_lists (type, name, status) VALUES ('subreddit', %s, 'enabled')",
+                "INSERT INTO scrape_lists (type, name, status) VALUES ('subreddit', %s, 'enabled') RETURNING id",
                 (name,)
             )
             conn.commit()
-            item_id = cursor.lastrowid
+            item_id = cursor.fetchone()[0]
             conn.close()
             return jsonify({'success': True, 'id': item_id})
-        except mysql.connector.IntegrityError:
+        except psycopg2.errors.UniqueViolation:
             conn.rollback()
             conn.close()
             return jsonify({'success': False, 'error': 'Already in list'}), 400
@@ -1770,7 +1739,7 @@ def api_toggle_scrape_list_by_name(name):
     """Toggle enabled status of a subreddit in the scrape list by name."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             "SELECT id, status FROM scrape_lists WHERE name = %s AND type = 'subreddit'",
             (name,)
@@ -1814,7 +1783,7 @@ def delete_posts_by_user(username):
             return jsonify({'success': False, 'error': 'Username is required'}), 400
         
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         # Get all post IDs for this user
         cursor.execute("SELECT id FROM posts WHERE author = %s", (username,))
@@ -1940,7 +1909,7 @@ def blocked_users_page():
     users = ui_handler.get_users()
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT bu.username, bu.blocked_at,
                    COUNT(DISTINCT p.id) as post_count
@@ -1964,7 +1933,7 @@ def api_get_blocked_users():
     """Return list of blocked users."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT username, blocked_at FROM blocked_users ORDER BY blocked_at DESC")
         rows = cursor.fetchall()
         conn.close()
@@ -1986,15 +1955,15 @@ def api_block_user(username):
     conn = None
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
             cursor.execute(
                 "INSERT INTO blocked_users (username) VALUES (%s)",
                 (username,)
             )
             conn.commit()
-        except mysql.connector.IntegrityError:
-            pass  # already blocked — that's fine
+        except psycopg2.errors.UniqueViolation:
+            conn.rollback()  # reset transaction after error — that's fine
 
         deleted_count = 0
         if delete_posts:
@@ -2404,7 +2373,7 @@ def api_flairs():
     subreddit = request.args.get('subreddit', '').strip() or None
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         if subreddit:
             cursor.execute("""
                 SELECT p.flair,
@@ -2447,7 +2416,7 @@ def api_flair_posts():
     offset = (page - 1) * per_page
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         params_count = [flair]
         params_rows  = [flair]
         sr_clause = ''
@@ -2650,7 +2619,7 @@ def api_explicit_delete():
     conn = None
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         for file_path_str in paths:
             try:
@@ -2850,7 +2819,7 @@ def reddit_deleted_page():
 
     try:
         conn   = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         where_parts = [
             "p.is_deleted = 1",
@@ -2996,7 +2965,7 @@ def _run_video_compression(image_id: int, crf: int):
 
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT file_path, file_size FROM images WHERE id = %s", [image_id])
         row = cursor.fetchone()
         conn.close()
@@ -3095,7 +3064,7 @@ def _run_batch_compression(image_ids: list, quality: int):
     for i, image_id in enumerate(image_ids):
         try:
             conn = _get_db_connection()
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cursor.execute("SELECT file_path, file_size FROM images WHERE id = %s", [image_id])
             row = cursor.fetchone()
             conn.close()
@@ -3218,7 +3187,7 @@ def file_browser():
 
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         subreddit_clause = ""
         subreddit_params: list = []
@@ -3299,7 +3268,7 @@ def favourites():
 
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         cursor.execute("""
             SELECT COUNT(DISTINCT p.id) AS total
@@ -3422,7 +3391,7 @@ def _media_for_review(media_type):
                    f"AND {type_clause}")
     try:
         conn   = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(f"SELECT COUNT(*) as total FROM images i WHERE {base_where}")
         total = cursor.fetchone()['total']
         cursor.execute(f"""
@@ -3496,7 +3465,7 @@ def delete_file_physical(image_id):
     """Delete file from disk, mark as deleted, and delete all linked posts."""
     try:
         conn = _get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("SELECT file_path FROM images WHERE id = %s", [image_id])
         row = cursor.fetchone()
         if not row:

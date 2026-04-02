@@ -19,8 +19,9 @@ import praw
 from configparser import ConfigParser
 import mimetypes
 import re
-import mysql.connector
-from mysql.connector import pooling
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
 import configparser
 import hashlib
 from typing import List, Dict, Optional
@@ -43,20 +44,14 @@ class SubredditAccessError(RuntimeError):
         super().__init__(f"r/{subreddit} returned status {status_code}: {message}")
 
 
-# Load MySQL config
-mysql_config = None
+# Load PostgreSQL config
+_PG_DSN = None
 try:
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    mysql_config = {
-        'host': config.get('mysql', 'host', fallback='localhost'),
-        'port': config.getint('mysql', 'port', fallback=3306),
-        'user': config.get('mysql', 'user', fallback='root'),
-        'password': config.get('mysql', 'password', fallback=''),
-        'database': config.get('mysql', 'database', fallback='reddit_images')
-    }
+    _pg_config = configparser.ConfigParser()
+    _pg_config.read('config.ini')
+    _PG_DSN = _pg_config.get('postgresql', 'dsn', fallback=None)
 except Exception as e:
-    logger.error(f"Error loading MySQL config: {e}")
+    logger.error(f"Error loading PostgreSQL config: {e}")
 
 
 class RedditImageDownloader:
@@ -89,32 +84,45 @@ class RedditImageDownloader:
         # Loaded lazily on first duplicate check; new downloads append to it.
         self._phash_mem_cache: Optional[list] = None
 
-        # Initialize MySQL connection pool (if mysql_config is available). Use a small default pool size.
+        # Initialize PostgreSQL connection pool.
         self.db_pool = None
         try:
-            if mysql_config:
-                pool_size = self.config.getint('mysql', 'pool_size', fallback=5)
-                # Note: mysql.connector.pooling.MySQLConnectionPool expects connection arguments like host/user/password/database
-                self.db_pool = pooling.MySQLConnectionPool(pool_name="reddit_pool", pool_size=pool_size, **mysql_config)
-                logger.info(f"✓ MySQL connection pool created (size={pool_size})")
+            if _PG_DSN:
+                pool_size = self.config.getint('postgresql', 'pool_size', fallback=5)
+                self.db_pool = psycopg2.pool.ThreadedConnectionPool(1, pool_size, _PG_DSN)
+                logger.info(f"✓ PostgreSQL connection pool created (size={pool_size})")
         except Exception as e:
-            logger.warning(f"⚠️  Failed to create MySQL connection pool: {e}")
+            logger.warning(f"⚠️  Failed to create PostgreSQL connection pool: {e}")
             self.db_pool = None
 
     def _get_db_connection(self):
-        """Return a MySQL connection from the pool if available, otherwise create a new connection.
-
-        Caller is responsible for closing the returned connection (which returns it to the pool).
-        """
+        """Return a PostgreSQL connection. conn.close() returns it to the pool."""
         try:
             if self.db_pool:
-                return self.db_pool.get_connection()
-            # Fallback to direct connect if pool isn't available
-            return mysql.connector.connect(**mysql_config)
+                raw = self.db_pool.getconn()
+                pool = self.db_pool
+                class _PC:
+                    def __init__(self, c): self._c = c
+                    def cursor(self, **kw): return self._c.cursor(**kw)
+                    def commit(self): self._c.commit()
+                    def rollback(self): self._c.rollback()
+                    def close(self): pool.putconn(self._c)
+                    def __getattr__(self, n): return getattr(self._c, n)
+                return _PC(raw)
+            return psycopg2.connect(_PG_DSN)
         except Exception as e:
             logger.debug(f"Error acquiring DB connection: {e}")
-            # Final fallback - attempt direct connect (may raise)
-            return mysql.connector.connect(**mysql_config)
+            return psycopg2.connect(_PG_DSN)
+
+    def _release_db_connection(self, conn):
+        """Return a connection to the pool or close it."""
+        try:
+            if self.db_pool:
+                self.db_pool.putconn(conn)
+            else:
+                conn.close()
+        except Exception:
+            pass
 
     def _get_blocked_users(self) -> set:
         """Return set of blocked usernames from the blocked_users table."""
@@ -597,7 +605,7 @@ class RedditImageDownloader:
     def _get_image_record(self, url: str) -> Optional[Dict]:
         """Get image record from metadata database."""
         conn = self._get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         # Join post_images and images to get full record
         query = '''
             SELECT i.*, pi.url 
@@ -613,7 +621,7 @@ class RedditImageDownloader:
     def _get_image_by_hash(self, file_hash: str) -> Optional[Dict]:
         """Get image record by file hash."""
         conn = self._get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute('SELECT * FROM images WHERE file_hash = %s', (file_hash,))
         result = cursor.fetchone()
         conn.close()
@@ -623,7 +631,7 @@ class RedditImageDownloader:
         """Get image record by file path."""
         try:
             conn = self._get_db_connection()
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cursor.execute('SELECT * FROM images WHERE file_path = %s', (file_path,))
             result = cursor.fetchone()
             conn.close()
@@ -683,62 +691,44 @@ class RedditImageDownloader:
             cursor.execute('''
                 INSERT INTO posts (reddit_id, title, author, subreddit, permalink, created_utc, score, post_username, comments, flair)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE 
-                    title=VALUES(title), 
-                    score=VALUES(score), 
-                    comments=VALUES(comments),
-                    flair=VALUES(flair)
-            ''', (reddit_id, title, author, subreddit, permalink, 
-                  created_utc_dt, post_data.get('score', 0), 
+                ON CONFLICT (permalink) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    score = EXCLUDED.score,
+                    comments = EXCLUDED.comments,
+                    flair = EXCLUDED.flair
+                RETURNING id
+            ''', (reddit_id, title, author, subreddit, permalink,
+                  created_utc_dt, post_data.get('score', 0),
                   post_username, comments, flair))
-            
+            result = cursor.fetchone()
+            post_id = result[0] if result else None
+
             # Save permalink to permalinks table to prevent redownloads of deleted posts
             if permalink:
-                cursor.execute('''
-                    INSERT IGNORE INTO permalinks (permalink)
-                    VALUES (%s)
-                ''', (permalink,))
-            
-            # Get the post_id - either from lastrowid (if inserted) or by querying (if updated)
-            post_id = cursor.lastrowid
-            if not post_id or post_id == 0:
-                # Post already existed, fetch its ID
-                if permalink:
-                    cursor.execute('SELECT id FROM posts WHERE permalink = %s', (permalink,))
-                elif reddit_id:
-                    cursor.execute('SELECT id FROM posts WHERE reddit_id = %s', (reddit_id,))
-                else:
-                    cursor.execute('SELECT id FROM posts WHERE subreddit = %s AND title = %s AND author = %s LIMIT 1', 
-                                  (subreddit, title, author))
-                result = cursor.fetchone()
-                if result:
-                    post_id = result[0]
+                cursor.execute(
+                    'INSERT INTO permalinks (permalink) VALUES (%s) ON CONFLICT DO NOTHING',
+                    (permalink,)
+                )
         
         # 2. Insert/Update Image
         # Check if image exists by hash (handled in download_image, but we ensure here)
         cursor.execute('''
             INSERT INTO images (file_hash, filename, file_path, file_size, download_date, download_time)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE 
-                file_path=VALUES(file_path)
-        ''', (file_hash, filename, str(filepath), file_size, 
-              datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")))
-        
-        # Get the image_id - either from lastrowid (if inserted) or by querying (if updated)
-        image_id = cursor.lastrowid
-        if not image_id or image_id == 0:
-            # Image already existed, fetch its ID by hash
-            cursor.execute('SELECT id FROM images WHERE file_hash = %s', (file_hash,))
-            result = cursor.fetchone()
-            if result:
-                image_id = result[0]
+            ON CONFLICT (file_hash) DO UPDATE SET
+                file_path = EXCLUDED.file_path
+            RETURNING id
+        ''', (file_hash, filename, str(filepath), file_size,
+              datetime.now().strftime('%Y-%m-%d'), datetime.now().strftime('%H:%M:%S')))
+        result = cursor.fetchone()
+        image_id = result[0] if result else None
         
         # 3. Link Post and Image
         if post_id and image_id:
-            cursor.execute('''
-                INSERT IGNORE INTO post_images (post_id, image_id, url)
-                VALUES (%s, %s, %s)
-            ''', (post_id, image_id, url))
+            cursor.execute(
+                'INSERT INTO post_images (post_id, image_id, url) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
+                (post_id, image_id, url)
+            )
         
         conn.commit()
         conn.close()
@@ -751,10 +741,10 @@ class RedditImageDownloader:
         # Or just update images table directly if we know the file path?
         # But we only have URL here.
         cursor.execute('''
-            UPDATE images i 
-            JOIN post_images pi ON i.id = pi.image_id 
-            SET i.file_path = %s 
-            WHERE pi.url = %s
+            UPDATE images SET file_path = %s
+            WHERE id IN (
+                SELECT image_id FROM post_images WHERE url = %s
+            )
         ''', (new_filepath, url))
         conn.commit()
         conn.close()
@@ -764,10 +754,10 @@ class RedditImageDownloader:
         conn = self._get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            UPDATE images i
-            JOIN post_images pi ON i.id = pi.image_id
-            SET i.is_deleted = 1 
-            WHERE pi.url = %s
+            UPDATE images SET is_deleted = TRUE
+            WHERE id IN (
+                SELECT image_id FROM post_images WHERE url = %s
+            )
         ''', (url,))
         conn.commit()
         conn.close()
@@ -886,7 +876,7 @@ class RedditImageDownloader:
             result = cursor.fetchone()
             conn.close()
             return result[0] if result else 0
-        except mysql.connector.Error:
+        except psycopg2.Error:
             return 0
 
     def increment_zero_result_count(self, list_type: str, name: str):
@@ -900,7 +890,7 @@ class RedditImageDownloader:
             """, (list_type, name))
             conn.commit()
             conn.close()
-        except mysql.connector.Error as e:
+        except psycopg2.Error as e:
             logger.debug(f"Error incrementing zero result count: {e}")
 
     def reset_zero_result_count(self, list_type: str, name: str):
@@ -914,7 +904,7 @@ class RedditImageDownloader:
             """, (list_type, name))
             conn.commit()
             conn.close()
-        except mysql.connector.Error as e:
+        except psycopg2.Error as e:
             logger.debug(f"Error resetting zero result count: {e}")
 
     def mark_as_banned(self, list_type: str, name: str):
@@ -1485,20 +1475,22 @@ class RedditImageDownloader:
                         (reddit_id, title, author, subreddit, permalink, created_utc,
                          score, post_username, comments, flair, selftext)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        title=VALUES(title), score=VALUES(score),
-                        selftext=VALUES(selftext)
+                    ON CONFLICT (permalink) DO UPDATE SET
+                        title = EXCLUDED.title, score = EXCLUDED.score,
+                        selftext = EXCLUDED.selftext
+                    RETURNING id
                 ''', (
                     post.get('reddit_id'), post.get('title'), post.get('author'),
                     post.get('subreddit'), post.get('permalink'), created_utc_dt,
                     post.get('score', 0), post.get('post_username'),
                     post.get('comments'), post.get('flair'), post.get('selftext'),
                 ))
-                if cursor.lastrowid:
+                _row = cursor.fetchone()
+                if _row:
                     # Track permalink to prevent re-scraping
                     permalink = post.get('permalink')
                     if permalink:
-                        cursor.execute('INSERT IGNORE INTO permalinks (permalink) VALUES (%s)', (permalink,))
+                        cursor.execute('INSERT INTO permalinks (permalink) VALUES (%s) ON CONFLICT DO NOTHING', (permalink,))
                     saved += 1
             except Exception as e:
                 logger.error(f"Error saving text post: {e}")

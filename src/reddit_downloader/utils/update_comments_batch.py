@@ -33,7 +33,7 @@ import configparser
 from pathlib import Path
 
 from loguru import logger
-import mysql.connector
+import psycopg2
 import praw
 
 logger.remove()
