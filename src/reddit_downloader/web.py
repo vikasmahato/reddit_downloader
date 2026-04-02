@@ -342,7 +342,7 @@ class RedditImageUI:
             return str(thumb_rel).replace('\\', '/')
         return None
 
-    def get_all_images(self, limit=100, offset=0, subreddit=None, username=None, search=None, user=None, deleted=None):
+    def get_all_images(self, limit=100, offset=0, subreddit=None, username=None, search=None, user=None, deleted=None, sort=None):
         """
         Paginate on posts, then fetch all images for those posts.
         Each returned item represents one post with a post_images list.
@@ -357,7 +357,15 @@ class RedditImageUI:
             search_param = search if search else None
             search_like = f"%{search}%" if search else None
 
-            query = """
+            # Build ORDER BY clause based on sort param
+            if sort == 'score':
+                order_clause = 'ORDER BY COALESCE(score, 0) DESC'
+            elif sort == 'comments':
+                order_clause = "ORDER BY CASE WHEN comments IS NULL OR comments = '' THEN 0 ELSE json_array_length(comments::json) END DESC"
+            else:
+                order_clause = 'ORDER BY created_utc DESC'
+
+            query = f"""
             SELECT
                 p.id AS post_id,
                 p.title, p.author, p.subreddit, p.permalink, p.created_utc,
@@ -374,7 +382,7 @@ class RedditImageUI:
                 AND (%s IS NULL OR title LIKE %s OR author LIKE %s)
                 AND (author IS NULL OR author NOT IN (SELECT username FROM blocked_users))
                 AND EXISTS (SELECT 1 FROM post_images WHERE post_id = posts.id)
-                ORDER BY created_utc DESC
+                {order_clause}
                 LIMIT %s OFFSET %s
             ) paged_posts
             JOIN posts p ON p.id = paged_posts.id
@@ -635,7 +643,8 @@ def index():
         search=search if search else None,
         subreddit=subreddit if subreddit else None,
         user=user if user else None,
-        deleted=deleted_filter
+        deleted=deleted_filter,
+        sort=sort if sort else None
     )
     stats = ui_handler.get_stats()
     subreddits = ui_handler.get_subreddits(only_enabled=only_enabled)
@@ -662,6 +671,7 @@ def api_images():
     subreddit = request.args.get('subreddit', '')
     user = request.args.get('user', '')
     deleted = request.args.get('deleted', '')
+    sort = request.args.get('sort', '')
     deleted_filter = None
     if deleted == '1':
         deleted_filter = True
@@ -670,14 +680,15 @@ def api_images():
 
     per_page = 20
     offset = (page - 1) * per_page
-    
+
     images = ui_handler.get_all_images(
-        limit=per_page, 
-        offset=offset, 
+        limit=per_page,
+        offset=offset,
         search=search if search else None,
         subreddit=subreddit if subreddit else None,
         user=user if user else None,
-        deleted=deleted_filter
+        deleted=deleted_filter,
+        sort=sort if sort else None
     )
     
     return jsonify(images)

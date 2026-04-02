@@ -375,6 +375,15 @@
 
         <div class="filter-sep"></div>
 
+        <span class="filter-label">Sort</span>
+        <select class="form-select form-select-sm" id="sortSelect" name="sort" style="width:auto;min-width:120px;">
+            <option value="" {% if not sort %}selected{% endif %}>date added</option>
+            <option value="score" {% if sort == 'score' %}selected{% endif %}>popularity</option>
+            <option value="comments" {% if sort == 'comments' %}selected{% endif %}>comments</option>
+        </select>
+
+        <div class="filter-sep"></div>
+
         <label class="filter-check-wrap">
             <input type="checkbox" id="onlyEnabled" name="only_enabled" value="1" {% if only_enabled %}checked{% endif %}>
             <span>enabled only</span>
@@ -582,19 +591,20 @@
 <div class="d-flex justify-content-center mt-4">
     <nav>
         <ul class="pagination pagination-sm">
+            {% set pg_extra %}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}{% if sort %}&sort={{ sort }}{% endif %}{% endset %}
             {% if current_page > 1 %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ current_page - 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">‹ Prev</a>
+                <a class="page-link" href="?page={{ current_page - 1 }}{{ pg_extra }}">‹ Prev</a>
             </li>
             {% endif %}
             {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
             <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                <a class="page-link" href="?page={{ page_num }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">{{ page_num }}</a>
+                <a class="page-link" href="?page={{ page_num }}{{ pg_extra }}">{{ page_num }}</a>
             </li>
             {% endfor %}
             {% if images|length == 20 %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ current_page + 1 }}{% if filter_subreddit %}&subreddit={{ filter_subreddit }}{% endif %}{% if filter_user %}&user={{ filter_user }}{% endif %}">Next ›</a>
+                <a class="page-link" href="?page={{ current_page + 1 }}{{ pg_extra }}">Next ›</a>
             </li>
             {% endif %}
         </ul>
@@ -671,7 +681,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Auto-submit filter on change
-    ['subreddit', 'user', 'onlyEnabled'].forEach(id => {
+    ['subreddit', 'user', 'onlyEnabled', 'sortSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', () => document.getElementById('filterForm').submit());
     });
