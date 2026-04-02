@@ -361,7 +361,7 @@ class RedditImageUI:
             if sort == 'score':
                 order_clause = 'ORDER BY COALESCE(score, 0) DESC'
             elif sort == 'comments':
-                order_clause = "ORDER BY CASE WHEN comments IS NULL OR comments = '' THEN 0 ELSE json_array_length(comments::json) END DESC"
+                order_clause = "ORDER BY COALESCE(comment_count, 0) DESC"
             else:
                 order_clause = 'ORDER BY created_utc DESC'
 

@@ -143,7 +143,7 @@ def update_comments(config_path):
         # Add new comments
         merged_comments.extend(new_comments)
         comments_json = json.dumps(merged_comments)
-        cursor.execute("UPDATE posts SET comments = %s WHERE id = %s", (comments_json, post_db_id))
+        cursor.execute("UPDATE posts SET comments = %s, comment_count = %s WHERE id = %s", (comments_json, len(merged_comments), post_db_id))
         updated += 1
         if idx % 10 == 0:
             logging.info(f"Progress: {idx}/{total} processed.")
