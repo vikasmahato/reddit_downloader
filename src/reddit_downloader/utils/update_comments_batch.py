@@ -34,6 +34,7 @@ from pathlib import Path
 
 from loguru import logger
 import psycopg2
+import psycopg2.extras
 import praw
 
 logger.remove()
@@ -51,16 +52,10 @@ MODE_LIMITS = {
 
 # ── config helpers ─────────────────────────────────────────────────────────
 
-def _load_mysql(config_path):
+def _load_pg_dsn(config_path):
     cfg = configparser.ConfigParser()
     cfg.read(config_path)
-    return {
-        'host':     cfg.get('mysql', 'host',     fallback='localhost'),
-        'port':     cfg.getint('mysql', 'port',  fallback=3306),
-        'user':     cfg.get('mysql', 'user',     fallback='root'),
-        'password': cfg.get('mysql', 'password', fallback=''),
-        'database': cfg.get('mysql', 'database', fallback='reddit_images'),
-    }
+    return cfg.get('postgresql', 'dsn')
 
 
 def _parse_reddit_config(config_path):
@@ -263,12 +258,12 @@ def process_batch(reddit, conn, rows, skip_comments=False):
 # ── main entry point ───────────────────────────────────────────────────────
 
 def run(config_path, mode='weekly', progress_json=False, skip_comments=False):
-    limit = MODE_LIMITS.get(mode)
-    mysql_cfg = _load_mysql(config_path)
-    reddit    = get_reddit(config_path)
+    limit  = MODE_LIMITS.get(mode)
+    pg_dsn = _load_pg_dsn(config_path)
+    reddit = get_reddit(config_path)
 
-    conn   = mysql.connector.connect(**mysql_cfg)
-    cursor = conn.cursor(dictionary=True)
+    conn   = psycopg2.connect(pg_dsn)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # Exclude posts already marked deleted and posts from banned subreddits
     base_where = """
