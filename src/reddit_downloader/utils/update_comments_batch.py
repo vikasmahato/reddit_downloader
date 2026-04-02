@@ -171,7 +171,7 @@ def process_batch(reddit, conn, rows, skip_comments=False):
         if rid not in found:
             # Post completely absent from Reddit API (very rare)
             cursor.execute(
-                "UPDATE posts SET is_deleted=1, removed_by_category='unknown' WHERE id=%s",
+                "UPDATE posts SET is_deleted=TRUE, removed_by_category='unknown' WHERE id=%s",
                 [db_id]
             )
             deleted += 1
@@ -190,12 +190,12 @@ def process_batch(reddit, conn, rows, skip_comments=False):
             category = removed_by or 'deleted'
             if score is not None:
                 cursor.execute(
-                    "UPDATE posts SET is_deleted=1, removed_by_category=%s, score=%s WHERE id=%s",
+                    "UPDATE posts SET is_deleted=TRUE, removed_by_category=%s, score=%s WHERE id=%s",
                     [category, score, db_id]
                 )
             else:
                 cursor.execute(
-                    "UPDATE posts SET is_deleted=1, removed_by_category=%s WHERE id=%s",
+                    "UPDATE posts SET is_deleted=TRUE, removed_by_category=%s WHERE id=%s",
                     [category, db_id]
                 )
             deleted += 1
@@ -207,11 +207,11 @@ def process_batch(reddit, conn, rows, skip_comments=False):
             # Fast path — score + deletion only, no per-post API call
             if score is not None:
                 cursor.execute(
-                    "UPDATE posts SET score=%s, is_deleted=0 WHERE id=%s",
+                    "UPDATE posts SET score=%s, is_deleted=FALSE WHERE id=%s",
                     [score, db_id]
                 )
             else:
-                cursor.execute("UPDATE posts SET is_deleted=0 WHERE id=%s", [db_id])
+                cursor.execute("UPDATE posts SET is_deleted=FALSE WHERE id=%s", [db_id])
             updated += 1
             continue
 
@@ -231,7 +231,7 @@ def process_batch(reddit, conn, rows, skip_comments=False):
             logger.error(f"Comment fetch error for {rid}: {e}")
             if score is not None:
                 cursor.execute(
-                    "UPDATE posts SET score=%s, is_deleted=0 WHERE id=%s",
+                    "UPDATE posts SET score=%s, is_deleted=FALSE WHERE id=%s",
                     [score, db_id]
                 )
             errors += 1
@@ -240,12 +240,12 @@ def process_batch(reddit, conn, rows, skip_comments=False):
         merged = _merge_comments(old_comments_json, new_comments)
         if score is not None:
             cursor.execute(
-                "UPDATE posts SET comments=%s, score=%s, is_deleted=0 WHERE id=%s",
+                "UPDATE posts SET comments=%s, score=%s, is_deleted=FALSE WHERE id=%s",
                 [json.dumps(merged), score, db_id]
             )
         else:
             cursor.execute(
-                "UPDATE posts SET comments=%s, is_deleted=0 WHERE id=%s",
+                "UPDATE posts SET comments=%s, is_deleted=FALSE WHERE id=%s",
                 [json.dumps(merged), db_id]
             )
         updated += 1
@@ -267,7 +267,7 @@ def run(config_path, mode='weekly', progress_json=False, skip_comments=False):
 
     # Exclude posts already marked deleted and posts from banned subreddits
     base_where = """
-        WHERE p.is_deleted = 0
+        WHERE p.is_deleted = FALSE
           AND p.reddit_id IS NOT NULL
           AND NOT EXISTS (
               SELECT 1 FROM scrape_lists sl
