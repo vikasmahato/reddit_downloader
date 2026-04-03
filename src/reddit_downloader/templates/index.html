@@ -513,6 +513,7 @@
             {% if image.author %}
             <a href="?user={{ image.author }}" class="m-btn">u/{{ image.author }}</a>
             <button class="m-btn" style="background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.35);color:#fcd34d;" onclick="event.stopPropagation();blockUser('{{ image.author }}')">Block</button>
+            <button class="m-btn m-btn-del" style="background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.35);color:#f87171;" onclick="event.stopPropagation();blockAndDeleteUser('{{ image.author }}')">Block+Del</button>
             {% endif %}
             <button class="m-btn m-btn-del" onclick="event.stopPropagation();deletePost({{ image.post_id }},'{{ (image.title or image.filename or '')|replace("'","\\'")|truncate(40) }}')">Del</button>
             {% endif %}

@@ -778,14 +778,14 @@ class RedditImageDownloader:
                 FROM post_images pi
                 JOIN posts p ON pi.post_id = p.id
                 JOIN images i ON pi.image_id = i.id
-                WHERE p.subreddit = %s AND i.is_deleted = 0
+                WHERE p.subreddit = %s AND i.is_deleted = FALSE
             ''', (subreddit,))
         else:
             cursor.execute('''
                 SELECT pi.url, i.filename, i.file_path 
                 FROM post_images pi
                 JOIN images i ON pi.image_id = i.id
-                WHERE i.is_deleted = 0
+                WHERE i.is_deleted = FALSE
             ''')
         images = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]

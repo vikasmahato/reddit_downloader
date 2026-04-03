@@ -2833,7 +2833,7 @@ def reddit_deleted_page():
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         where_parts = [
-            "p.is_deleted = 1",
+            "p.is_deleted = TRUE",
             "NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')",
         ]
         params = []
@@ -2873,7 +2873,7 @@ def reddit_deleted_page():
         # Subreddits for filter dropdown
         cursor.execute("""
             SELECT DISTINCT p.subreddit FROM posts p
-            WHERE p.is_deleted=1
+            WHERE p.is_deleted = TRUE
               AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')
             ORDER BY p.subreddit LIMIT 200
         """)
@@ -2882,7 +2882,7 @@ def reddit_deleted_page():
         # Categories for filter dropdown
         cursor.execute("""
             SELECT p.removed_by_category, COUNT(*) AS cnt FROM posts p
-            WHERE p.is_deleted=1
+            WHERE p.is_deleted = TRUE
               AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')
             GROUP BY p.removed_by_category ORDER BY cnt DESC
         """)
@@ -2942,7 +2942,7 @@ def restore_post(post_id):
     try:
         conn   = _get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE posts SET is_deleted = 0 WHERE id = %s", [post_id])
+        cursor.execute("UPDATE posts SET is_deleted = FALSE WHERE id = %s", [post_id])
         conn.commit()
         cursor.close()
         conn.close()
@@ -3210,7 +3210,7 @@ def file_browser():
             )"""
             subreddit_params = [subreddit]
 
-        base_where = f"(i.is_deleted = 0 OR i.is_deleted IS NULL) AND (i.is_ignored = 0 OR i.is_ignored IS NULL) {type_clause} {subreddit_clause}"
+        base_where = f"(i.is_deleted = FALSE OR i.is_deleted IS NULL) AND (i.is_ignored = FALSE OR i.is_ignored IS NULL) {type_clause} {subreddit_clause}"
 
         cursor.execute(f"SELECT COUNT(*) as total FROM images i WHERE {base_where}", subreddit_params)
         total = cursor.fetchone()['total']
@@ -3239,7 +3239,7 @@ def file_browser():
             FROM posts p
             JOIN post_images pi ON pi.post_id = p.id
             JOIN images i ON i.id = pi.image_id
-            WHERE (i.is_deleted = 0 OR i.is_deleted IS NULL)
+            WHERE (i.is_deleted = FALSE OR i.is_deleted IS NULL)
               AND p.subreddit IS NOT NULL AND p.subreddit != ''
             ORDER BY p.subreddit
         """)
@@ -3397,8 +3397,8 @@ def _media_for_review(media_type):
     }
     order_by   = sort_map.get(sort, 'i.file_size DESC')
     type_clause = _REVIEW_TYPE_CLAUSES.get(media_type, _REVIEW_TYPE_CLAUSES['video'])
-    base_where  = (f"(i.is_deleted = 0 OR i.is_deleted IS NULL) "
-                   f"AND (i.is_ignored = 0 OR i.is_ignored IS NULL) "
+    base_where  = (f"(i.is_deleted = FALSE OR i.is_deleted IS NULL) "
+                   f"AND (i.is_ignored = FALSE OR i.is_ignored IS NULL) "
                    f"AND {type_clause}")
     try:
         conn   = _get_db_connection()
@@ -3462,11 +3462,11 @@ def ignore_file(image_id):
         if not row:
             conn.close()
             return jsonify({'error': 'Image not found'}), 404
-        new_val = 0 if row[0] else 1
+        new_val = not row[0]
         cursor.execute("UPDATE images SET is_ignored = %s WHERE id = %s", [new_val, image_id])
         conn.commit()
         conn.close()
-        return jsonify({'is_ignored': bool(new_val)})
+        return jsonify({'is_ignored': new_val})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3505,7 +3505,7 @@ def delete_file_physical(image_id):
             cursor.execute(f"DELETE FROM posts WHERE id IN ({fmt})", post_ids)
 
         # Mark image as deleted
-        cursor.execute("UPDATE images SET is_deleted = 1 WHERE id = %s", [image_id])
+        cursor.execute("UPDATE images SET is_deleted = TRUE WHERE id = %s", [image_id])
         conn.commit()
         conn.close()
         return jsonify({'success': True, 'posts_deleted': len(post_ids)})
