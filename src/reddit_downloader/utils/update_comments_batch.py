@@ -115,27 +115,70 @@ def emit(enabled, progress, total, message, **extra):
 
 # ── core batch processor ───────────────────────────────────────────────────
 
+def _build_comment_tree(comment, depth=0, max_depth=8):
+    """Recursively build a comment dict with nested replies."""
+    result = {
+        'id':          comment.id,
+        'author':      str(comment.author) if comment.author else '[deleted]',
+        'body':        comment.body,
+        'score':       comment.score,
+        'created_utc': comment.created_utc,
+        'replies':     [],
+    }
+    if depth < max_depth and hasattr(comment, 'replies'):
+        for reply in comment.replies:
+            if hasattr(reply, 'body'):  # skip MoreComments objects
+                result['replies'].append(_build_comment_tree(reply, depth + 1, max_depth))
+    return result
+
+
+def _collect_ids(comments):
+    """Collect all comment IDs from a nested comment list."""
+    ids = set()
+    for c in comments:
+        if c.get('id'):
+            ids.add(c['id'])
+        if c.get('replies'):
+            ids |= _collect_ids(c['replies'])
+    return ids
+
+
+def _flatten(comments):
+    """Flatten nested comment list to a single-level list."""
+    result = []
+    for c in comments:
+        result.append(c)
+        if c.get('replies'):
+            result.extend(_flatten(c['replies']))
+    return result
+
+
 def _merge_comments(old_json, new_comments):
-    """Merge new comment list with old, preserving comments that disappeared."""
+    """Merge new nested comment tree with old, preserving comments that disappeared."""
     try:
         old = json.loads(old_json) if old_json else []
     except Exception:
         old = []
 
-    new_keys = {(c.get('author', ''), c.get('body', '')) for c in new_comments}
-    merged = []
-    for oc in old:
-        key = (oc.get('author', ''), oc.get('body', ''))
-        if key not in new_keys:
-            mc = dict(oc)
-            a = mc.get('author', '')
-            b = mc.get('body', '')
-            if a not in ('[deleted]', '[removed]') and not a.endswith(' (deleted)'):
-                mc['author'] = a + ' (deleted)'
-            if b not in ('[deleted]', '[removed]') and not b.endswith(' (deleted)'):
-                mc['body'] = b + ' (deleted)'
-            merged.append(mc)
-    merged.extend(new_comments)
+    new_ids  = _collect_ids(new_comments)
+    new_keys = {(c.get('author', ''), c.get('body', '')) for c in _flatten(new_comments)}
+
+    merged = list(new_comments)
+    for oc in _flatten(old):
+        oc_id = oc.get('id')
+        if oc_id and oc_id in new_ids:
+            continue
+        if not oc_id and (oc.get('author', ''), oc.get('body', '')) in new_keys:
+            continue
+        mc = {k: v for k, v in oc.items() if k != 'replies'}
+        mc['replies'] = []
+        a = mc.get('author', '')
+        b = mc.get('body', '')
+        if a not in ('[deleted]', '[removed]') and not a.endswith(' (deleted)'):
+            mc['author'] = a + ' (deleted)'
+        if b not in ('[deleted]', '[removed]') and not b.endswith(' (deleted)'):
+            mc['body'] = b + ' (deleted)'
+        merged.insert(0, mc)
     return merged
 
 
@@ -219,12 +262,7 @@ def process_batch(reddit, conn, rows, skip_comments=False):
         try:
             sub.comments.replace_more(limit=0)
             new_comments = [
-                {
-                    'author':      str(c.author) if c.author else '[deleted]',
-                    'body':        c.body,
-                    'score':       c.score,
-                    'created_utc': c.created_utc,
-                }
+                _build_comment_tree(c)
                 for c in sub.comments[:COMMENT_LIMIT]
             ]
         except Exception as e:

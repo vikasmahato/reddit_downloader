@@ -80,19 +80,47 @@ def extract_post_id(permalink, url):
         return match.group(1)
     return None
 
+def _build_comment_tree(comment, depth=0, max_depth=8):
+    """Recursively build a comment dict with nested replies."""
+    result = {
+        'id':          comment.id,
+        'author':      str(comment.author) if comment.author else '[deleted]',
+        'body':        comment.body,
+        'score':       comment.score,
+        'created_utc': comment.created_utc,
+        'replies':     [],
+    }
+    if depth < max_depth and hasattr(comment, 'replies'):
+        for reply in comment.replies:
+            if hasattr(reply, 'body'):
+                result['replies'].append(_build_comment_tree(reply, depth + 1, max_depth))
+    return result
+
+
+def _collect_ids(comments):
+    ids = set()
+    for c in comments:
+        if c.get('id'):
+            ids.add(c['id'])
+        if c.get('replies'):
+            ids |= _collect_ids(c['replies'])
+    return ids
+
+
+def _flatten(comments):
+    result = []
+    for c in comments:
+        result.append(c)
+        if c.get('replies'):
+            result.extend(_flatten(c['replies']))
+    return result
+
+
 def fetch_comments(reddit, post_id, limit=100):
     try:
         submission = reddit.submission(id=post_id)
         submission.comments.replace_more(limit=0)
-        comments = []
-        for c in submission.comments[:limit]:
-            comments.append({
-                'author': str(c.author) if c.author else '',
-                'body': c.body,
-                'score': c.score,
-                'created_utc': c.created_utc
-            })
-        return comments
+        return [_build_comment_tree(c) for c in submission.comments[:limit]]
     except Exception as e:
         print(f"Error fetching comments for post {post_id}: {e}")
         return []
@@ -126,22 +154,25 @@ def update_comments(config_path):
             old_comments = json.loads(old_comments_json) if old_comments_json else []
         except Exception:
             old_comments = []
-        # Mark deleted comments
-        merged_comments = []
-        # Use (author, body) as identity for matching
-        new_comment_keys = set((c['author'], c['body']) for c in new_comments)
-        for old in old_comments:
-            key = (old.get('author', ''), old.get('body', ''))
-            if key not in new_comment_keys:
-                # Mark as deleted
-                deleted_comment = dict(old)
-                if not deleted_comment['author'].endswith(' (deleted)'):
-                    deleted_comment['author'] += ' (deleted)'
-                if not deleted_comment['body'].endswith(' (deleted)'):
-                    deleted_comment['body'] += ' (deleted)'
-                merged_comments.append(deleted_comment)
-        # Add new comments
-        merged_comments.extend(new_comments)
+        # Merge new nested tree with old, preserving disappeared comments
+        new_ids  = _collect_ids(new_comments)
+        new_keys = {(c.get('author', ''), c.get('body', '')) for c in _flatten(new_comments)}
+        merged_comments = list(new_comments)
+        for oc in _flatten(old_comments):
+            oc_id = oc.get('id')
+            if oc_id and oc_id in new_ids:
+                continue
+            if not oc_id and (oc.get('author', ''), oc.get('body', '')) in new_keys:
+                continue
+            mc = {k: v for k, v in oc.items() if k != 'replies'}
+            mc['replies'] = []
+            a = mc.get('author', '')
+            b = mc.get('body', '')
+            if a not in ('[deleted]', '[removed]') and not a.endswith(' (deleted)'):
+                mc['author'] = a + ' (deleted)'
+            if b not in ('[deleted]', '[removed]') and not b.endswith(' (deleted)'):
+                mc['body'] = b + ' (deleted)'
+            merged_comments.insert(0, mc)
         comments_json = json.dumps(merged_comments)
         cursor.execute("UPDATE posts SET comments = %s, comment_count = %s WHERE id = %s", (comments_json, len(merged_comments), post_db_id))
         updated += 1

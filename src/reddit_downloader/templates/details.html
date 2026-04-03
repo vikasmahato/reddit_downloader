@@ -28,12 +28,41 @@
     display: block;
     margin: 0 auto;
 }
-.comment-item {
-    border-bottom: 1px solid var(--border);
-    padding: 0.6rem 0;
+.comment-thread {
+    display: flex;
+    gap: 0;
+    margin-top: 0.4rem;
 }
-.comment-item:last-child { border-bottom: none; }
-.comment-author { font-size: 0.7rem; color: var(--accent); font-weight: 500; }
+.comment-thread + .comment-thread { margin-top: 0.4rem; }
+.comment-collapse-bar {
+    width: 6px;
+    min-width: 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-right: 7px;
+    flex-shrink: 0;
+    align-self: stretch;
+    min-height: 16px;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+.comment-collapse-bar:hover { opacity: 1; }
+.comment-content { flex: 1; min-width: 0; }
+.comment-replies { margin-top: 0.25rem; }
+.comment-thread.collapsed > .comment-content > .comment-replies,
+.comment-thread.collapsed > .comment-content > .comment-item > .comment-body { display: none; }
+.comment-thread.collapsed > .comment-content > .comment-item::after {
+    content: ' [collapsed]';
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    margin-left: 0.4rem;
+}
+.comment-item { padding: 0.3rem 0 0.2rem; }
+.comment-author { font-size: 0.7rem; color: var(--accent); font-weight: 600; display: inline; }
+.comment-author.deleted { color: var(--text-muted); text-decoration: line-through; }
+.comment-score { font-size: 0.62rem; color: var(--text-muted); display: inline; margin-left: 0.4rem; }
+.comment-score.positive { color: #ff4500; }
+.comment-score.negative { color: #9494ff; }
 .comment-meta   { font-size: 0.58rem; color: var(--text-muted); margin: 1px 0 3px; }
 .comment-body   { font-size: 0.72rem; color: var(--text); line-height: 1.45; }
 .comment-md p { margin: 0 0 0.3rem; }
@@ -276,20 +305,37 @@
         <div class="card-header">
             <h6><i class="fas fa-comments"></i> Top Comments</h6>
         </div>
-        <div class="card-body">
+        <div class="card-body p-2">
             {% set comments = image.comments | safe | loads %}
             {% if comments and comments|length > 0 %}
+            {% set depth_colors = ['#ff4500','#ff8717','#46d160','#24a0ed','#9494ff','#ff585b'] %}
+            {% macro render_comment(comment, depth) %}
+            <div class="comment-thread" data-depth="{{ depth }}">
+                <div class="comment-collapse-bar" style="background:{{ depth_colors[depth % 6] }};" title="Click to collapse" onclick="this.closest('.comment-thread').classList.toggle('collapsed')"></div>
+                <div class="comment-content">
+                    <div class="comment-item">
+                        <span class="comment-author{% if '(deleted)' in (comment.author or '') %} deleted{% endif %}">{{ comment.author or 'Unknown' }}</span>
+                        <span class="comment-score{% if (comment.score or 0) > 0 %} positive{% elif (comment.score or 0) < 0 %} negative{% endif %}">▲ {{ comment.score or 0 }}</span>
+                        <div class="comment-meta">{{ comment.created_utc | format_datetime }}</div>
+                        <div class="comment-body comment-md" data-md="{{ comment.body | e }}"></div>
+                    </div>
+                    {% if comment.replies and comment.replies|length > 0 %}
+                    <div class="comment-replies">
+                        {% for reply in comment.replies %}
+                        {{ render_comment(reply, depth + 1) }}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endmacro %}
             <div id="commentsList">
                 {% for comment in comments %}
-                <div class="comment-item">
-                    <div class="comment-author">{{ comment.author or 'Unknown' }}</div>
-                    <div class="comment-meta">score {{ comment.score }} · {{ comment.created_utc | format_datetime }}</div>
-                    <div class="comment-body comment-md" data-md="{{ comment.body | e }}"></div>
-                </div>
+                {{ render_comment(comment, 0) }}
                 {% endfor %}
             </div>
             {% else %}
-            <div class="text-muted">No comments found.</div>
+            <div class="text-muted ps-1">No comments found.</div>
             {% endif %}
         </div>
     </div>
@@ -505,15 +551,10 @@ if (_commentForm) _commentForm.addEventListener('submit', function(e) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Add new comment to the top of the list
             var commentsList = document.getElementById('commentsList');
-            var newComment = document.createElement('div');
-            newComment.className = 'comment-item';
-            newComment.innerHTML = `<div class='comment-author'>${data.comment.author || 'You'}</div>
-                <div class='comment-meta'>score ${data.comment.score || 1} · just now</div>
-                <div class='comment-body comment-md'>${renderMd(data.comment.body)}</div>`;
             if (commentsList) {
-                commentsList.prepend(newComment);
+                const newComment = Object.assign({replies: []}, data.comment);
+                commentsList.prepend(renderComment(newComment, 0));
             }
             statusDiv.style.display = 'block';
             statusDiv.className = 'alert alert-success';
@@ -540,6 +581,52 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// Reddit-like nested comment renderer
+const DEPTH_COLORS = ['#ff4500', '#ff8717', '#46d160', '#24a0ed', '#9494ff', '#ff585b'];
+
+function renderComment(comment, depth) {
+    depth = depth || 0;
+    const thread = document.createElement('div');
+    thread.className = 'comment-thread';
+    thread.dataset.depth = depth;
+
+    const bar = document.createElement('div');
+    bar.className = 'comment-collapse-bar';
+    bar.style.background = DEPTH_COLORS[depth % DEPTH_COLORS.length];
+    bar.title = 'Click to collapse';
+    bar.addEventListener('click', function() {
+        thread.classList.toggle('collapsed');
+    });
+
+    const content = document.createElement('div');
+    content.className = 'comment-content';
+
+    const item = document.createElement('div');
+    item.className = 'comment-item';
+    const isDeleted = (comment.author || '').includes('(deleted)');
+    const score = comment.score || 0;
+    const scoreClass = score > 0 ? 'positive' : (score < 0 ? 'negative' : '');
+    const timeStr = comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : '';
+    item.innerHTML = `<span class="comment-author${isDeleted ? ' deleted' : ''}">${comment.author || 'Unknown'}</span>` +
+        `<span class="comment-score${scoreClass ? ' ' + scoreClass : ''}">▲ ${score}</span>` +
+        `<div class="comment-meta">${timeStr}</div>` +
+        `<div class="comment-body comment-md">${renderMd(comment.body || '')}</div>`;
+    content.appendChild(item);
+
+    if (comment.replies && comment.replies.length > 0) {
+        const repliesDiv = document.createElement('div');
+        repliesDiv.className = 'comment-replies';
+        comment.replies.forEach(function(reply) {
+            repliesDiv.appendChild(renderComment(reply, depth + 1));
+        });
+        content.appendChild(repliesDiv);
+    }
+
+    thread.appendChild(bar);
+    thread.appendChild(content);
+    return thread;
+}
+
 // Auto-fetch and update comments on page load
 window.addEventListener('DOMContentLoaded', function() {
     var postId = {{ image.post_id }};
@@ -552,19 +639,10 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (data.comments.length > 0) {
                     commentsList.innerHTML = '';
                     data.comments.forEach(function(comment) {
-                        var li = document.createElement('div');
-                        li.className = 'comment-item';
-                        li.innerHTML = `<div class='comment-author'>${comment.author || 'Unknown'}</div>
-                            <div class='comment-meta'>score ${comment.score || 0} · ${comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : ''}</div>
-                            <div class='comment-body comment-md'>${renderMd(comment.body)}</div>`;
-                        commentsList.appendChild(li);
+                        commentsList.appendChild(renderComment(comment, 0));
                     });
                 } else {
-                    commentsList.innerHTML = '';
-                    var noCommentsDiv = document.createElement('div');
-                    noCommentsDiv.className = 'text-muted';
-                    noCommentsDiv.textContent = 'No comments found.';
-                    commentsCardBody.appendChild(noCommentsDiv);
+                    commentsList.innerHTML = '<div class="text-muted ps-1">No comments found.</div>';
                 }
             }
         });
