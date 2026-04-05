@@ -3,7 +3,7 @@
 compress_images.py — Compress images larger than a size threshold.
 
 Scans a folder (or the whole reddit_downloads tree), compresses oversized JPEGs
-and PNGs in-place using Pillow, then updates file_size in the MySQL images table
+and PNGs in-place using Pillow, then updates file_size in the PostgreSQL images table
 and invalidates stale entries in the phash_cache (duplicates.db) so that the
 next phash run re-hashes touched files.
 
@@ -85,30 +85,26 @@ def _emit(msg: str, cur: int = 0, tot: int = 0,
         print(f'{bar}{msg}', flush=True)
 
 
-# ── MySQL update ──────────────────────────────────────────────────────────
+# ── PostgreSQL update ─────────────────────────────────────────────────────
 
 def _update_db_filesize(file_path: str, new_size: int) -> bool:
-    """Update file_size for the given path in the MySQL images table."""
+    """Update file_size for the given path in the PostgreSQL images table."""
     try:
         import configparser
-        import mysql.connector
+        import psycopg2
         cfg = configparser.ConfigParser()
         cfg.read('config.ini')
-        conn = mysql.connector.connect(
-            host    =cfg.get('mysql', 'host',     fallback='localhost'),
-            port    =cfg.getint('mysql', 'port',  fallback=3306),
-            user    =cfg.get('mysql', 'user',     fallback='root'),
-            password=cfg.get('mysql', 'password', fallback=''),
-            database=cfg.get('mysql', 'database', fallback='reddit_images'),
-        )
+        dsn = cfg.get('postgresql', 'dsn')
+        conn = psycopg2.connect(dsn)
         cur = conn.cursor()
         cur.execute(
             'UPDATE images SET file_size = %s WHERE file_path = %s',
             (new_size, file_path)
         )
         conn.commit()
+        updated = cur.rowcount > 0
         conn.close()
-        return cur.rowcount > 0
+        return updated
     except Exception as e:
         print(f'[warn] DB update failed for {file_path}: {e}', file=sys.stderr)
         return False
