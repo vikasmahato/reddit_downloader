@@ -36,6 +36,7 @@ _FILE_TIMEOUT_SECS = 30  # kill any PIL operation that hangs longer than this
 try:
     from PIL import Image as _PILImage, ImageFile as _PILImageFile
     _PILImageFile.LOAD_TRUNCATED_IMAGES = True  # handle partially-downloaded files
+    _PILImage.MAX_IMAGE_PIXELS = 500_000_000     # raise limit (~22360×22360 px)
 except ImportError:
     _PILImage = None
 
@@ -57,9 +58,10 @@ DEFAULT_QUALITY     = 85            # JPEG quality (1-95)
 DEFAULT_FOLDER      = 'reddit_downloads'
 DUPES_DB            = Path('duplicates.db')
 
-IMAGE_EXT   = {'.jpg', '.jpeg'}     # formats we re-encode
-PNG_EXT     = {'.png'}              # lossless-optimised separately
-SKIP_DIRS   = {'deleted', 'thumbs'} # never touch these sub-folders
+IMAGE_EXT   = {'.jpg', '.jpeg'}                          # native JPEG
+PNG_EXT     = {'.png'}                                   # lossless PNG → JPEG
+OTHER_EXT   = {'.webp', '.gif', '.bmp', '.tiff', '.tif'} # convert via PIL
+SKIP_DIRS   = {'deleted', 'thumbs'}                      # never touch these sub-folders
 
 # Progressive resize steps tried when file stays above threshold after quality compression
 MOBILE_RESIZE_STEPS = [1920, 1440, 1080, 720]
@@ -140,8 +142,13 @@ def _to_rgb(img):
     return img
 
 
+_SKIP_UNSUPPORTED = object()  # sentinel: file format not handled
+_SKIP_TIMEOUT     = object()  # sentinel: PIL operation timed out
+_SKIP_ERROR       = object()  # sentinel: PIL raised an exception
+
+
 def compress_file(path: Path, quality: int,
-                  min_size_bytes: int = DEFAULT_MIN_SIZE_KB * 1024) -> Optional[int]:
+                  min_size_bytes: int = DEFAULT_MIN_SIZE_KB * 1024):
     """
     Compress a single image file in-place.
 
@@ -150,7 +157,13 @@ def compress_file(path: Path, quality: int,
       2. If the result is still >= min_size_bytes, progressively downscale
          through MOBILE_RESIZE_STEPS until below threshold.
 
-    Returns bytes saved (positive), 0 if nothing helped, or None if skipped/failed.
+    Returns a tuple (result, final_path) where:
+      result is one of:
+        int             — bytes saved (positive = smaller; 0/negative = already optimal)
+        _SKIP_UNSUPPORTED — file extension/format not handled
+        _SKIP_TIMEOUT     — PIL timed out
+        _SKIP_ERROR       — PIL raised an exception (warning already printed)
+      final_path — the path after any rename (same as input unless format was converted)
     """
     if _PILImage is None:
         print('Pillow not installed — run: pip install Pillow', file=sys.stderr)
@@ -166,7 +179,7 @@ def compress_file(path: Path, quality: int,
         signal.signal(signal.SIGALRM, _alarm)
         signal.alarm(_FILE_TIMEOUT_SECS)
         with _PILImage.open(path) as img:
-            fmt = img.format  # 'JPEG', 'PNG', …
+            fmt = img.format  # 'JPEG', 'PNG', 'WEBP', 'GIF', …
 
             if ext in IMAGE_EXT or fmt == 'JPEG':
                 img_out = _to_rgb(img)
@@ -180,12 +193,24 @@ def compress_file(path: Path, quality: int,
                 img_out.save(path, 'JPEG', quality=quality, optimize=True,
                              progressive=True)
 
+            elif ext in OTHER_EXT or fmt in ('WEBP', 'GIF', 'BMP', 'TIFF'):
+                # PIL could open it — convert to JPEG and rename extension
+                img_out = _to_rgb(img)
+                new_path = path.with_suffix('.jpg')
+                img_out.save(new_path, 'JPEG', quality=quality, optimize=True,
+                             progressive=True)
+                if new_path != path:
+                    path.unlink()
+                    path = new_path  # update reference for size calculation below
+
             else:
-                return None  # unsupported format
+                signal.alarm(0)
+                print(f'[warn] Unrecognised format "{fmt}" for {path}', file=sys.stderr)
+                return _SKIP_UNSUPPORTED, path
 
         # ── Step 2: if still too large, progressively downscale for mobile ──
         if min_size_bytes and path.stat().st_size >= min_size_bytes \
-                and ext in (IMAGE_EXT | PNG_EXT):
+                and ext in (IMAGE_EXT | PNG_EXT | OTHER_EXT):
             with _PILImage.open(path) as img2:
                 img_rgb = _to_rgb(img2)
             for max_dim in MOBILE_RESIZE_STEPS:
@@ -203,19 +228,19 @@ def compress_file(path: Path, quality: int,
         signal.alarm(0)  # cancel timeout
         new_size = path.stat().st_size
         saved = original_size - new_size
-        return saved  # may be negative if already well-compressed
+        return saved, path  # may be negative if already well-compressed
 
-    except TimeoutError as e:
+    except TimeoutError:
         signal.alarm(0)
-        print(f'[warn] Skipped (timeout): {path.name}', file=sys.stderr)
-        return None
+        print(f'[warn] Timed out after {_FILE_TIMEOUT_SECS}s: {path}', file=sys.stderr)
+        return _SKIP_TIMEOUT, path
     except Exception as e:
         signal.alarm(0)
         msg = str(e)
         silent = any(s in msg for s in ('cannot identify', 'NoneType'))
         if not silent:
             print(f'[warn] Could not compress {path}: {e}', file=sys.stderr)
-        return None
+        return _SKIP_ERROR, path
 
 
 # ── Core ──────────────────────────────────────────────────────────────────
@@ -240,7 +265,7 @@ def run_compress(
         _emit(msg, cur, tot, saved, as_json=progress_json)
 
     folder = folder.resolve()
-    COMPRESSIBLE = IMAGE_EXT | PNG_EXT
+    COMPRESSIBLE = IMAGE_EXT | PNG_EXT | OTHER_EXT
 
     # Collect candidate files
     emit(f'Scanning {folder} …')
@@ -284,11 +309,19 @@ def run_compress(
             emit(f'Stopped at {i-1}/{total}.', i - 1, total, total_saved)
             break
 
-        saved = compress_file(fp, quality, min_size_bytes)
+        saved, final_fp = compress_file(fp, quality, min_size_bytes)
 
-        if saved is None:
+        if saved is _SKIP_UNSUPPORTED:
             skipped += 1
-            emit(f'[{i}/{total}] Skipped (unsupported): {fp.name}', i, total, total_saved)
+            emit(f'[{i}/{total}] Skipped (unsupported format): {fp.name}', i, total, total_saved)
+            continue
+        if saved is _SKIP_TIMEOUT:
+            skipped += 1
+            emit(f'[{i}/{total}] Skipped (timeout): {fp.name}', i, total, total_saved)
+            continue
+        if saved is _SKIP_ERROR:
+            skipped += 1
+            emit(f'[{i}/{total}] Skipped (error — see warning above): {fp.name}', i, total, total_saved)
             continue
 
         if saved <= 0:
@@ -298,21 +331,22 @@ def run_compress(
 
         compressed += 1
         total_saved += saved
-        new_size = fp.stat().st_size
+        new_size = final_fp.stat().st_size
+        renamed = f' → {final_fp.name}' if final_fp != fp else ''
         still_large = ' [still >{} after downscale]'.format(_fmt(min_size_bytes)) if new_size >= min_size_bytes else ''
         emit(
-            f'[{i}/{total}] {fp.name}  −{_fmt(saved)}  → {_fmt(new_size)}{still_large}',
+            f'[{i}/{total}] {fp.name}{renamed}  −{_fmt(saved)}  → {_fmt(new_size)}{still_large}',
             i, total, total_saved,
         )
 
         # Keep DB in sync
-        _update_db_filesize(str(fp), new_size)
-        _invalidate_phash(str(fp))
+        _update_db_filesize(str(final_fp), new_size)
+        _invalidate_phash(str(final_fp))
 
     elapsed = time.time() - t0
 
     # ── After stats ───────────────────────────────────────────────────────
-    size_after = sum(fp.stat().st_size for fp in candidates)
+    size_after = sum(fp.stat().st_size for fp in candidates if fp.exists())
     actual_saved = size_before - size_after
 
     summary_lines = [
