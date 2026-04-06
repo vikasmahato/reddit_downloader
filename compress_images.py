@@ -194,14 +194,17 @@ def compress_file(path: Path, quality: int,
                              progressive=True)
 
             elif ext in OTHER_EXT or fmt in ('WEBP', 'GIF', 'BMP', 'TIFF'):
-                # PIL could open it — convert to JPEG and rename extension
-                img_out = _to_rgb(img)
+                # For animated GIFs load only the first frame to avoid OOM
+                if fmt == 'GIF' or ext == '.gif':
+                    img.seek(0)
+                img_out = _to_rgb(img.copy())
                 new_path = path.with_suffix('.jpg')
-                img_out.save(new_path, 'JPEG', quality=quality, optimize=True,
-                             progressive=True)
+                # Delete original before saving to avoid holding both in memory/disk
                 if new_path != path:
                     path.unlink()
-                    path = new_path  # update reference for size calculation below
+                img_out.save(new_path, 'JPEG', quality=quality, optimize=True,
+                             progressive=True)
+                path = new_path  # update reference for size calculation below
 
             else:
                 signal.alarm(0)
