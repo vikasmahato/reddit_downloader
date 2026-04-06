@@ -265,6 +265,12 @@ def run_compress(
         _emit(msg, cur, tot, saved, as_json=progress_json)
 
     folder = folder.resolve()
+
+    if not folder.exists():
+        emit(f'Skipping (folder not found): {folder}')
+        return {'total': 0, 'compressed': 0, 'skipped': 0, 'saved_bytes': 0,
+                'size_before_bytes': 0, 'size_after_bytes': 0}
+
     COMPRESSIBLE = IMAGE_EXT | PNG_EXT | OTHER_EXT
 
     # Collect candidate files
