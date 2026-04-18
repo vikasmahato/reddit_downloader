@@ -327,6 +327,29 @@
     font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase;
     letter-spacing: 0.08em; margin: 0;
 }
+
+/* ── BULK DELETE PROGRESS ───────────────────────────── */
+#bulk-delete-progress {
+    display: none;
+    width: 100%;
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+}
+.bdp-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 0.6rem;
+    color: var(--text-muted); margin-bottom: 0.3rem;
+}
+.bdp-msg { flex: 1; }
+.bdp-pct { color: var(--accent); font-weight: 600; margin-left: 0.5rem; }
+.bdp-track {
+    height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+}
+.bdp-fill {
+    height: 100%; background: #ef4444; border-radius: 2px;
+    transition: width 0.4s ease;
+}
 </style>
 
 <!-- Header -->
@@ -413,6 +436,15 @@
                 <i class="fas fa-sync-alt"></i> Re-scan
             </button>
         </div>
+    </div>
+
+    <!-- Bulk-delete progress (shown while running) -->
+    <div id="bulk-delete-progress">
+        <div class="bdp-row">
+            <span class="bdp-msg" id="bdp-msg">Preparing…</span>
+            <span class="bdp-pct" id="bdp-pct">0%</span>
+        </div>
+        <div class="bdp-track"><div class="bdp-fill" id="bdp-fill" style="width:0%"></div></div>
     </div>
 
     <!-- Controls -->
@@ -957,6 +989,48 @@ function updateTotalLabel() {
 }
 
 // ── DELETE ALL KEEP SMALLEST ──────────────────────────────────────────────
+let _deletePollTimer = null;
+
+function _setBulkDeleteProgress(show, msg, pct) {
+    const wrap = document.getElementById('bulk-delete-progress');
+    wrap.style.display = show ? 'block' : 'none';
+    if (show) {
+        document.getElementById('bdp-msg').textContent  = msg || '';
+        document.getElementById('bdp-pct').textContent  = pct != null ? pct + '%' : '';
+        document.getElementById('bdp-fill').style.width = (pct || 0) + '%';
+    }
+}
+
+async function _pollBulkDelete() {
+    try {
+        const st = await fetch('/api/duplicates/delete_all_keep_smallest/status').then(r => r.json());
+        const pct = st.total > 0 ? Math.round(st.progress / st.total * 100) : 0;
+        _setBulkDeleteProgress(true, st.message, pct);
+
+        if (!st.running) {
+            clearInterval(_deletePollTimer);
+            _deletePollTimer = null;
+            _setBulkDeleteProgress(false);
+
+            const btn = document.getElementById('delete-all-smallest-btn');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-trash-alt me-1"></i>Delete all · keep smallest';
+
+            if (st.error) {
+                showToast('Delete failed: ' + st.error, 'error');
+            } else if (st.deleted > 0 || st.total > 0) {
+                const msg = `Deleted ${(st.deleted||0).toLocaleString()} file${st.deleted !== 1 ? 's' : ''}` +
+                            (st.freed_fmt ? ` · freed ${st.freed_fmt}` : '') +
+                            (st.errors?.length ? ` (${st.errors.length} error${st.errors.length !== 1 ? 's' : ''})` : '');
+                showToast(msg, 'ok');
+                if (st.errors?.length) st.errors.slice(0, 3).forEach(e => showToast(e, 'warn'));
+                await loadFolderStats();
+                await loadGroups();
+            }
+        }
+    } catch(e) { /* ignore poll errors */ }
+}
+
 async function deleteAllKeepSmallest() {
     if (!currentFolder) return;
     const groupCount = parseInt(document.getElementById('stat-groups').textContent.replace(/,/g, '')) || 0;
@@ -973,6 +1047,7 @@ async function deleteAllKeepSmallest() {
     const btn = document.getElementById('delete-all-smallest-btn');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Deleting…';
+    _setBulkDeleteProgress(true, 'Starting…', 0);
 
     try {
         const res = await fetch('/api/duplicates/delete_all_keep_smallest', {
@@ -983,21 +1058,21 @@ async function deleteAllKeepSmallest() {
 
         if (!res.success) {
             showToast('Delete failed: ' + res.error, 'error');
-        } else {
-            const msg = `Deleted ${res.deleted.toLocaleString()} file${res.deleted !== 1 ? 's' : ''}` +
-                        (res.freed_fmt ? ` · freed ${res.freed_fmt}` : '') +
-                        (res.errors?.length ? ` (${res.errors.length} error${res.errors.length !== 1 ? 's' : ''})` : '');
-            showToast(msg, 'ok');
-            if (res.errors?.length) res.errors.forEach(e => showToast(e, 'warn'));
-            await loadFolderStats();
-            await loadGroups();
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-trash-alt me-1"></i>Delete all · keep smallest';
+            _setBulkDeleteProgress(false);
+            return;
         }
+
+        // Start polling for progress
+        if (_deletePollTimer) clearInterval(_deletePollTimer);
+        _deletePollTimer = setInterval(_pollBulkDelete, 800);
     } catch(e) {
         showToast('Request failed: ' + e, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-trash-alt me-1"></i>Delete all · keep smallest';
+        _setBulkDeleteProgress(false);
     }
-
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-trash-alt me-1"></i>Delete all · keep smallest';
 }
 
 // ── PAGINATION ────────────────────────────────────────────────────────────
