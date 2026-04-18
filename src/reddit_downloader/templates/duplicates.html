@@ -359,6 +359,27 @@
         <i class="fas fa-arrow-left me-1"></i>Folders
     </button>
     <span id="current-folder-label"></span>
+    <div id="bulk-scan-header-actions" style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">
+        <button class="f-btn f-btn-primary" id="bulk-scan-btn" onclick="startBulkScan()"
+                title="Compute hashes then find duplicates for every folder">
+            <i class="fas fa-layer-group me-1"></i>Scan all folders
+        </button>
+        <button class="f-btn f-btn-stop" id="bulk-scan-stop-btn" style="display:none" onclick="stopBulkScan()">
+            <i class="fas fa-stop me-1"></i>Stop
+        </button>
+    </div>
+</div>
+
+<!-- Bulk scan progress bar (shown in folders view while running) -->
+<div id="bulk-scan-progress" style="display:none;margin-bottom:0.75rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted);margin-bottom:0.3rem;">
+        <span id="bsp-msg">Starting…</span>
+        <span id="bsp-pct" style="color:var(--accent);font-weight:600;"></span>
+    </div>
+    <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+        <div id="bsp-fill" style="height:100%;background:var(--accent);border-radius:2px;transition:width 0.4s ease;width:0%;"></div>
+    </div>
+    <div id="bsp-sub" style="font-family:var(--font-mono);font-size:0.56rem;color:var(--text-muted);margin-top:0.25rem;"></div>
 </div>
 
 <!-- Toast container -->
@@ -497,6 +518,7 @@ function showFoldersView() {
     document.getElementById('groups-view').style.display  = 'none';
     document.getElementById('back-btn').style.display     = 'none';
     document.getElementById('current-folder-label').style.display = 'none';
+    document.getElementById('bulk-scan-header-actions').style.display = 'flex';
     closeLogPanel();
     loadFolders();
 }
@@ -508,6 +530,7 @@ async function showGroupsView(folderName) {
     document.getElementById('folders-view').style.display = 'none';
     document.getElementById('groups-view').style.display  = '';
     document.getElementById('back-btn').style.display     = '';
+    document.getElementById('bulk-scan-header-actions').style.display = 'none';
     const lbl = document.getElementById('current-folder-label');
     lbl.textContent = 'r/' + folderName;
     lbl.style.display = '';
@@ -987,6 +1010,101 @@ function updateTotalLabel() {
     const remaining = document.querySelectorAll('.dup-group').length;
     document.getElementById('total-label').textContent = `${remaining.toLocaleString()} groups`;
 }
+
+// ── BULK SCAN ALL FOLDERS ─────────────────────────────────────────────────
+let _bulkScanPollTimer = null;
+
+function _setBulkScanUI(running) {
+    document.getElementById('bulk-scan-btn').style.display      = running ? 'none' : '';
+    document.getElementById('bulk-scan-stop-btn').style.display = running ? '' : 'none';
+    document.getElementById('bulk-scan-progress').style.display = running ? 'block' : 'none';
+    // Hide "Scan all folders" button when in groups view
+    const hdr = document.getElementById('bulk-scan-header-actions');
+    if (hdr) hdr.style.display = currentView === 'groups' ? 'none' : 'flex';
+}
+
+function _updateBulkScanProgress(st) {
+    const folderPct = st.folder_total > 0
+        ? Math.round(st.folder_index / st.folder_total * 100) : 0;
+
+    document.getElementById('bsp-msg').textContent = st.message || '';
+    document.getElementById('bsp-pct').textContent = st.folder_total > 0
+        ? `${st.folder_index} / ${st.folder_total} folders` : '';
+    document.getElementById('bsp-fill').style.width = folderPct + '%';
+
+    // Sub-line: live op progress
+    let sub = '';
+    if (st.op === 'hash' && st.hash_total > 0) {
+        const p = Math.round(st.hash_progress / st.hash_total * 100);
+        sub = `Hashes: ${st.hash_progress.toLocaleString()} / ${st.hash_total.toLocaleString()} (${p}%)`;
+    } else if (st.op === 'scan' && st.scan_total > 0) {
+        const p = Math.round(st.scan_progress / st.scan_total * 100);
+        sub = `Scan: ${st.scan_progress.toLocaleString()} / ${st.scan_total.toLocaleString()} (${p}%)`;
+    }
+    document.getElementById('bsp-sub').textContent = sub;
+}
+
+async function _pollBulkScan() {
+    try {
+        const st = await fetch('/api/duplicates/bulk_scan/status').then(r => r.json());
+        _updateBulkScanProgress(st);
+
+        if (!st.running) {
+            clearInterval(_bulkScanPollTimer);
+            _bulkScanPollTimer = null;
+            _setBulkScanUI(false);
+
+            if (st.error) {
+                showToast('Bulk scan error: ' + st.error, 'error');
+            } else {
+                showToast(st.message || 'Bulk scan complete.', 'ok');
+            }
+            if (currentView === 'folders') await loadFolders();
+        }
+    } catch(e) { /* ignore */ }
+}
+
+async function startBulkScan() {
+    const threshold = 10; // could expose later
+    const ok = await showConfirm(
+        'Scan all folders',
+        'This will compute pHashes then find duplicates for every folder in reddit_downloads, one by one. ' +
+        'Existing hashes are reused — only new files will be hashed.'
+    );
+    if (!ok) return;
+
+    try {
+        const res = await fetch('/api/duplicates/bulk_scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({threshold}),
+        }).then(r => r.json());
+
+        if (!res.success) { showToast(res.error, 'error'); return; }
+        showToast(`Bulk scan started — ${res.folder_count} folders queued.`, 'ok');
+        _setBulkScanUI(true);
+        _updateBulkScanProgress({folder_index: 0, folder_total: res.folder_count, message: 'Starting…', op: '', hash_total: 0, scan_total: 0});
+        if (_bulkScanPollTimer) clearInterval(_bulkScanPollTimer);
+        _bulkScanPollTimer = setInterval(_pollBulkScan, 1000);
+    } catch(e) { showToast('Request failed: ' + e, 'error'); }
+}
+
+async function stopBulkScan() {
+    try { await fetch('/api/duplicates/bulk_scan/stop', {method: 'POST'}); } catch(_) {}
+}
+
+// Check bulk scan status on page load in case one is already running
+(async function checkBulkScanOnLoad() {
+    try {
+        const st = await fetch('/api/duplicates/bulk_scan/status').then(r => r.json());
+        if (st.running) {
+            _setBulkScanUI(true);
+            _updateBulkScanProgress(st);
+            if (_bulkScanPollTimer) clearInterval(_bulkScanPollTimer);
+            _bulkScanPollTimer = setInterval(_pollBulkScan, 1000);
+        }
+    } catch(_) {}
+})();
 
 // ── DELETE ALL KEEP SMALLEST ──────────────────────────────────────────────
 let _deletePollTimer = null;

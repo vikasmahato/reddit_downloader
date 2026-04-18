@@ -3571,6 +3571,10 @@ _hash_proc = None
 _delete_state: dict = {'running': False, 'folder': None, 'message': '', 'progress': 0, 'total': 0, 'deleted': 0, 'freed': 0, 'freed_fmt': '', 'error': None, 'errors': []}
 _delete_lock = threading.Lock()
 
+_bulk_scan_state: dict = {'running': False, 'stopped': False, 'op': '', 'folder': None,
+                           'folder_index': 0, 'folder_total': 0, 'message': '', 'error': None}
+_bulk_scan_lock = threading.Lock()
+
 
 def _get_dupes_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(_DUPES_DB), timeout=10.0)
@@ -4100,6 +4104,157 @@ def api_duplicate_groups():
                         'page': page, 'per_page': per_p})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _run_bulk_scan(folder_names: list, threshold: int = 10):
+    """Background thread: hash then scan every folder sequentially."""
+    import sys as _sys
+
+    total = len(folder_names)
+    with _bulk_scan_lock:
+        _bulk_scan_state.update({
+            'running': True, 'stopped': False, 'error': None,
+            'folder_total': total, 'folder_index': 0,
+            'folder': None, 'op': '', 'message': 'Starting…',
+        })
+
+    try:
+        for idx, folder_name in enumerate(folder_names):
+            with _bulk_scan_lock:
+                if _bulk_scan_state['stopped']:
+                    break
+                _bulk_scan_state.update({
+                    'folder_index': idx + 1,
+                    'folder': folder_name,
+                    'op': 'hash',
+                    'message': f'[{idx+1}/{total}] r/{folder_name} — computing hashes…',
+                })
+
+            # ── Hash phase ────────────────────────────────────────────────
+            hash_script = Path(__file__).parent.parent.parent / 'compute_hashes.py'
+            if not hash_script.exists():
+                hash_script = Path.cwd() / 'compute_hashes.py'
+            folder_path = str(Path.cwd() / 'reddit_downloads' / folder_name)
+            hash_cmd = [_sys.executable, str(hash_script),
+                        '--folder', folder_path, '--progress-json']
+
+            with _hash_lock:
+                _hash_state.update({
+                    'running': True, 'folder': folder_name,
+                    'message': 'Starting…', 'progress': 0, 'total': 0,
+                    'error': None, 'logs': [],
+                })
+
+            def _set_hash_proc(p):
+                global _hash_proc
+                with _hash_lock:
+                    _hash_proc = p
+
+            _run_subprocess_with_state(hash_cmd, _hash_state, _hash_lock, _set_hash_proc)
+
+            with _bulk_scan_lock:
+                if _bulk_scan_state['stopped']:
+                    break
+
+            # ── Scan phase ────────────────────────────────────────────────
+            with _bulk_scan_lock:
+                _bulk_scan_state.update({
+                    'op': 'scan',
+                    'message': f'[{idx+1}/{total}] r/{folder_name} — finding duplicates…',
+                })
+
+            scan_script = Path(__file__).parent.parent.parent / 'scan_duplicates.py'
+            if not scan_script.exists():
+                scan_script = Path.cwd() / 'scan_duplicates.py'
+            scan_cmd = [_sys.executable, str(scan_script),
+                        '--threshold', str(threshold),
+                        '--folder', folder_path,
+                        '--use-cache-only', '--progress-json']
+
+            with _scan_lock:
+                _scan_state.update({
+                    'running': True, 'folder': folder_name,
+                    'message': 'Starting…', 'progress': 0, 'total': 0,
+                    'error': None, 'logs': [], 'partial': False,
+                })
+
+            def _set_scan_proc(p):
+                global _scan_proc
+                with _scan_lock:
+                    _scan_proc = p
+
+            _run_subprocess_with_state(scan_cmd, _scan_state, _scan_lock, _set_scan_proc)
+
+        with _bulk_scan_lock:
+            stopped = _bulk_scan_state['stopped']
+        done_folders = idx + 1 if 'idx' in dir() else 0  # type: ignore[name-defined]  # noqa
+        with _bulk_scan_lock:
+            _bulk_scan_state.update({
+                'running': False,
+                'message': ('Stopped.' if stopped
+                            else f'Done — scanned {done_folders} folder{"s" if done_folders != 1 else ""}'),
+            })
+
+    except Exception as exc:
+        with _bulk_scan_lock:
+            _bulk_scan_state.update({'running': False, 'error': str(exc),
+                                      'message': f'Error: {exc}'})
+
+
+@app.route('/api/duplicates/bulk_scan', methods=['POST'])
+def api_bulk_scan_start():
+    data      = request.get_json() or {}
+    threshold = int(data.get('threshold', 10))
+
+    with _bulk_scan_lock:
+        if _bulk_scan_state['running']:
+            return jsonify({'success': False, 'error': 'Bulk scan already running'}), 409
+
+    dl_dir = Path.cwd() / 'reddit_downloads'
+    if not dl_dir.exists():
+        return jsonify({'success': False, 'error': 'reddit_downloads not found'}), 404
+
+    folders = sorted([f.name for f in dl_dir.iterdir() if f.is_dir()])
+    if not folders:
+        return jsonify({'success': False, 'error': 'No folders found'}), 404
+
+    threading.Thread(target=_run_bulk_scan, args=(folders, threshold), daemon=True).start()
+    return jsonify({'success': True, 'folder_count': len(folders)})
+
+
+@app.route('/api/duplicates/bulk_scan/status')
+def api_bulk_scan_status():
+    with _bulk_scan_lock:
+        st = dict(_bulk_scan_state)
+    # Attach live per-op progress from hash/scan state
+    with _hash_lock:
+        st['hash_progress'] = _hash_state.get('progress', 0)
+        st['hash_total']    = _hash_state.get('total', 0)
+        st['hash_message']  = _hash_state.get('message', '')
+    with _scan_lock:
+        st['scan_progress'] = _scan_state.get('progress', 0)
+        st['scan_total']    = _scan_state.get('total', 0)
+        st['scan_message']  = _scan_state.get('message', '')
+    return jsonify(st)
+
+
+@app.route('/api/duplicates/bulk_scan/stop', methods=['POST'])
+def api_bulk_scan_stop():
+    global _hash_proc, _scan_proc
+    with _bulk_scan_lock:
+        _bulk_scan_state['stopped'] = True
+    # Kill whichever subprocess is currently running
+    with _hash_lock:
+        p = _hash_proc
+    if p:
+        try: p.terminate()
+        except Exception: pass
+    with _scan_lock:
+        p = _scan_proc
+    if p:
+        try: p.terminate()
+        except Exception: pass
+    return jsonify({'success': True})
 
 
 def _run_bulk_delete_keep_smallest(folder_name: str):
