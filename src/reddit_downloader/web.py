@@ -4099,6 +4099,102 @@ def api_duplicate_groups():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/duplicates/delete_all_keep_smallest', methods=['POST'])
+def api_delete_all_keep_smallest():
+    """Delete all duplicates in a folder keeping only the smallest file per group."""
+    data        = request.get_json() or {}
+    folder_name = data.get('folder')
+    if not folder_name:
+        return jsonify({'success': False, 'error': 'No folder specified'}), 400
+    if not _DUPES_DB.exists():
+        return jsonify({'success': False, 'error': 'No duplicates database found'}), 400
+
+    sdb = _get_dupes_db()
+    groups = sdb.execute(
+        'SELECT id FROM dup_groups WHERE file_count > 1 AND folder = ?', (folder_name,)
+    ).fetchall()
+
+    file_ids_to_delete = []
+    for g in groups:
+        # Order ASC so index 0 is smallest — we keep it, delete the rest
+        files = sdb.execute(
+            'SELECT id FROM dup_files WHERE group_id = ? AND is_deleted = 0 ORDER BY file_size ASC',
+            (g['id'],),
+        ).fetchall()
+        if len(files) > 1:
+            file_ids_to_delete.extend(f['id'] for f in files[1:])
+    sdb.close()
+
+    if not file_ids_to_delete:
+        return jsonify({'success': True, 'deleted': 0, 'freed': 0, 'errors': []})
+
+    sdb = _get_dupes_db()
+    ph    = ','.join(['?'] * len(file_ids_to_delete))
+    files = sdb.execute(
+        f'SELECT * FROM dup_files WHERE id IN ({ph}) AND is_deleted = 0', file_ids_to_delete
+    ).fetchall()
+    sdb.close()
+
+    deleted, freed, errors = 0, 0, []
+    my_conn = _get_db_connection()
+    my_cur  = my_conn.cursor()
+    sdb     = _get_dupes_db()
+
+    for f in files:
+        try:
+            fp = Path(f['file_path'])
+            fsize = f['file_size'] or 0
+            if fp.exists():
+                fp.unlink()
+                freed += fsize
+            sdb.execute('UPDATE dup_files SET is_deleted = 1 WHERE id = ?', (f['id'],))
+            if f['image_id']:
+                remaining = sdb.execute(
+                    'SELECT COUNT(*) FROM dup_files '
+                    'WHERE group_id = ? AND image_id = ? AND is_deleted = 0 AND id != ?',
+                    (f['group_id'], f['image_id'], f['id']),
+                ).fetchone()[0]
+                if remaining == 0:
+                    my_cur.execute('SELECT post_id FROM post_images WHERE image_id = %s', (f['image_id'],))
+                    post_ids = [r[0] for r in my_cur.fetchall()]
+                    my_cur.execute('DELETE FROM images WHERE id = %s', (f['image_id'],))
+                    for pid in post_ids:
+                        if pid is None:
+                            continue
+                        my_cur.execute('SELECT COUNT(*) FROM post_images WHERE post_id = %s', (pid,))
+                        if my_cur.fetchone()[0] == 0:
+                            my_cur.execute('DELETE FROM posts WHERE id = %s', (pid,))
+                    my_conn.commit()
+            deleted += 1
+        except Exception as exc:
+            errors.append(f'{Path(f["file_path"]).name}: {exc}')
+
+    group_ids = list({f['group_id'] for f in files})
+    for gid in group_ids:
+        row = sdb.execute(
+            'SELECT COUNT(*) AS cnt, COALESCE(SUM(file_size),0) AS ts, '
+            'COALESCE(MIN(file_size),0) AS ms '
+            'FROM dup_files WHERE group_id = ? AND is_deleted = 0', (gid,)
+        ).fetchone()
+        cnt, ts, ms = row['cnt'], row['ts'], row['ms']
+        if cnt <= 1:
+            sdb.execute('DELETE FROM dup_groups WHERE id = ?', (gid,))
+            sdb.execute('DELETE FROM dup_files WHERE group_id = ?', (gid,))
+        else:
+            sdb.execute(
+                'UPDATE dup_groups SET file_count=?, total_size=?, wasted_size=? WHERE id=?',
+                (cnt, ts, ts - ms, gid),
+            )
+
+    sdb.commit()
+    sdb.close()
+    my_cur.close()
+    my_conn.close()
+
+    return jsonify({'success': True, 'deleted': deleted,
+                    'freed': freed, 'freed_fmt': _format_bytes(freed), 'errors': errors})
+
+
 @app.route('/api/duplicates/delete', methods=['POST'])
 def api_delete_duplicates():
     data     = request.get_json() or {}

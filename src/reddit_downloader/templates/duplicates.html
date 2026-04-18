@@ -392,6 +392,12 @@
             <span id="partial-badge" style="display:none;font-size:0.6rem;color:#fb923c;font-family:var(--font-mono);border:1px solid rgba(251,146,60,0.4);border-radius:4px;padding:2px 8px;">
                 <i class="fas fa-exclamation-triangle me-1"></i>Partial
             </span>
+            <button class="btn btn-sm" id="delete-all-smallest-btn"
+                    onclick="deleteAllKeepSmallest()"
+                    style="font-size:0.62rem;font-family:var(--font-mono);border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.08);color:#f87171;white-space:nowrap;"
+                    title="Delete all duplicates in this folder, keeping the smallest file in each group">
+                <i class="fas fa-trash-alt me-1"></i>Delete all · keep smallest
+            </button>
             <div class="threshold-wrap">
                 <label>Threshold</label>
                 <select id="threshold-sel" class="form-select form-select-sm"
@@ -948,6 +954,50 @@ function refreshGroup(groupId) {
 function updateTotalLabel() {
     const remaining = document.querySelectorAll('.dup-group').length;
     document.getElementById('total-label').textContent = `${remaining.toLocaleString()} groups`;
+}
+
+// ── DELETE ALL KEEP SMALLEST ──────────────────────────────────────────────
+async function deleteAllKeepSmallest() {
+    if (!currentFolder) return;
+    const groupCount = parseInt(document.getElementById('stat-groups').textContent.replace(/,/g, '')) || 0;
+    if (groupCount === 0) { showToast('No duplicate groups to process.', 'warn'); return; }
+    const wastedSize = document.getElementById('stat-wasted').textContent;
+    const ok = await showConfirm(
+        'Delete all duplicates — keep smallest',
+        `This will process all ${groupCount.toLocaleString()} group${groupCount !== 1 ? 's' : ''} in r/${currentFolder} ` +
+        `and permanently delete every copy except the smallest file in each group. ` +
+        `~${wastedSize} will be freed. This cannot be undone.`
+    );
+    if (!ok) return;
+
+    const btn = document.getElementById('delete-all-smallest-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Deleting…';
+
+    try {
+        const res = await fetch('/api/duplicates/delete_all_keep_smallest', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({folder: currentFolder}),
+        }).then(r => r.json());
+
+        if (!res.success) {
+            showToast('Delete failed: ' + res.error, 'error');
+        } else {
+            const msg = `Deleted ${res.deleted.toLocaleString()} file${res.deleted !== 1 ? 's' : ''}` +
+                        (res.freed_fmt ? ` · freed ${res.freed_fmt}` : '') +
+                        (res.errors?.length ? ` (${res.errors.length} error${res.errors.length !== 1 ? 's' : ''})` : '');
+            showToast(msg, 'ok');
+            if (res.errors?.length) res.errors.forEach(e => showToast(e, 'warn'));
+            await loadFolderStats();
+            await loadGroups();
+        }
+    } catch(e) {
+        showToast('Request failed: ' + e, 'error');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-trash-alt me-1"></i>Delete all · keep smallest';
 }
 
 // ── PAGINATION ────────────────────────────────────────────────────────────
