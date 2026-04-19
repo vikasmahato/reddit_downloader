@@ -3522,6 +3522,7 @@ def main():
 # ═══════════════════════════════════════════════════════════════════════════
 
 _DUPES_DB = Path.cwd() / 'duplicates.db'
+_BULK_SCAN_PROGRESS_FILE = Path.cwd() / 'bulk_scan_progress.json'
 
 _DUPES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS scan_info (
@@ -4106,28 +4107,43 @@ def api_duplicate_groups():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-def _run_bulk_scan(folder_names: list, threshold: int = 10):
+def _run_bulk_scan(folder_names: list, threshold: int = 10, skip_folders: set = None):
     """Background thread: hash then scan every folder sequentially."""
     import sys as _sys
 
+    skip_folders = skip_folders or set()
     total = len(folder_names)
     with _bulk_scan_lock:
         _bulk_scan_state.update({
             'running': True, 'stopped': False, 'error': None,
-            'folder_total': total, 'folder_index': 0,
-            'folder': None, 'op': '', 'message': 'Starting…',
+            'folder_total': total, 'folder_index': len(skip_folders),
+            'folder': None, 'op': '', 'message': 'Resuming…' if skip_folders else 'Starting…',
         })
 
+    completed: set = set(skip_folders)
+
+    def _save_progress():
+        try:
+            _BULK_SCAN_PROGRESS_FILE.write_text(
+                json.dumps({'completed': sorted(completed), 'all_folders': folder_names}),
+                encoding='utf-8',
+            )
+        except Exception:
+            pass
+
     try:
+        done_count = len(skip_folders)
         for idx, folder_name in enumerate(folder_names):
+            if folder_name in skip_folders:
+                continue
             with _bulk_scan_lock:
                 if _bulk_scan_state['stopped']:
                     break
                 _bulk_scan_state.update({
-                    'folder_index': idx + 1,
+                    'folder_index': done_count + 1,
                     'folder': folder_name,
                     'op': 'hash',
-                    'message': f'[{idx+1}/{total}] r/{folder_name} — computing hashes…',
+                    'message': f'[{done_count+1}/{total}] r/{folder_name} — computing hashes…',
                 })
 
             # ── Hash phase ────────────────────────────────────────────────
@@ -4160,7 +4176,7 @@ def _run_bulk_scan(folder_names: list, threshold: int = 10):
             with _bulk_scan_lock:
                 _bulk_scan_state.update({
                     'op': 'scan',
-                    'message': f'[{idx+1}/{total}] r/{folder_name} — finding duplicates…',
+                    'message': f'[{done_count+1}/{total}] r/{folder_name} — finding duplicates…',
                 })
 
             scan_script = Path(__file__).parent.parent.parent / 'scan_duplicates.py'
@@ -4185,15 +4201,23 @@ def _run_bulk_scan(folder_names: list, threshold: int = 10):
 
             _run_subprocess_with_state(scan_cmd, _scan_state, _scan_lock, _set_scan_proc)
 
+            done_count += 1
+            completed.add(folder_name)
+            _save_progress()
+
         with _bulk_scan_lock:
             stopped = _bulk_scan_state['stopped']
-        done_folders = idx + 1 if 'idx' in dir() else 0  # type: ignore[name-defined]  # noqa
         with _bulk_scan_lock:
             _bulk_scan_state.update({
                 'running': False,
                 'message': ('Stopped.' if stopped
-                            else f'Done — scanned {done_folders} folder{"s" if done_folders != 1 else ""}'),
+                            else f'Done — scanned {done_count} folder{"s" if done_count != 1 else ""}'),
             })
+        if not stopped:
+            try:
+                _BULK_SCAN_PROGRESS_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     except Exception as exc:
         with _bulk_scan_lock:
@@ -4201,10 +4225,29 @@ def _run_bulk_scan(folder_names: list, threshold: int = 10):
                                       'message': f'Error: {exc}'})
 
 
+@app.route('/api/duplicates/bulk_scan/progress')
+def api_bulk_scan_progress():
+    if not _BULK_SCAN_PROGRESS_FILE.exists():
+        return jsonify({'has_progress': False})
+    try:
+        data = json.loads(_BULK_SCAN_PROGRESS_FILE.read_text(encoding='utf-8'))
+        completed = data.get('completed', [])
+        all_folders = data.get('all_folders', [])
+        return jsonify({
+            'has_progress': True,
+            'completed_count': len(completed),
+            'total_count': len(all_folders),
+            'next_folder': next((f for f in all_folders if f not in completed), None),
+        })
+    except Exception:
+        return jsonify({'has_progress': False})
+
+
 @app.route('/api/duplicates/bulk_scan', methods=['POST'])
 def api_bulk_scan_start():
     data      = request.get_json() or {}
     threshold = int(data.get('threshold', 10))
+    resume    = bool(data.get('resume', False))
 
     with _bulk_scan_lock:
         if _bulk_scan_state['running']:
@@ -4218,8 +4261,21 @@ def api_bulk_scan_start():
     if not folders:
         return jsonify({'success': False, 'error': 'No folders found'}), 404
 
-    threading.Thread(target=_run_bulk_scan, args=(folders, threshold), daemon=True).start()
-    return jsonify({'success': True, 'folder_count': len(folders)})
+    skip_folders: set = set()
+    if resume and _BULK_SCAN_PROGRESS_FILE.exists():
+        try:
+            saved = json.loads(_BULK_SCAN_PROGRESS_FILE.read_text(encoding='utf-8'))
+            skip_folders = set(saved.get('completed', []))
+        except Exception:
+            pass
+    elif not resume:
+        try:
+            _BULK_SCAN_PROGRESS_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    threading.Thread(target=_run_bulk_scan, args=(folders, threshold, skip_folders), daemon=True).start()
+    return jsonify({'success': True, 'folder_count': len(folders), 'skipped_count': len(skip_folders)})
 
 
 @app.route('/api/duplicates/bulk_scan/status')

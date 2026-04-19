@@ -1067,28 +1067,83 @@ async function _pollBulkScan() {
 }
 
 async function startBulkScan() {
-    const threshold = 10; // could expose later
-    const ok = await showConfirm(
-        'Scan all folders',
-        'This will compute pHashes then find duplicates for every folder in reddit_downloads, one by one. ' +
-        'Existing hashes are reused — only new files will be hashed.'
-    );
-    if (!ok) return;
+    const threshold = 10;
+
+    // Check for resumable progress
+    let resume = false;
+    try {
+        const prog = await fetch('/api/duplicates/bulk_scan/progress').then(r => r.json());
+        if (prog.has_progress && prog.completed_count > 0) {
+            const choice = await showBulkScanChoice(prog.completed_count, prog.total_count, prog.next_folder);
+            if (choice === null) return; // cancelled
+            resume = choice;
+        } else {
+            const ok = await showConfirm(
+                'Scan all folders',
+                'This will compute pHashes then find duplicates for every folder in reddit_downloads, one by one. ' +
+                'Existing hashes are reused — only new files will be hashed.'
+            );
+            if (!ok) return;
+        }
+    } catch(e) {
+        const ok = await showConfirm(
+            'Scan all folders',
+            'This will compute pHashes then find duplicates for every folder in reddit_downloads, one by one. ' +
+            'Existing hashes are reused — only new files will be hashed.'
+        );
+        if (!ok) return;
+    }
 
     try {
         const res = await fetch('/api/duplicates/bulk_scan', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({threshold}),
+            body: JSON.stringify({threshold, resume}),
         }).then(r => r.json());
 
         if (!res.success) { showToast(res.error, 'error'); return; }
-        showToast(`Bulk scan started — ${res.folder_count} folders queued.`, 'ok');
+        const skipped = res.skipped_count || 0;
+        showToast(
+            skipped > 0
+                ? `Bulk scan resumed — ${res.folder_count - skipped} folders remaining.`
+                : `Bulk scan started — ${res.folder_count} folders queued.`,
+            'ok'
+        );
         _setBulkScanUI(true);
-        _updateBulkScanProgress({folder_index: 0, folder_total: res.folder_count, message: 'Starting…', op: '', hash_total: 0, scan_total: 0});
+        _updateBulkScanProgress({folder_index: skipped, folder_total: res.folder_count, message: resume ? 'Resuming…' : 'Starting…', op: '', hash_total: 0, scan_total: 0});
         if (_bulkScanPollTimer) clearInterval(_bulkScanPollTimer);
         _bulkScanPollTimer = setInterval(_pollBulkScan, 1000);
     } catch(e) { showToast('Request failed: ' + e, 'error'); }
+}
+
+function showBulkScanChoice(doneCnt, totalCnt, nextFolder) {
+    return new Promise(resolve => {
+        const existing = document.getElementById('_bulkChoiceModal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = '_bulkChoiceModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+        modal.innerHTML = `
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:1.5rem;max-width:420px;width:90%">
+                <div style="font-weight:700;font-size:1rem;margin-bottom:.5rem">Scan all folders</div>
+                <div style="color:var(--text-muted);font-size:.88rem;margin-bottom:1.25rem">
+                    A previous scan completed <strong>${doneCnt}</strong> of <strong>${totalCnt}</strong> folders.
+                    ${nextFolder ? `Next up: <strong>r/${nextFolder}</strong>.` : ''}
+                </div>
+                <div style="display:flex;gap:.6rem;justify-content:flex-end;flex-wrap:wrap">
+                    <button id="_bsc-cancel" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.4rem .9rem;cursor:pointer;font-size:.85rem">Cancel</button>
+                    <button id="_bsc-fresh"  style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.4rem .9rem;cursor:pointer;font-size:.85rem">Start fresh</button>
+                    <button id="_bsc-resume" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:.4rem .9rem;cursor:pointer;font-size:.85rem">Resume</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+        const cleanup = (val) => { modal.remove(); resolve(val); };
+        document.getElementById('_bsc-cancel').onclick  = () => cleanup(null);
+        document.getElementById('_bsc-fresh').onclick   = () => cleanup(false);
+        document.getElementById('_bsc-resume').onclick  = () => cleanup(true);
+        modal.addEventListener('click', e => { if (e.target === modal) cleanup(null); });
+    });
 }
 
 async function stopBulkScan() {
