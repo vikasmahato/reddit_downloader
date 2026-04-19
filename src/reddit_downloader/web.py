@@ -4492,6 +4492,80 @@ def api_delete_duplicates():
     return jsonify({'success': True, 'deleted': deleted, 'errors': errors})
 
 
+# ── Activity / 24-hour stats ──────────────────────────────────────────────
+
+@app.route('/activity')
+def activity_page():
+    stats = ui_handler.get_stats()
+    return render_template('activity.html', stats=stats)
+
+
+@app.route('/api/activity/stats')
+def api_activity_stats():
+    try:
+        hours = int(request.args.get('hours', 24))
+        conn = _get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT
+                p.subreddit,
+                COUNT(i.id)                                          AS files,
+                ROUND(SUM(i.file_size)::numeric / 1073741824, 3)    AS gb,
+                sl.id                                                AS scrape_list_id,
+                sl.status                                            AS scrape_status
+            FROM images i
+            JOIN post_images pi ON pi.image_id = i.id
+            JOIN posts p        ON p.id = pi.post_id
+            LEFT JOIN scrape_lists sl ON sl.name = p.subreddit AND sl.type = 'subreddit'
+            WHERE i.is_deleted = 0
+              AND (i.download_date::timestamp + i.download_time) >= NOW() - (%s || ' hours')::interval
+            GROUP BY p.subreddit, sl.id, sl.status
+            ORDER BY files DESC
+        """, (str(hours),))
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        for r in rows:
+            r['gb'] = float(r['gb']) if r['gb'] is not None else 0.0
+        return jsonify({'success': True, 'rows': rows, 'hours': hours})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/activity/scraped')
+def api_activity_scraped():
+    subreddit = request.args.get('subreddit', '')
+    hours = int(request.args.get('hours', 24))
+    if not subreddit:
+        return jsonify({'success': False, 'error': 'subreddit required'}), 400
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
+            SELECT i.id, i.file_path, i.filename, i.file_size,
+                   p.title, p.permalink, p.reddit_id,
+                   i.download_date, i.download_time
+            FROM images i
+            JOIN post_images pi ON pi.image_id = i.id
+            JOIN posts p        ON p.id = pi.post_id
+            WHERE i.is_deleted = 0
+              AND p.subreddit = %s
+              AND (i.download_date::timestamp + i.download_time) >= NOW() - (%s || ' hours')::interval
+            ORDER BY i.download_date DESC, i.download_time DESC
+            LIMIT 500
+        """, (subreddit, str(hours)))
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+        for r in rows:
+            wp = (r.get('file_path') or '').replace('\\', '/')
+            r['thumb_url'] = '/thumbs/' + str(Path(wp).with_suffix('.jpg')).replace('\\', '/') if wp else ''
+            r['file_size'] = r['file_size'] or 0
+            r['download_date'] = str(r['download_date']) if r['download_date'] else ''
+            r['download_time'] = str(r['download_time']) if r['download_time'] else ''
+        return jsonify({'success': True, 'rows': rows, 'subreddit': subreddit})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     main()
 

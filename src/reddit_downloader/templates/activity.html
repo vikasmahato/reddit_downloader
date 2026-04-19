@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+:root { --radius: 8px; }
+.act-header {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .75rem;
+    padding: 1.25rem 1.5rem .75rem;
+}
+.act-title { font-size: 1.3rem; font-weight: 700; color: var(--text); }
+.act-controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.act-hours-select {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: .3rem .6rem; font-size: .85rem; cursor: pointer;
+}
+.act-refresh-btn {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: var(--radius); padding: .35rem .8rem; font-size: .85rem; cursor: pointer;
+}
+.act-refresh-btn:hover { opacity: .85; }
+
+.act-summary {
+    display: flex; gap: 1rem; flex-wrap: wrap;
+    padding: 0 1.5rem .75rem;
+}
+.act-stat-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: .6rem 1rem; min-width: 110px;
+}
+.act-stat-box .val { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+.act-stat-box .lbl { font-size: .75rem; color: var(--text-muted); margin-top: 2px; }
+
+.act-table-wrap { overflow-x: auto; padding: 0 1.5rem 2rem; }
+table.act-table {
+    width: 100%; border-collapse: collapse; font-size: .88rem;
+}
+.act-table th {
+    text-align: left; padding: .5rem .75rem;
+    border-bottom: 2px solid var(--border); color: var(--text-muted);
+    font-weight: 600; white-space: nowrap;
+}
+.act-table td {
+    padding: .5rem .75rem; border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+.act-table tr:hover td { background: var(--surface); }
+.act-table .sub-name { font-weight: 600; color: var(--accent); }
+.act-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.act-btn {
+    border: none; border-radius: 5px; padding: .28rem .65rem;
+    font-size: .8rem; cursor: pointer; display: inline-flex; align-items: center; gap: .3rem;
+}
+.act-btn-view  { background: var(--accent); color: #fff; }
+.act-btn-view:hover { opacity: .85; }
+.act-btn-stop  { background: #c0392b; color: #fff; }
+.act-btn-stop:hover { background: #96281b; }
+.act-btn-enable { background: #27ae60; color: #fff; }
+.act-btn-enable:hover { background: #1e8449; }
+
+.status-badge {
+    display: inline-block; border-radius: 4px; padding: .15rem .45rem;
+    font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+}
+.status-enabled  { background: rgba(39,174,96,.18); color: #27ae60; }
+.status-disabled { background: rgba(192,57,43,.18); color: #c0392b; }
+.status-banned   { background: rgba(127,140,141,.2); color: #7f8c8d; }
+.status-none     { background: rgba(127,140,141,.15); color: #7f8c8d; }
+
+/* Modal */
+.act-modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    z-index: 1050; align-items: flex-start; justify-content: center; padding-top: 60px;
+}
+.act-modal-backdrop.open { display: flex; }
+.act-modal {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+    width: min(900px, 96vw); max-height: 82vh; display: flex; flex-direction: column;
+    overflow: hidden;
+}
+.act-modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .9rem 1.25rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.act-modal-title { font-weight: 700; font-size: 1rem; }
+.act-modal-close {
+    background: none; border: none; color: var(--text-muted); font-size: 1.2rem;
+    cursor: pointer; line-height: 1;
+}
+.act-modal-close:hover { color: var(--text); }
+.act-modal-body { overflow-y: auto; padding: 1rem 1.25rem; flex: 1; }
+.act-modal-summary {
+    font-size: .85rem; color: var(--text-muted); margin-bottom: .75rem;
+}
+.act-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: .6rem;
+}
+.act-grid-item {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; cursor: pointer; text-decoration: none; color: var(--text);
+    display: flex; flex-direction: column;
+}
+.act-grid-item:hover { border-color: var(--accent); }
+.act-grid-thumb {
+    width: 100%; aspect-ratio: 1/1; object-fit: cover; background: var(--border);
+    display: block;
+}
+.act-grid-info {
+    padding: .35rem .45rem; font-size: .72rem; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.act-grid-info strong { display: block; color: var(--text); font-size: .76rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.act-loading { text-align: center; padding: 2rem; color: var(--text-muted); }
+</style>
+
+<div class="act-header">
+    <span class="act-title"><i class="fas fa-chart-bar me-2"></i>Download Activity</span>
+    <div class="act-controls">
+        <select class="act-hours-select" id="hoursSelect">
+            <option value="6">Last 6 h</option>
+            <option value="12">Last 12 h</option>
+            <option value="24" selected>Last 24 h</option>
+            <option value="48">Last 48 h</option>
+            <option value="72">Last 72 h</option>
+        </select>
+        <button class="act-refresh-btn" onclick="loadStats()">
+            <i class="fas fa-sync-alt me-1"></i>Refresh
+        </button>
+    </div>
+</div>
+
+<div class="act-summary" id="summaryBar">
+    <div class="act-stat-box"><div class="val" id="sumSubs">—</div><div class="lbl">Subreddits</div></div>
+    <div class="act-stat-box"><div class="val" id="sumFiles">—</div><div class="lbl">Files</div></div>
+    <div class="act-stat-box"><div class="val" id="sumGB">—</div><div class="lbl">GB</div></div>
+</div>
+
+<div class="act-table-wrap">
+    <table class="act-table">
+        <thead>
+            <tr>
+                <th>Subreddit</th>
+                <th class="num">Files</th>
+                <th class="num">Size (GB)</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="actBody">
+            <tr><td colspan="5" class="act-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Scraped files modal -->
+<div class="act-modal-backdrop" id="scrapedModal">
+    <div class="act-modal">
+        <div class="act-modal-header">
+            <span class="act-modal-title" id="modalTitle">Scraped Files</span>
+            <button class="act-modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="act-modal-body">
+            <div class="act-modal-summary" id="modalSummary"></div>
+            <div class="act-grid" id="modalGrid"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let _rows = [];
+
+async function loadStats() {
+    const hours = document.getElementById('hoursSelect').value;
+    document.getElementById('actBody').innerHTML =
+        '<tr><td colspan="5" class="act-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</td></tr>';
+    try {
+        const res = await fetch(`/api/activity/stats?hours=${hours}`).then(r => r.json());
+        if (!res.success) { showError(res.error); return; }
+        _rows = res.rows;
+        renderTable(res.rows);
+        renderSummary(res.rows);
+    } catch(e) { showError(e.toString()); }
+}
+
+function renderSummary(rows) {
+    const totalFiles = rows.reduce((s, r) => s + r.files, 0);
+    const totalGB    = rows.reduce((s, r) => s + (r.gb || 0), 0);
+    document.getElementById('sumSubs').textContent  = rows.length.toLocaleString();
+    document.getElementById('sumFiles').textContent = totalFiles.toLocaleString();
+    document.getElementById('sumGB').textContent    = totalGB.toFixed(2);
+}
+
+function statusBadge(status) {
+    if (!status) return '<span class="status-badge status-none">—</span>';
+    return `<span class="status-badge status-${status}">${status}</span>`;
+}
+
+function renderTable(rows) {
+    if (!rows.length) {
+        document.getElementById('actBody').innerHTML =
+            '<tr><td colspan="5" class="act-loading">No downloads in this period.</td></tr>';
+        return;
+    }
+    const hours = document.getElementById('hoursSelect').value;
+    document.getElementById('actBody').innerHTML = rows.map(r => `
+        <tr>
+            <td class="sub-name">r/${escHtml(r.subreddit)}</td>
+            <td class="num">${r.files.toLocaleString()}</td>
+            <td class="num">${(r.gb || 0).toFixed(3)}</td>
+            <td>${statusBadge(r.scrape_status)}</td>
+            <td style="display:flex;gap:.4rem;flex-wrap:wrap">
+                <button class="act-btn act-btn-view" onclick="openModal(${JSON.stringify(r.subreddit)}, ${hours})">
+                    <i class="fas fa-images"></i> View
+                </button>
+                ${r.scrape_list_id ? `
+                <button class="act-btn ${r.scrape_status === 'enabled' ? 'act-btn-stop' : 'act-btn-enable'}"
+                        id="toggle-${r.scrape_list_id}"
+                        onclick="toggleScrape(${r.scrape_list_id}, this)">
+                    <i class="fas ${r.scrape_status === 'enabled' ? 'fa-stop' : 'fa-play'}"></i>
+                    ${r.scrape_status === 'enabled' ? 'Stop' : 'Enable'}
+                </button>` : ''}
+            </td>
+        </tr>`).join('');
+}
+
+async function toggleScrape(id, btn) {
+    btn.disabled = true;
+    try {
+        const res = await fetch(`/api/scrape-lists/${id}/toggle`, {method:'POST'}).then(r => r.json());
+        if (!res.success) { alert(res.error); btn.disabled = false; return; }
+        const enabled = res.status === 'enabled';
+        btn.className = `act-btn ${enabled ? 'act-btn-stop' : 'act-btn-enable'}`;
+        btn.innerHTML = `<i class="fas ${enabled ? 'fa-stop' : 'fa-play'}"></i> ${enabled ? 'Stop' : 'Enable'}`;
+        // Update badge in the same row
+        const row = btn.closest('tr');
+        const badge = row.querySelector('.status-badge');
+        if (badge) { badge.className = `status-badge status-${res.status}`; badge.textContent = res.status; }
+        btn.disabled = false;
+    } catch(e) { alert('Request failed: ' + e); btn.disabled = false; }
+}
+
+async function openModal(subreddit, hours) {
+    document.getElementById('modalTitle').textContent = `r/${subreddit} — scraped files`;
+    document.getElementById('modalSummary').textContent = 'Loading…';
+    document.getElementById('modalGrid').innerHTML = '';
+    document.getElementById('scrapedModal').classList.add('open');
+    try {
+        const res = await fetch(`/api/activity/scraped?subreddit=${encodeURIComponent(subreddit)}&hours=${hours}`).then(r => r.json());
+        if (!res.success) { document.getElementById('modalSummary').textContent = res.error; return; }
+        const rows = res.rows;
+        document.getElementById('modalSummary').textContent =
+            `${rows.length} file${rows.length !== 1 ? 's' : ''} downloaded in this period`;
+        document.getElementById('modalGrid').innerHTML = rows.map(f => `
+            <a class="act-grid-item" href="${f.permalink ? 'https://reddit.com' + escHtml(f.permalink) : '#'}" target="_blank">
+                <img class="act-grid-thumb" src="${escHtml(f.thumb_url)}"
+                     onerror="this.src='/static/placeholder.png';this.onerror=null"
+                     loading="lazy" alt="">
+                <div class="act-grid-info">
+                    <strong>${escHtml(f.filename || '')}</strong>
+                    ${formatFileSize(f.file_size)}
+                </div>
+            </a>`).join('');
+    } catch(e) {
+        document.getElementById('modalSummary').textContent = 'Failed: ' + e;
+    }
+}
+
+function closeModal() {
+    document.getElementById('scrapedModal').classList.remove('open');
+}
+
+document.getElementById('scrapedModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+function showError(msg) {
+    document.getElementById('actBody').innerHTML =
+        `<tr><td colspan="5" style="color:#c0392b;padding:1rem">${escHtml(msg)}</td></tr>`;
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.getElementById('hoursSelect').addEventListener('change', loadStats);
+loadStats();
+</script>
+{% endblock %}
