@@ -4517,7 +4517,7 @@ def api_activity_stats():
             JOIN post_images pi ON pi.image_id = i.id
             JOIN posts p        ON p.id = pi.post_id
             LEFT JOIN scrape_lists sl ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            WHERE i.is_deleted = 0
+            WHERE NOT i.is_deleted
               AND (i.download_date::timestamp + i.download_time) >= NOW() - (%s || ' hours')::interval
             GROUP BY p.subreddit, sl.id, sl.status
             ORDER BY files DESC
@@ -4547,7 +4547,7 @@ def api_activity_scraped():
             FROM images i
             JOIN post_images pi ON pi.image_id = i.id
             JOIN posts p        ON p.id = pi.post_id
-            WHERE i.is_deleted = 0
+            WHERE NOT i.is_deleted
               AND p.subreddit = %s
               AND (i.download_date::timestamp + i.download_time) >= NOW() - (%s || ' hours')::interval
             ORDER BY i.download_date DESC, i.download_time DESC
