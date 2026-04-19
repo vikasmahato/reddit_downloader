@@ -507,6 +507,8 @@ function escHtml(str) {
 // ── INIT ──────────────────────────────────────────────────────────────────
 (async function init() {
     await loadFolders();
+    const folderParam = new URLSearchParams(window.location.search).get('folder');
+    if (folderParam) await showGroupsView(folderParam);
     startPoll();
 })();
 
@@ -634,7 +636,7 @@ function renderFolderRow(f, hashSt, scanSt) {
             <i class="fas fa-search me-1"></i>Find Dupes
         </button>
         <button class="f-btn f-btn-primary" id="fbtn-show-${f.name}"
-                onclick="showGroupsView('${f.name}')" title="View duplicate groups for this folder">
+                onclick="window.open('/duplicates?folder=${encodeURIComponent(f.name)}','_blank')" title="View duplicate groups for this folder">
             <i class="fas fa-images me-1"></i>Show Dupes
         </button>
         <button class="f-btn f-btn-stop" id="fbtn-stop-hash-${f.name}" ${hashRunning ? 'style="display:inline-block"' : ''}
