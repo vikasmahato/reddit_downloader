@@ -36,7 +36,7 @@ from typing import Callable, Optional
 
 import cv2
 import numpy as np
-import mysql.connector
+# mysql.connector imported lazily inside run_scan to avoid hard dependency
 
 # ── Stop flag (set by SIGTERM handler) ───────────────────────────────────
 _stop_requested = False
@@ -402,7 +402,7 @@ def _write_results(
 def run_scan(
     downloads_dir: Path,
     db_path: Path,
-    mysql_cfg: Optional[dict],
+    mysql_cfg: Optional[str],
     threshold: int = DEFAULT_THRESHOLD,
     hash_size: int = DEFAULT_HASH_SIZE,
     images_only: bool = True,
@@ -609,8 +609,10 @@ def run_scan(
     if mysql_cfg and path_to_md5:
         progress('Querying prod DB…', 0, 0)
         try:
-            my  = mysql.connector.connect(**mysql_cfg)
-            cur = my.cursor(dictionary=True)
+            import psycopg2
+            import psycopg2.extras
+            my  = psycopg2.connect(mysql_cfg)
+            cur = my.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             all_md5s = list(path_to_md5.values())
             for i in range(0, len(all_md5s), 500):
                 batch = all_md5s[i : i + 500]
@@ -701,16 +703,10 @@ def run_scan(
 
 # ── Config & CLI ──────────────────────────────────────────────────────────
 
-def _get_mysql_config() -> dict:
+def _get_pg_dsn() -> Optional[str]:
     cfg = configparser.ConfigParser()
     cfg.read('config.ini')
-    return {
-        'host':     cfg.get('mysql', 'host',     fallback='localhost'),
-        'port':     cfg.getint('mysql', 'port',  fallback=3306),
-        'user':     cfg.get('mysql', 'user',     fallback='root'),
-        'password': cfg.get('mysql', 'password', fallback=''),
-        'database': cfg.get('mysql', 'database', fallback='reddit_images'),
-    }
+    return cfg.get('postgresql', 'dsn', fallback=None)
 
 
 def main():
@@ -759,7 +755,7 @@ Hamming distance guide (out of 64 bits):
         # Default to cache-only when a specific folder is given
         use_cache_only = True
 
-    mysql_cfg = None if args.no_db else _get_mysql_config()
+    mysql_cfg = None if args.no_db else _get_pg_dsn()
 
     def cb(msg: str, cur: int, tot: int):
         if args.progress_json:

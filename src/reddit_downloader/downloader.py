@@ -462,10 +462,8 @@ class RedditImageDownloader:
                         temp_folder = temp_folder / self._sanitize_folder_name(subreddit)
                     temp_path = temp_folder / filename
                     if temp_path.exists():
-                        # File exists, add timestamp to make it unique
-                        name, ext = os.path.splitext(filename)
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"{name}_{timestamp}{ext}"
+                        logger.debug(f"⏭️  File already exists, skipping download: {filename}")
+                        return True
             
             # Determine final folder and filepath
             folder = self.download_folder
@@ -485,6 +483,26 @@ class RedditImageDownloader:
                         downloaded += len(chunk)
                         if total_size > 0 and downloaded % (1024*1024) == 0:
                             logger.info(f"Downloaded {downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB...")
+            # GIF: extract first frame as JPEG when gif_as_image flag is set
+            gif_as_image = post_data.get('gif_as_image', False) if post_data else False
+            if filepath.suffix.lower() == '.gif' and gif_as_image:
+                try:
+                    from PIL import Image as _PilImg, ImageFile as _ImgFile
+                    _ImgFile.LOAD_TRUNCATED_IMAGES = True
+                    with _PilImg.open(filepath) as _gif:
+                        _gif.seek(0)
+                        _frame = _gif.convert('RGB')
+                    jpg_path = filepath.with_suffix('.jpg')
+                    _frame.save(jpg_path, 'JPEG', quality=85, optimize=True)
+                    filepath.unlink()
+                    filepath = jpg_path
+                    filename = jpg_path.name
+                    downloaded = jpg_path.stat().st_size
+                    file_hash = hashlib.md5(jpg_path.read_bytes())
+                    logger.info(f"🖼️  GIF first frame saved: {filename}")
+                except Exception as e:
+                    logger.error(f"GIF first-frame extraction failed for {filepath}: {e}")
+
             # GIF to MP4 conversion and size reporting using ffmpeg
             if filepath.suffix.lower() == '.gif':
                 import subprocess
@@ -1078,12 +1096,15 @@ class RedditImageDownloader:
                 has_video = bool(video_url)
 
                 # Skip based on media_types filter
-                is_image = has_gallery or self._is_image_url(submission.url)
+                is_gif = not has_gallery and self._is_gif_url(submission.url)
+                is_image = has_gallery or (self._is_image_url(submission.url) and not is_gif)
+                if is_gif and 'image' not in media_types and 'video' not in media_types:
+                    continue
                 if is_image and 'image' not in media_types:
                     continue
-                if has_video and not is_image and 'video' not in media_types:
+                if has_video and not is_image and not is_gif and 'video' not in media_types:
                     continue
-                if not has_gallery and not self._is_image_url(submission.url) and not has_video:
+                if not has_gallery and not self._is_image_url(submission.url) and not is_gif and not has_video:
                     continue
 
                 # Fetch comments for each post
@@ -1121,6 +1142,8 @@ class RedditImageDownloader:
                     'comments': json.dumps(comments_list),
                     'flair': flair_text
                 }
+                if is_gif and 'video' not in media_types:
+                    post_entry['gif_as_image'] = True
                 if has_gallery:
                     post_entry['all_urls'] = ','.join(gallery_urls)
                 post_data_list.append(post_entry)
@@ -1254,7 +1277,9 @@ class RedditImageDownloader:
                     
                     # Normal image handling
                     url = post.url
-                    if self._is_image_url(url) and 'image' in media_types:
+                    _is_gif = self._is_gif_url(url)
+                    if ((self._is_image_url(url) and not _is_gif and 'image' in media_types) or
+                            (_is_gif and ('image' in media_types or 'video' in media_types))):
                         if self._get_image_record(url):
                             logger.warning(f"🛑 Already downloaded: {url}. Stopping further scraping for r/{subreddit}.")
                             break
@@ -1273,7 +1298,7 @@ class RedditImageDownloader:
                             comments_list = []
                         # Extract flair
                         flair_text = post.link_flair_text if hasattr(post, 'link_flair_text') and post.link_flair_text else None
-                        image_posts.append({
+                        _entry = {
                             'title': post.title,
                             'url': url,
                             'author': str(post.author),
@@ -1283,7 +1308,10 @@ class RedditImageDownloader:
                             'post_username': post_username,
                             'comments': json.dumps(comments_list),
                             'flair': flair_text
-                        })
+                        }
+                        if _is_gif and 'video' not in media_types:
+                            _entry['gif_as_image'] = True
+                        image_posts.append(_entry)
             return image_posts
         except Forbidden as e:
             status_code = getattr(getattr(e, 'response', None), 'status_code', 403)
@@ -1294,7 +1322,7 @@ class RedditImageDownloader:
 
     def _is_image_url(self, url: str) -> bool:
         """Check if URL points to an image."""
-        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
         parsed_url = urlparse(url)
         
         # Check file extension
@@ -1305,6 +1333,10 @@ class RedditImageDownloader:
         # Check for imgur, reddit image, i.redd.it
         image_domains = ['imgur.com', 'i.imgur.com', 'i.redd.it', 'preview.redd.it']
         return any(domain in parsed_url.netloc for domain in image_domains)
+
+    def _is_gif_url(self, url: str) -> bool:
+        """Check if URL points to a GIF. GIFs are treated as videos."""
+        return urlparse(url).path.lower().endswith('.gif')
 
     def _is_video_url(self, url: str) -> bool:
         """Check if URL points to a video."""

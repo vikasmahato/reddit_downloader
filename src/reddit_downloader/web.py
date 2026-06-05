@@ -219,6 +219,19 @@ def _ensure_blocked_users_table():
 _ensure_blocked_users_table()
 
 
+def _ensure_blocked_flairs_table():
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS blocked_flairs (flair TEXT PRIMARY KEY, blocked_at TIMESTAMPTZ DEFAULT NOW())")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+_ensure_blocked_flairs_table()
+
+
 def _ensure_favourite_column():
     """No-op: column already exists in PostgreSQL schema."""
     pass
@@ -375,12 +388,13 @@ class RedditImageUI:
                 i.file_size, i.download_date, i.download_time, i.is_deleted,
                 pi.url
             FROM (
-                SELECT id
+                SELECT posts.id
                 FROM posts
+                LEFT JOIN blocked_users bu ON bu.username = posts.author
                 WHERE (%s IS NULL OR subreddit = %s)
                 AND (%s IS NULL OR author = %s)
                 AND (%s IS NULL OR title LIKE %s OR author LIKE %s)
-                AND (author IS NULL OR author NOT IN (SELECT username FROM blocked_users))
+                AND (posts.author IS NULL OR bu.username IS NULL)
                 AND EXISTS (SELECT 1 FROM post_images WHERE post_id = posts.id)
                 {order_clause}
                 LIMIT %s OFFSET %s
@@ -503,14 +517,14 @@ class RedditImageUI:
 
     def get_stats(self):
         """Get download statistics from MySQL (cached 60 s)."""
-        cached, hit = _cache.get('stats', ttl=60)
+        cached, hit = _cache.get('stats', ttl=600)
         if hit:
             return cached
         try:
             conn = _get_db_connection()
             cursor = conn.cursor()
             # Total images (count distinct images, not posts)
-            cursor.execute("SELECT COUNT(*) FROM images")
+            cursor.execute("SELECT GREATEST(0, reltuples::bigint) FROM pg_class WHERE relname = 'images'")
             total_images = cursor.fetchone()[0]
             # Images by subreddit (optimized query with LIMIT)
             cursor.execute("""SELECT subreddit, COUNT(1) as cnt
@@ -525,10 +539,11 @@ class RedditImageUI:
                 LIMIT 20""")
             user_counts = dict(cursor.fetchall())
             # All unique authors (for stats) - optimized
-            cursor.execute("""SELECT COUNT(DISTINCT p.author) 
-                FROM posts p
-                WHERE p.author IS NOT NULL AND p.author != ''""")
-            total_users = cursor.fetchone()[0]
+            cursor.execute("""SELECT GREATEST(0, (-n_distinct * reltuples)::bigint)
+                FROM pg_stats JOIN pg_class ON pg_class.relname = pg_stats.tablename
+                WHERE pg_stats.tablename = 'posts' AND attname = 'author' AND schemaname = 'public'""")
+            row = cursor.fetchone()
+            total_users = row[0] if row else 0
             # File size stats - optimized
             cursor.execute("SELECT COALESCE(SUM(file_size), 0) FROM images WHERE file_size > 0")
             total_size = cursor.fetchone()[0] or 0
@@ -1193,14 +1208,11 @@ def scrape_lists():
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         cursor.execute("""
-            SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
-                   COALESCE(sl.media_types, 'image,video') as media_types,
-                   sl.description,
-                   COUNT(DISTINCT p.id) as post_count
-            FROM scrape_lists sl
-            LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types, sl.description
-            ORDER BY sl.type, CASE sl.status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, sl.name
+            SELECT id, type, name, status, created_at, updated_at, last_scraped_at,
+                   COALESCE(media_types, 'image,video') as media_types,
+                   description
+            FROM scrape_lists
+            ORDER BY type, CASE status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, name
         """)
 
         items = cursor.fetchall()
@@ -1239,14 +1251,11 @@ def api_get_scrape_lists():
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
         cursor.execute("""
-            SELECT sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at,
-                   COALESCE(sl.media_types, 'image,video') as media_types,
-                   sl.description,
-                   COUNT(DISTINCT p.id) as post_count
-            FROM scrape_lists sl
-            LEFT JOIN posts p ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            GROUP BY sl.id, sl.type, sl.name, sl.status, sl.created_at, sl.updated_at, sl.last_scraped_at, sl.media_types, sl.description
-            ORDER BY sl.type, CASE sl.status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, sl.name
+            SELECT id, type, name, status, created_at, updated_at, last_scraped_at,
+                   COALESCE(media_types, 'image,video') as media_types,
+                   description
+            FROM scrape_lists
+            ORDER BY type, CASE status WHEN 'enabled' THEN 0 WHEN 'disabled' THEN 1 WHEN 'banned' THEN 2 END, name
         """)
 
         items = cursor.fetchall()
@@ -2389,7 +2398,8 @@ def api_flairs():
             cursor.execute("""
                 SELECT p.flair,
                        COUNT(DISTINCT p.id)  AS post_count,
-                       COUNT(pi.image_id)    AS image_count
+                       COUNT(pi.image_id)    AS image_count,
+                       EXISTS(SELECT 1 FROM blocked_flairs bf WHERE bf.flair = p.flair) AS is_blocked
                 FROM posts p
                 LEFT JOIN post_images pi ON pi.post_id = p.id
                 WHERE p.flair IS NOT NULL AND p.flair != ''
@@ -2401,7 +2411,8 @@ def api_flairs():
             cursor.execute("""
                 SELECT p.flair,
                        COUNT(DISTINCT p.id)  AS post_count,
-                       COUNT(pi.image_id)    AS image_count
+                       COUNT(pi.image_id)    AS image_count,
+                       EXISTS(SELECT 1 FROM blocked_flairs bf WHERE bf.flair = p.flair) AS is_blocked
                 FROM posts p
                 LEFT JOIN post_images pi ON pi.post_id = p.id
                 WHERE p.flair IS NOT NULL AND p.flair != ''
@@ -2421,7 +2432,7 @@ def api_flair_posts():
     flair   = request.args.get('flair', '').strip()
     subreddit = request.args.get('subreddit', '').strip() or None
     page    = max(1, int(request.args.get('page', 1)))
-    per_page = min(100, max(12, int(request.args.get('per_page', 48))))
+    per_page = min(500, max(12, int(request.args.get('per_page', 48))))
     if not flair:
         return jsonify({'success': False, 'error': 'flair required'}), 400
     offset = (page - 1) * per_page
@@ -2492,6 +2503,57 @@ def api_flair_posts():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+
+# BLOCKED FLAIRS
+# =============================================================================
+
+@app.route("/api/blocked-flairs", methods=["GET"])
+def api_get_blocked_flairs():
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT flair, blocked_at FROM blocked_flairs ORDER BY blocked_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        for row in rows:
+            if row.get("blocked_at") and hasattr(row["blocked_at"], "isoformat"):
+                row["blocked_at"] = row["blocked_at"].isoformat()
+        return jsonify({"success": True, "blocked_flairs": rows})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/block-flair", methods=["POST"])
+def api_block_flair():
+    data = request.get_json() or {}
+    flair = (data.get("flair") or "").strip()
+    if not flair:
+        return jsonify({"success": False, "error": "flair required"}), 400
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO blocked_flairs (flair) VALUES (%s) ON CONFLICT (flair) DO NOTHING", (flair,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": f"Flair blocked"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/unblock-flair", methods=["DELETE"])
+def api_unblock_flair():
+    data = request.get_json() or {}
+    flair = (data.get("flair") or "").strip()
+    if not flair:
+        return jsonify({"success": False, "error": "flair required"}), 400
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM blocked_flairs WHERE flair = %s", (flair,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": f"Flair unblocked"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # EXPLICIT CONTENT DETECTION
 # ═══════════════════════════════════════════════════════════════════════════
 
