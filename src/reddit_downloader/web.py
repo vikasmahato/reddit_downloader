@@ -1203,7 +1203,7 @@ def socials():
                    p.created_utc, p.score, p.author, p.is_deleted
             FROM posts p
             JOIN scrape_lists sl ON sl.name = p.subreddit AND sl.type = 'subreddit'
-            WHERE sl.media_types LIKE '%text%'
+            WHERE sl.media_types LIKE '%%text%%'
               AND p.selftext IS NOT NULL AND p.selftext != ''
             ORDER BY p.created_utc DESC
             LIMIT 1000
@@ -2985,7 +2985,7 @@ def reddit_deleted_page():
 
         where_parts = [
             "p.is_deleted = TRUE",
-            "NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')",
+            "NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%%text%%')",
         ]
         params = []
         if subreddit:
@@ -3025,7 +3025,7 @@ def reddit_deleted_page():
         cursor.execute("""
             SELECT DISTINCT p.subreddit FROM posts p
             WHERE p.is_deleted = TRUE
-              AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')
+              AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%%text%%')
             ORDER BY p.subreddit LIMIT 200
         """)
         subreddits = [r['subreddit'] for r in cursor.fetchall() if r['subreddit']]
@@ -3034,7 +3034,7 @@ def reddit_deleted_page():
         cursor.execute("""
             SELECT p.removed_by_category, COUNT(*) AS cnt FROM posts p
             WHERE p.is_deleted = TRUE
-              AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%text%')
+              AND NOT EXISTS (SELECT 1 FROM scrape_lists sl WHERE sl.name = p.subreddit AND sl.type = 'subreddit' AND sl.media_types LIKE '%%text%%')
             GROUP BY p.removed_by_category ORDER BY cnt DESC
         """)
         categories = [r['removed_by_category'] for r in cursor.fetchall()]
