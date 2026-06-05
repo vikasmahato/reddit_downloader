@@ -757,6 +757,9 @@
                 {% else %}
                 <span class="det-nav-link dim"><i class="fas fa-chevron-left"></i></span>
                 {% endif %}
+                <button class="det-nav-link" id="randBtn" onclick="goRandom()" title="Random post (R)" style="cursor:pointer;border:none;">
+                    <i class="fas fa-random"></i>
+                </button>
                 {% if image.next_post_id %}
                 <a class="det-nav-link" href="/details/{{ image.next_post_id }}" title="Next post (→)">
                     <i class="fas fa-chevron-right"></i>
@@ -1085,6 +1088,7 @@ document.addEventListener('keydown', e => {
             break;
         }
         case 'Escape': closeLightbox(); break;
+        case 'r': case 'R': goRandom(); break;
     }
 });
 
@@ -1102,6 +1106,22 @@ document.querySelectorAll('.det-mv code').forEach(el => {
         navigator.clipboard.writeText(el.textContent.trim()).then(() => toast('Copied!'));
     });
 });
+
+/* ── RANDOM POST ─────────────────────────────── */
+function goRandom() {
+    const btn = document.getElementById('randBtn');
+    if (btn) { btn.style.opacity = '0.4'; btn.style.pointerEvents = 'none'; }
+    fetch('/api/random-post')
+        .then(r => r.json())
+        .then(data => {
+            if (data.post_id) window.location.href = '/details/' + data.post_id;
+            else toast('No posts found');
+        })
+        .catch(() => toast('Error fetching random post'))
+        .finally(() => {
+            if (btn) { btn.style.opacity = ''; btn.style.pointerEvents = ''; }
+        });
+}
 
 /* ── TOAST ───────────────────────────────────── */
 function toast(msg) {

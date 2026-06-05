@@ -1260,6 +1260,65 @@ def scrape_lists():
     except Exception as e:
         return f"Error: {e}", 500
 
+@app.route('/api/scrape-counts')
+def api_scrape_counts():
+    """Return post counts per subreddit and per author, cached 5 min."""
+    cached, hit = _cache.get('scrape_counts', ttl=300)
+    if hit:
+        return jsonify(cached)
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT subreddit, COUNT(*) AS cnt
+            FROM posts
+            WHERE subreddit IS NOT NULL
+            GROUP BY subreddit
+        """)
+        subreddit_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        cursor.execute("""
+            SELECT author, COUNT(*) AS cnt
+            FROM posts
+            WHERE author IS NOT NULL
+            GROUP BY author
+        """)
+        user_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        conn.close()
+        result = {'subreddits': subreddit_counts, 'users': user_counts}
+        _cache.set('scrape_counts', result)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/random-post')
+def api_random_post():
+    """Return a random post ID for the random-post button."""
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id FROM posts
+            WHERE id NOT IN (SELECT post_id FROM post_images WHERE post_id IS NOT NULL
+                             EXCEPT SELECT pi.post_id FROM post_images pi
+                             JOIN images i ON pi.image_id = i.id
+                             WHERE i.file_path IS NOT NULL)
+            OFFSET floor(random() * (SELECT COUNT(*) FROM posts))
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            # Simpler fallback
+            cursor.execute("SELECT id FROM posts ORDER BY random() LIMIT 1")
+            row = cursor.fetchone()
+        conn.close()
+        if row:
+            return jsonify({'post_id': row[0]})
+        return jsonify({'error': 'No posts found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/scrape-lists', methods=['GET'])
 def api_get_scrape_lists():
     """API endpoint to get all scrape lists."""

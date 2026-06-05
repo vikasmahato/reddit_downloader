@@ -62,7 +62,7 @@
                                     {% endfor %}
                                 </td>
                                 <td>
-                                    <span class="badge bg-info">{{ item.post_count or 0 }}</span>
+                                    <span class="badge bg-info post-count-badge" data-name="{{ item.name }}" data-type="subreddit">—</span>
                                 </td>
                                 <td>
                                     <small class="text-muted">
@@ -325,6 +325,25 @@
 </div>
 
 <script>
+// ── ASYNC POST COUNTS ──────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/api/scrape-counts')
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) return;
+            document.querySelectorAll('.post-count-badge').forEach(badge => {
+                const name = badge.dataset.name;
+                const type = badge.dataset.type;
+                const counts = type === 'user' ? data.users : data.subreddits;
+                const n = counts && counts[name];
+                badge.textContent = n != null ? n.toLocaleString() : '0';
+            });
+        })
+        .catch(() => {
+            document.querySelectorAll('.post-count-badge').forEach(b => { b.textContent = '?'; });
+        });
+});
+
 let currentEditId = null;
 
 function addItem() {

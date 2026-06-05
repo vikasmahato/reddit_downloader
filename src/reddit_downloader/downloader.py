@@ -27,7 +27,7 @@ import hashlib
 from typing import List, Dict, Optional
 import time
 from loguru import logger
-from prawcore.exceptions import Forbidden
+from prawcore.exceptions import Forbidden, TooManyRequests, ResponseException
 
 
 logger.remove()
@@ -42,6 +42,14 @@ class SubredditAccessError(RuntimeError):
         self.status_code = status_code
         self.message = message
         super().__init__(f"r/{subreddit} returned status {status_code}: {message}")
+
+
+class RateLimitedError(RuntimeError):
+    """Raised when Reddit returns 429 Too Many Requests."""
+
+    def __init__(self, retry_after: int = 60):
+        self.retry_after = retry_after
+        super().__init__(f"Reddit rate-limited (429). Retry after {retry_after}s.")
 
 
 # Load PostgreSQL config
@@ -968,12 +976,19 @@ class RedditImageDownloader:
         
         # Get backoff threshold from config (default: 3)
         backoff_threshold = self._get_config_int('general', 'backoff_threshold', fallback=3)
-        
+        # Delay between each subreddit/user scrape to avoid hammering Reddit
+        scrape_delay = self._get_config_int('general', 'scrape_delay', fallback=3)
+
         total_downloads = 0
         subreddit_counts: Dict[str, int] = {}
         forbidden_subreddits: List[str] = []
         backoff_skipped: List[str] = []
-        
+
+        def _sleep_rate_limit(seconds: int, source: str):
+            wait = min(max(seconds + 5, 60), 900)
+            logger.warning(f"⏳ Rate limited (429) on {source}. Pausing all scraping for {wait}s...")
+            time.sleep(wait)
+
         # Scrape subreddits
         if scrape_type in ["all", "subreddits"]:
             subreddits = self.get_scrape_lists_from_db('subreddit', backoff_threshold)
@@ -993,28 +1008,41 @@ class RedditImageDownloader:
                     else:
                         limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
 
-                    try:
-                        downloaded = self.download_from_subreddit(clean_name, limit, media_types=media_types)
-                        subreddit_counts[clean_name] = downloaded
-                        total_downloads += 1
-                        
-                        # Update last_scraped_at timestamp
-                        self.update_last_scraped_at('subreddit', clean_name)
-                        
-                        # Track zero results for backoff
-                        if downloaded == 0:
-                            self.increment_zero_result_count('subreddit', clean_name)
-                            zero_count = self.get_zero_result_count('subreddit', clean_name)
-                            logger.warning(f"⚠️  r/{clean_name}: No images found (consecutive zero results: {zero_count})")
-                        else:
-                            # Reset zero result count when images are found
-                            self.reset_zero_result_count('subreddit', clean_name)
-                            
-                    except SubredditAccessError as err:
-                        forbidden_subreddits.append(clean_name)
-                        logger.warning(f"🚫 Skipping r/{clean_name}: {err}")
-                        self.mark_as_banned('subreddit', clean_name)
-        
+                    for attempt in range(2):
+                        try:
+                            downloaded = self.download_from_subreddit(clean_name, limit, media_types=media_types)
+                            subreddit_counts[clean_name] = downloaded
+                            total_downloads += 1
+
+                            # Update last_scraped_at timestamp
+                            self.update_last_scraped_at('subreddit', clean_name)
+
+                            # Track zero results for backoff
+                            if downloaded == 0:
+                                self.increment_zero_result_count('subreddit', clean_name)
+                                zero_count = self.get_zero_result_count('subreddit', clean_name)
+                                logger.warning(f"⚠️  r/{clean_name}: No images found (consecutive zero results: {zero_count})")
+                            else:
+                                self.reset_zero_result_count('subreddit', clean_name)
+                            break  # success
+
+                        except RateLimitedError as e:
+                            if attempt == 0:
+                                _sleep_rate_limit(e.retry_after, f"r/{clean_name}")
+                                # retry
+                            else:
+                                logger.warning(f"⏭️  Still rate limited after retry, skipping r/{clean_name} for now")
+                                break
+
+                        except SubredditAccessError as err:
+                            forbidden_subreddits.append(clean_name)
+                            logger.warning(f"🚫 Skipping r/{clean_name}: {err}")
+                            self.mark_as_banned('subreddit', clean_name)
+                            break
+
+                    if scrape_delay > 0:
+                        time.sleep(scrape_delay)
+
         # Scrape user posts
         if scrape_type in ["all", "users"]:
             users = self.get_scrape_lists_from_db('user', backoff_threshold)
@@ -1026,23 +1054,38 @@ class RedditImageDownloader:
                     logger.info(f"\n🔍 Scraping u/{clean_name} (media: {','.join(sorted(media_types))})...")
 
                     limit = self.config.getint('general', 'max_images_per_subreddit', fallback=25)
-                    try:
-                        downloaded = self.download_from_user(clean_name, limit, media_types=media_types)
-                        total_downloads += 1
-                        
-                        # Update last_scraped_at timestamp
-                        self.update_last_scraped_at('user', clean_name)
-                        
-                        # Track zero results for backoff
-                        if downloaded == 0:
-                            self.increment_zero_result_count('user', clean_name)
-                            zero_count = self.get_zero_result_count('user', clean_name)
-                            logger.warning(f"⚠️  u/{clean_name}: No images found (consecutive zero results: {zero_count})")
-                        else:
-                            # Reset zero result count when images are found
-                            self.reset_zero_result_count('user', clean_name)
-                    except Exception as e:
-                        logger.error(f"❌ Error scraping u/{clean_name}: {e}")
+
+                    for attempt in range(2):
+                        try:
+                            downloaded = self.download_from_user(clean_name, limit, media_types=media_types)
+                            total_downloads += 1
+
+                            # Update last_scraped_at timestamp
+                            self.update_last_scraped_at('user', clean_name)
+
+                            # Track zero results for backoff
+                            if downloaded == 0:
+                                self.increment_zero_result_count('user', clean_name)
+                                zero_count = self.get_zero_result_count('user', clean_name)
+                                logger.warning(f"⚠️  u/{clean_name}: No images found (consecutive zero results: {zero_count})")
+                            else:
+                                self.reset_zero_result_count('user', clean_name)
+                            break  # success
+
+                        except RateLimitedError as e:
+                            if attempt == 0:
+                                _sleep_rate_limit(e.retry_after, f"u/{clean_name}")
+                                # retry
+                            else:
+                                logger.warning(f"⏭️  Still rate limited after retry, skipping u/{clean_name} for now")
+                                break
+
+                        except Exception as e:
+                            logger.error(f"❌ Error scraping u/{clean_name}: {e}")
+                            break
+
+                    if scrape_delay > 0:
+                        time.sleep(scrape_delay)
         
         logger.success(f"\n✅ Batch scraping complete! Scraped from {total_downloads} sources.")
         
@@ -1157,7 +1200,20 @@ class RedditImageDownloader:
             urls = [post['url'] for post in post_data_list]
             return self.download_from_urls(urls, username, post_data_list)
             
+        except TooManyRequests as e:
+            retry_after = int(getattr(e, 'retry_after', None) or 60)
+            raise RateLimitedError(retry_after) from e
+        except ResponseException as e:
+            status_code = getattr(getattr(e, 'response', None), 'status_code', 0)
+            if status_code == 429:
+                retry_after = int(getattr(getattr(e, 'response', None), 'headers', {}).get('Retry-After', 60))
+                raise RateLimitedError(retry_after) from e
+            logger.error(f"❌ Error fetching posts from u/{username}: {e}")
+            return 0
         except Exception as e:
+            msg = str(e).lower()
+            if '429' in msg or 'too many requests' in msg or 'rate limit' in msg:
+                raise RateLimitedError(60) from e
             logger.error(f"❌ Error fetching posts from u/{username}: {e}")
             return 0
 
@@ -1313,10 +1369,24 @@ class RedditImageDownloader:
                             _entry['gif_as_image'] = True
                         image_posts.append(_entry)
             return image_posts
+        except TooManyRequests as e:
+            retry_after = int(getattr(e, 'retry_after', None) or 60)
+            raise RateLimitedError(retry_after) from e
         except Forbidden as e:
             status_code = getattr(getattr(e, 'response', None), 'status_code', 403)
             raise SubredditAccessError(subreddit, status_code, "Access forbidden (possibly banned)") from e
+        except ResponseException as e:
+            status_code = getattr(getattr(e, 'response', None), 'status_code', 0)
+            if status_code == 429:
+                retry_after = int(getattr(getattr(e, 'response', None), 'headers', {}).get('Retry-After', 60))
+                raise RateLimitedError(retry_after) from e
+            logger.error(f"❌ Error accessing subreddit {subreddit}: {e}")
+            return []
         except Exception as e:
+            # Re-raise if it's a rate limit wrapped in a generic exception
+            msg = str(e).lower()
+            if '429' in msg or 'too many requests' in msg or 'rate limit' in msg:
+                raise RateLimitedError(60) from e
             logger.error(f"❌ Error accessing subreddit {subreddit}: {e}")
             return []
 
