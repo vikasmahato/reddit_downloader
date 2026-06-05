@@ -2472,10 +2472,8 @@ def api_cleanup_stop():
 
 @app.route('/flairs')
 def flairs_page():
-    stats = ui_handler.get_stats()
-    subreddits = ui_handler.get_subreddits()
-    users = ui_handler.get_users()
-    return render_template('flairs.html', stats=stats, subreddits=subreddits, users=users)
+    subreddits = ui_handler.get_subreddits(only_enabled=False)
+    return render_template('flairs.html', subreddits=subreddits)
 
 
 @app.route('/api/flairs')

@@ -1,150 +1,510 @@
 {% extends "base.html" %}
-{% block title %}Browse by Flair — Reddit Vault{% endblock %}
+{% block title %}Flairs — Reddit Vault{% endblock %}
 
 {% block content %}
 <style>
-/* ── Layout ──────────────────────────────────────────────────────────────── */
-.flair-layout {
+/* ── Top bar ─────────────────────────────────── */
+.fl-topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.65rem;
+    flex-wrap: wrap;
+}
+.fl-topbar-title {
+    font-family: var(--font-head);
+    font-size: 1rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #efefef;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.fl-topbar-title i { color: var(--accent); }
+
+/* ── Layout ──────────────────────────────────── */
+.fl-layout {
     display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 1rem;
+    grid-template-columns: 272px 1fr;
+    gap: 0.65rem;
     align-items: start;
 }
 @media (max-width: 700px) {
-    .flair-layout { grid-template-columns: 1fr; }
-    .flair-sidebar { max-height: 260px; }
+    .fl-layout { grid-template-columns: 1fr; }
 }
 
-/* ── Sidebar ─────────────────────────────────────────────────────────────── */
-.flair-sidebar {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r); overflow: hidden;
-    display: flex; flex-direction: column;
-    position: sticky; top: 1rem; max-height: calc(100vh - 6rem);
+/* ── Sidebar ─────────────────────────────────── */
+.fl-sidebar {
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 5.5rem);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
-.sidebar-head {
-    padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+@media (max-width: 700px) {
+    .fl-sidebar { position: static; max-height: 280px; }
 }
-.sidebar-head-title {
-    font-family: var(--font-head); font-size: 0.65rem; text-transform: uppercase;
-    letter-spacing: 0.1em; color: var(--text-muted); flex: 1;
+
+.fl-sb-head {
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
 }
-.flair-search {
-    padding: 0.5rem 0.85rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
-.flair-search input {
-    width: 100%; background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 0.3rem 0.6rem; font-size: 0.72rem;
-    color: var(--text); outline: none;
-}
-.flair-search input:focus { border-color: var(--accent); }
-.flair-list { overflow-y: auto; flex: 1; }
-.flair-item {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.45rem 0.85rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03);
-    transition: background 0.1s;
-}
-.flair-item:hover { background: var(--surface-2); }
-.flair-item.active { background: rgba(139,92,246,0.12); border-left: 2px solid var(--accent); }
-.flair-pill {
-    font-size: 0.6rem; padding: 1px 7px; border-radius: 2px;
-    background: var(--surface-2); border: 1px solid var(--border);
-    color: var(--text-dim); white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; max-width: 150px; flex: 1;
-    font-family: var(--font-head); letter-spacing: 0.04em;
-}
-.flair-item.active .flair-pill { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.08); }
-.flair-count {
-    font-size: 0.6rem; color: var(--text-muted); white-space: nowrap;
+.fl-sb-label {
     font-family: var(--font-head);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    flex: 1;
 }
-.no-flairs {
-    padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.75rem;
-}
-
-/* ── Main panel ──────────────────────────────────────────────────────────── */
-.panel-head {
-    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap;
-}
-.panel-title {
-    font-family: var(--font-head); font-size: 0.9rem; font-weight: 800;
-    letter-spacing: 0.06em; text-transform: uppercase; color: #efefef;
-}
-.panel-meta { font-size: 0.7rem; color: var(--text-muted); }
-.filter-bar {
-    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;
-}
-
-/* ── Post grid ───────────────────────────────────────────────────────────── */
-.post-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 0.6rem;
-}
-.post-card {
-    background: var(--surface); border: 2px solid var(--border);
-    border-radius: var(--r); overflow: hidden; cursor: pointer;
-    transition: border-color 0.15s; position: relative;
-}
-.post-card:hover { border-color: rgba(139,92,246,0.5); }
-.post-card.selected { border-color: var(--danger); }
-.post-card img {
-    width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+.fl-sb-cnt {
+    font-family: var(--font-head);
+    font-size: 0.62rem;
+    color: var(--text-muted);
     background: var(--surface-2);
-}
-.post-card-no-thumb {
-    width: 100%; aspect-ratio: 1; display: flex; align-items: center;
-    justify-content: center; background: var(--surface-2); color: var(--text-muted);
-    font-size: 1.5rem;
-}
-.post-card-info {
-    padding: 0.35rem 0.5rem; font-size: 0.6rem; color: var(--text-muted); line-height: 1.4;
-}
-.post-card-title {
-    color: var(--text-dim); font-size: 0.65rem; display: -webkit-box;
-    -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-    margin-bottom: 2px;
-}
-.post-card-meta { display: flex; justify-content: space-between; }
-.sel-check {
-    position: absolute; top: 5px; right: 5px; width: 18px; height: 18px;
-    border-radius: 50%; background: rgba(239,68,68,0.9);
-    display: none; align-items: center; justify-content: center;
-    color: #fff; font-size: 0.55rem;
-}
-.post-card.selected .sel-check { display: flex; }
-
-/* ── Toolbar ─────────────────────────────────────────────────────────────── */
-.bulk-toolbar {
-    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;
-}
-.empty-panel {
-    text-align: center; padding: 4rem 1rem; color: var(--text-muted); font-size: 0.8rem;
+    border: 1px solid var(--border);
+    padding: 1px 8px;
+    border-radius: 10px;
 }
 
-/* ── Pagination ──────────────────────────────────────────────────────────── */
-.pagination-bar {
-    display: flex; justify-content: center; gap: 0.35rem; margin-top: 1rem; flex-wrap: wrap;
+.fl-sb-search {
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
 }
-.page-btn {
-    background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: var(--r); padding: 3px 10px; font-size: 0.7rem;
-    color: var(--text-dim); cursor: pointer;
+.fl-sb-search-input {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    color: var(--text);
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    outline: none;
+    box-sizing: border-box;
 }
-.page-btn:hover { border-color: var(--accent); color: var(--accent); }
-.page-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.12); }
-.page-btn:disabled { opacity: 0.4; cursor: default; }
+.fl-sb-search-input:focus { border-color: var(--accent); }
+
+.fl-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.fl-tab {
+    flex: 1;
+    padding: 6px 0;
+    font-family: var(--font-head);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+}
+.fl-tab:hover { color: var(--text-dim); }
+.fl-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.fl-tab-badge {
+    background: rgba(239,68,68,0.2);
+    color: var(--danger);
+    border-radius: 10px;
+    padding: 0 5px;
+    font-size: 0.58rem;
+    line-height: 1.5;
+}
+
+.fl-list { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.fl-list::-webkit-scrollbar { width: 4px; }
+.fl-list::-webkit-scrollbar-track { background: transparent; }
+.fl-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.fl-item {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.42rem 0.75rem;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.025);
+    transition: background 0.1s;
+    position: relative;
+    user-select: none;
+}
+.fl-item:hover { background: var(--surface-2); }
+.fl-item.active {
+    background: rgba(139,92,246,0.1);
+    border-left: 2px solid var(--accent);
+    padding-left: calc(0.75rem - 2px);
+}
+
+.fl-item-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--border-2);
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+.fl-item.blocked .fl-item-dot { background: var(--danger); }
+.fl-item.active .fl-item-dot { background: var(--accent); }
+
+.fl-item-name {
+    font-family: var(--font-head);
+    font-size: 0.68rem;
+    letter-spacing: 0.03em;
+    color: var(--text-dim);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fl-item.active .fl-item-name { color: var(--accent); }
+.fl-item.blocked .fl-item-name { color: var(--text-muted); text-decoration: line-through; }
+
+.fl-item-cnt {
+    font-family: var(--font-head);
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.fl-item-block {
+    width: 22px;
+    height: 22px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--r);
+    font-size: 0.6rem;
+    flex-shrink: 0;
+    transition: color 0.12s, background 0.12s;
+}
+.fl-item:hover .fl-item-block { display: flex; }
+.fl-item-block:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+.fl-item.blocked .fl-item-block:hover { color: #22c55e; background: rgba(34,197,94,0.1); }
+
+.fl-no-items {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* ── Main ────────────────────────────────────── */
+.fl-main { min-width: 0; }
+
+.fl-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.75rem;
+    padding: 5rem 2rem;
+    color: var(--text-muted);
+}
+.fl-empty-icon { font-size: 3rem; opacity: 0.18; line-height: 1; }
+.fl-empty-text { font-size: 0.8rem; }
+
+/* ── Panel header ────────────────────────────── */
+.fl-panel-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+}
+.fl-panel-info { flex: 1; min-width: 0; }
+.fl-panel-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 3px;
+}
+.fl-panel-flair-name {
+    font-family: var(--font-head);
+    font-size: 0.95rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #efefef;
+    word-break: break-all;
+}
+.fl-blocked-badge {
+    font-family: var(--font-head);
+    font-size: 0.55rem;
+    padding: 2px 7px;
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.35);
+    color: var(--danger);
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.fl-panel-meta {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+.fl-panel-acts {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+/* ── Buttons ─────────────────────────────────── */
+.fl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: var(--r);
+    font-family: var(--font-head);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-dim);
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.fl-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.fl-btn:disabled { opacity: 0.4; cursor: default; }
+.fl-btn.warn { border-color: rgba(234,179,8,0.4); color: #ca8a04; }
+.fl-btn.warn:hover { background: rgba(234,179,8,0.08); border-color: #ca8a04; color: #ca8a04; }
+.fl-btn.danger { border-color: rgba(239,68,68,0.4); color: var(--danger); }
+.fl-btn.danger:hover:not(:disabled) { background: rgba(239,68,68,0.1); border-color: var(--danger); color: var(--danger); }
+.fl-btn.confirm { background: rgba(239,68,68,0.12); border-color: var(--danger); color: var(--danger); animation: btn-pulse 0.4s ease; }
+@keyframes btn-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+.fl-btn.ghost { border-color: transparent; background: none; }
+.fl-btn.ghost:hover { border-color: var(--accent); background: var(--surface-2); }
+
+/* ── Bulk toolbar ────────────────────────────── */
+.fl-bulk {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.4rem 0.7rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+}
+.fl-bulk-sep { width: 1px; height: 14px; background: var(--border-2); flex-shrink: 0; }
+.fl-sel-badge {
+    font-family: var(--font-head);
+    font-size: 0.65rem;
+    color: var(--accent);
+    white-space: nowrap;
+}
+
+/* ── Post grid ───────────────────────────────── */
+.fl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+    gap: 5px;
+}
+@media (max-width: 480px) { .fl-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── Card ────────────────────────────────────── */
+.fl-card {
+    position: relative;
+    background: var(--surface-2);
+    border-radius: var(--r);
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.15s;
+    display: block;
+    text-decoration: none;
+}
+.fl-card:hover { border-color: rgba(139,92,246,0.45); }
+.fl-card.sel { border-color: var(--danger); }
+
+.fl-card-thumb {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    display: block;
+    background: var(--surface);
+    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.fl-card:hover:not(.sel) .fl-card-thumb { transform: scale(1.04); }
+.fl-card-no-thumb {
+    width: 100%;
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 2rem;
+}
+
+/* Checkbox overlay */
+.fl-card-cb {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    border: 1.5px solid rgba(255,255,255,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+    z-index: 3;
+}
+.fl-card:hover .fl-card-cb,
+.fl-card.sel .fl-card-cb { opacity: 1; }
+.fl-card.sel .fl-card-cb { background: var(--danger); border-color: var(--danger); }
+.fl-card-cb i { font-size: 0.55rem; color: #fff; }
+
+/* Badges */
+.fl-card-badges {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    z-index: 2;
+    pointer-events: none;
+}
+.fl-badge {
+    font-size: 0.55rem;
+    padding: 2px 5px;
+    border-radius: 2px;
+    background: rgba(0,0,0,0.65);
+    color: #fff;
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+.fl-badge.video { background: rgba(139,92,246,0.8); }
+
+/* Card info */
+.fl-card-info {
+    padding: 5px 7px 6px;
+    font-size: 0.6rem;
+    color: var(--text-muted);
+}
+.fl-card-title {
+    font-size: 0.63rem;
+    color: var(--text-dim);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    line-height: 1.35;
+    margin-bottom: 3px;
+}
+.fl-card-sub {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Loading skeleton */
+.fl-skeleton {
+    aspect-ratio: 1;
+    border-radius: var(--r);
+    background: linear-gradient(90deg, var(--surface-2) 25%, rgba(255,255,255,0.04) 50%, var(--surface-2) 75%);
+    background-size: 300% 100%;
+    animation: fl-shimmer 1.4s infinite;
+}
+@keyframes fl-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+}
+
+/* ── Pagination ──────────────────────────────── */
+.fl-pages {
+    display: flex;
+    justify-content: center;
+    gap: 0.3rem;
+    margin-top: 1rem;
+    padding-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+.fl-pg-btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s;
+}
+.fl-pg-btn:hover { border-color: var(--accent); color: var(--accent); }
+.fl-pg-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(139,92,246,0.12); }
+.fl-pg-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ── Toast ───────────────────────────────────── */
+.fl-toast {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 0.5rem 1.4rem;
+    font-size: 0.78rem;
+    color: var(--text);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.55);
+    z-index: 9999;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: fl-toast-in 0.2s ease;
+}
+@keyframes fl-toast-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
 </style>
 
-<!-- ── Page header ────────────────────────────────────────────────────────── -->
-<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.1rem;flex-wrap:wrap;">
-    <h1 style="font-family:var(--font-head);font-size:1.1rem;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#efefef;margin:0;">
-        <i class="fas fa-tags" style="color:var(--accent);margin-right:8px;"></i>Browse by Flair
+<!-- ── Top bar ────────────────────────────────────────────────────────────── -->
+<div class="fl-topbar">
+    <h1 class="fl-topbar-title">
+        <i class="fas fa-tags"></i> Browse by Flair
     </h1>
     <div style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">
-        <span style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-head);">Subreddit</span>
-        <select id="srFilter" class="form-select form-select-sm" style="min-width:160px;" onchange="loadFlairs()">
+        <span style="font-size:0.62rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:var(--font-head);">r/</span>
+        <select id="srFilter" class="form-select form-select-sm" style="width:auto;min-width:155px;" onchange="onSrChange()">
             <option value="">All subreddits</option>
             {% for sr in subreddits %}
             <option value="{{ sr }}">r/{{ sr }}</option>
@@ -153,142 +513,253 @@
     </div>
 </div>
 
-<div class="flair-layout">
-    <!-- ── Sidebar: flair list ─────────────────────────────────────────────── -->
-    <div class="flair-sidebar">
-        <div class="sidebar-head">
-            <span class="sidebar-head-title">Flairs</span>
-            <span id="flairCount" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-head);"></span>
+<div class="fl-layout">
+    <!-- ── Sidebar ──────────────────────────────────────────────────────────── -->
+    <div class="fl-sidebar">
+        <div class="fl-sb-head">
+            <span class="fl-sb-label">Flairs</span>
+            <span class="fl-sb-cnt" id="flairTotal">—</span>
         </div>
-        <div class="flair-search">
-            <input type="text" id="flairSearch" placeholder="Filter flairs…" oninput="filterSidebar()">
+        <div class="fl-sb-search">
+            <input type="text" class="fl-sb-search-input" id="flairSearch" placeholder="Search flairs…" oninput="renderSidebar()">
         </div>
-        <div class="flair-list" id="flairList">
-            <div class="no-flairs">Loading…</div>
+        <div class="fl-tabs">
+            <button class="fl-tab active" data-tab="all" onclick="switchTab('all')">All</button>
+            <button class="fl-tab" data-tab="blocked" onclick="switchTab('blocked')">
+                Blocked <span class="fl-tab-badge" id="blockedBadge" style="display:none;"></span>
+            </button>
+        </div>
+        <div class="fl-list" id="flairList">
+            <div class="fl-no-items">Loading…</div>
         </div>
     </div>
 
-    <!-- ── Main: post grid ────────────────────────────────────────────────── -->
-    <div>
-        <!-- Bulk toolbar (hidden until flair selected) -->
-        <div class="bulk-toolbar" id="bulkToolbar" style="display:none;">
-            <button class="btn btn-sm btn-outline-secondary" onclick="selectAll()">Select All</button>
-            <button class="btn btn-sm btn-outline-secondary" onclick="selectNone()">Deselect All</button>
-            <span id="selBadge" style="font-size:0.72rem;color:var(--text-muted);"></span>
-            <div style="margin-left:auto;">
-                <button class="btn btn-sm btn-danger" id="deleteSelBtn" onclick="deleteSelected()" disabled>
-                    <i class="fas fa-trash"></i> Delete Selected
-                </button>
-                <button class="btn btn-sm btn-outline-danger" id="deleteAllBtn" onclick="deleteAllInFlair()" style="margin-left:4px;">
-                    <i class="fas fa-trash-alt"></i> Delete All in Flair
-                </button>
+    <!-- ── Main ─────────────────────────────────────────────────────────────── -->
+    <div class="fl-main" id="flMain">
+        <!-- Empty state -->
+        <div class="fl-empty" id="emptyState">
+            <div class="fl-empty-icon"><i class="fas fa-tags"></i></div>
+            <div class="fl-empty-text">Select a flair from the sidebar to browse posts</div>
+        </div>
+
+        <!-- Panel (shown when flair selected) -->
+        <div id="flairPanel" style="display:none;">
+            <!-- Header -->
+            <div class="fl-panel-head">
+                <div class="fl-panel-info">
+                    <div class="fl-panel-title-row">
+                        <span class="fl-panel-flair-name" id="panelFlairName"></span>
+                        <span class="fl-blocked-badge" id="panelBlockedBadge" style="display:none;">Blocked</span>
+                    </div>
+                    <div class="fl-panel-meta" id="panelMeta"></div>
+                </div>
+                <div class="fl-panel-acts">
+                    <button class="fl-btn warn" id="blockBtn" onclick="toggleBlockActiveFlair()">
+                        <i class="fas fa-ban" id="blockBtnIcon"></i>
+                        <span id="blockBtnText">Block Flair</span>
+                    </button>
+                    <button class="fl-btn danger" id="deleteAllBtn" onclick="confirmDeleteAll()">
+                        <i class="fas fa-trash-alt"></i>
+                        <span id="deleteAllText">Delete All</span>
+                    </button>
+                </div>
             </div>
-        </div>
 
-        <!-- Panel header -->
-        <div class="panel-head" id="panelHead" style="display:none;">
-            <span class="panel-title" id="panelTitle"></span>
-            <span class="panel-meta" id="panelMeta"></span>
-        </div>
+            <!-- Bulk toolbar -->
+            <div class="fl-bulk" id="bulkBar" style="display:none;">
+                <button class="fl-btn ghost" onclick="selectAll()"><i class="fas fa-check-square"></i> All</button>
+                <button class="fl-btn ghost" onclick="selectNone()"><i class="far fa-square"></i> None</button>
+                <div class="fl-bulk-sep"></div>
+                <span class="fl-sel-badge" id="selBadge"></span>
+                <div style="margin-left:auto;">
+                    <button class="fl-btn danger" id="deleteSelBtn" onclick="deleteSelected()" disabled>
+                        <i class="fas fa-trash"></i> Delete Selected
+                    </button>
+                </div>
+            </div>
 
-        <!-- Grid -->
-        <div class="post-grid" id="postGrid"></div>
-        <div class="empty-panel" id="emptyPanel">
-            <i class="fas fa-tags" style="font-size:2rem;margin-bottom:0.5rem;opacity:0.3;"></i><br>
-            Select a flair from the sidebar to browse posts.
-        </div>
+            <!-- Post grid -->
+            <div class="fl-grid" id="postGrid"></div>
 
-        <!-- Pagination -->
-        <div class="pagination-bar" id="paginationBar"></div>
+            <!-- Pagination -->
+            <div class="fl-pages" id="pageBar"></div>
+        </div>
     </div>
 </div>
 
 <script>
-let _allFlairs = [];
-let _activeFlair = null;
-let _currentPage = 1;
-let _totalPosts  = 0;
-let _perPage     = 48;
-let _selected    = new Set();
+let _allFlairs     = [];
+let _activeFlair   = null;
+let _activeBlocked = false;
+let _currentPage   = 1;
+let _totalPosts    = 0;
+let _perPage       = 48;
+let _selected      = new Set();
+let _tab           = 'all';
+let _delAllConfirm = false;
+let _delAllTimer   = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', loadFlairs);
+document.addEventListener('DOMContentLoaded', () => {
+    loadFlairs();
+});
 
-// ── Sidebar ───────────────────────────────────────────────────────────────
-function loadFlairs() {
-    _activeFlair = null;
-    _selected.clear();
-    document.getElementById('postGrid').innerHTML = '';
-    document.getElementById('emptyPanel').style.display = 'block';
-    document.getElementById('panelHead').style.display = 'none';
-    document.getElementById('bulkToolbar').style.display = 'none';
-    document.getElementById('paginationBar').innerHTML = '';
+// ── Subreddit filter ──────────────────────────────────────────────────────
+function onSrChange() {
+    // Keep active flair across subreddit changes
+    loadFlairs(_activeFlair);
+}
 
+// ── Load flair list ───────────────────────────────────────────────────────
+function loadFlairs(restoreFlair) {
     const sr = document.getElementById('srFilter').value;
     const url = '/api/flairs' + (sr ? `?subreddit=${encodeURIComponent(sr)}` : '');
-
-    document.getElementById('flairList').innerHTML = '<div class="no-flairs">Loading…</div>';
+    document.getElementById('flairList').innerHTML = '<div class="fl-no-items">Loading…</div>';
+    document.getElementById('flairTotal').textContent = '—';
 
     fetch(url)
         .then(r => r.json())
         .then(data => {
             _allFlairs = data.flairs || [];
-            document.getElementById('flairCount').textContent = _allFlairs.length.toLocaleString();
-            renderSidebar(_allFlairs);
+            updateFlairMeta();
+            renderSidebar();
+
+            // Restore selected flair
+            const tryFlair = restoreFlair || (() => {
+                try {
+                    const p = new URLSearchParams(location.hash.slice(1));
+                    return p.get('flair') || null;
+                } catch { return null; }
+            })();
+            if (tryFlair && _allFlairs.some(f => f.flair === tryFlair)) {
+                selectFlair(tryFlair, false);
+            }
         })
         .catch(() => {
-            document.getElementById('flairList').innerHTML = '<div class="no-flairs">Failed to load.</div>';
+            document.getElementById('flairList').innerHTML = '<div class="fl-no-items">Failed to load flairs.</div>';
         });
 }
 
-function renderSidebar(flairs) {
-    const list = document.getElementById('flairList');
-    if (!flairs.length) {
-        list.innerHTML = '<div class="no-flairs">No flairs found.</div>';
+function updateFlairMeta() {
+    document.getElementById('flairTotal').textContent = _allFlairs.length.toLocaleString();
+    const blocked = _allFlairs.filter(f => f.is_blocked).length;
+    const bb = document.getElementById('blockedBadge');
+    bb.textContent = blocked;
+    bb.style.display = blocked > 0 ? '' : 'none';
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────
+function switchTab(tab) {
+    _tab = tab;
+    document.querySelectorAll('.fl-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    renderSidebar();
+}
+
+function renderSidebar() {
+    const q = (document.getElementById('flairSearch').value || '').toLowerCase().trim();
+    let list = _allFlairs;
+    if (_tab === 'blocked') list = list.filter(f => f.is_blocked);
+    if (q) list = list.filter(f => f.flair.toLowerCase().includes(q));
+
+    const el = document.getElementById('flairList');
+    if (!list.length) {
+        el.innerHTML = `<div class="fl-no-items">${q ? 'No matching flairs.' : _tab === 'blocked' ? 'No blocked flairs.' : 'No flairs found.'}</div>`;
         return;
     }
-    list.innerHTML = '';
-    flairs.forEach(f => {
+    el.innerHTML = '';
+    list.forEach(f => {
+        const isActive  = f.flair === _activeFlair;
+        const isBlocked = !!f.is_blocked;
+        const blockIcon = isBlocked ? 'fa-unlock' : 'fa-ban';
+        const blockTip  = isBlocked ? 'Unblock flair' : 'Block flair';
+
         const item = document.createElement('div');
-        item.className = 'flair-item' + (f.flair === _activeFlair ? ' active' : '');
+        item.className = 'fl-item' + (isBlocked ? ' blocked' : '') + (isActive ? ' active' : '');
         item.dataset.flair = f.flair;
+        item.title = f.flair;
         item.innerHTML = `
-            <span class="flair-pill" title="${escHtml(f.flair)}">${escHtml(f.flair)}</span>
-            <span class="flair-count">${f.post_count.toLocaleString()}</span>`;
-        item.addEventListener('click', () => selectFlair(f.flair));
-        list.appendChild(item);
+            <div class="fl-item-dot"></div>
+            <span class="fl-item-name">${escHtml(f.flair)}</span>
+            <span class="fl-item-cnt">${(f.post_count || 0).toLocaleString()}</span>
+            <button class="fl-item-block" title="${blockTip}" onclick="toggleBlockItem(event,'${escJs(f.flair)}',${isBlocked})">
+                <i class="fas ${blockIcon}"></i>
+            </button>`;
+        item.addEventListener('click', e => {
+            if (e.target.closest('.fl-item-block')) return;
+            selectFlair(f.flair, true);
+        });
+        el.appendChild(item);
     });
 }
 
-function filterSidebar() {
-    const q = document.getElementById('flairSearch').value.toLowerCase();
-    const filtered = _allFlairs.filter(f => f.flair.toLowerCase().includes(q));
-    renderSidebar(filtered);
-}
-
-function selectFlair(flair) {
+// ── Select flair ──────────────────────────────────────────────────────────
+function selectFlair(flair, pushHash) {
     _activeFlair = flair;
     _currentPage = 1;
     _selected.clear();
-    // Update sidebar active state
-    document.querySelectorAll('.flair-item').forEach(el => {
+    _delAllConfirm = false;
+    clearTimeout(_delAllTimer);
+    resetDeleteAllBtn();
+
+    // Sidebar highlight
+    document.querySelectorAll('.fl-item').forEach(el => {
         el.classList.toggle('active', el.dataset.flair === flair);
     });
+
+    // Hash
+    if (pushHash) {
+        const p = new URLSearchParams();
+        p.set('flair', flair);
+        history.replaceState(null, '', '#' + p.toString());
+    }
+
+    // Panel
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('flairPanel').style.display = 'block';
+
+    // Update panel header
+    const fd = _allFlairs.find(f => f.flair === flair);
+    _activeBlocked = fd ? !!fd.is_blocked : false;
+    refreshPanelBlockUI();
+
     loadPosts();
 }
 
-// ── Posts ─────────────────────────────────────────────────────────────────
+function refreshPanelBlockUI() {
+    document.getElementById('panelFlairName').textContent = _activeFlair || '';
+    document.getElementById('panelBlockedBadge').style.display = _activeBlocked ? '' : 'none';
+    const btn  = document.getElementById('blockBtn');
+    const icon = document.getElementById('blockBtnIcon');
+    const text = document.getElementById('blockBtnText');
+    if (_activeBlocked) {
+        btn.className  = 'fl-btn';
+        icon.className = 'fas fa-unlock';
+        text.textContent = 'Unblock';
+    } else {
+        btn.className  = 'fl-btn warn';
+        icon.className = 'fas fa-ban';
+        text.textContent = 'Block Flair';
+    }
+}
+
+// ── Load posts ────────────────────────────────────────────────────────────
 function loadPosts() {
     if (!_activeFlair) return;
-    const sr = document.getElementById('srFilter').value;
+    const sr  = document.getElementById('srFilter').value;
     let url = `/api/flairs/posts?flair=${encodeURIComponent(_activeFlair)}&page=${_currentPage}&per_page=${_perPage}`;
     if (sr) url += `&subreddit=${encodeURIComponent(sr)}`;
 
-    document.getElementById('postGrid').innerHTML = '';
-    document.getElementById('emptyPanel').style.display = 'none';
-    document.getElementById('bulkToolbar').style.display = 'flex';
-    document.getElementById('panelHead').style.display   = 'flex';
-    document.getElementById('panelTitle').textContent = _activeFlair;
+    // Skeleton
+    const grid = document.getElementById('postGrid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 12; i++) {
+        const sk = document.createElement('div');
+        sk.className = 'fl-skeleton';
+        grid.appendChild(sk);
+    }
+    document.getElementById('pageBar').innerHTML = '';
+    document.getElementById('panelMeta').textContent = 'Loading…';
+    updateBulkBar();
 
     fetch(url)
         .then(r => r.json())
@@ -298,163 +769,225 @@ function loadPosts() {
                 `${_totalPosts.toLocaleString()} post${_totalPosts !== 1 ? 's' : ''}`;
             renderPosts(data.posts || []);
             renderPagination();
-            updateSelUI();
         })
-        .catch(err => console.error(err));
+        .catch(() => {
+            grid.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);grid-column:1/-1;">Failed to load posts.</div>';
+            document.getElementById('panelMeta').textContent = '';
+        });
 }
 
+// ── Render posts ──────────────────────────────────────────────────────────
 function renderPosts(posts) {
     const grid = document.getElementById('postGrid');
     grid.innerHTML = '';
-
     if (!posts.length) {
-        document.getElementById('emptyPanel').style.display = 'block';
-        document.getElementById('emptyPanel').innerHTML = '<i class="fas fa-inbox" style="font-size:2rem;opacity:0.3;margin-bottom:0.5rem;"></i><br>No posts for this flair.';
+        grid.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);grid-column:1/-1;"><i class="fas fa-inbox" style="font-size:2rem;opacity:0.25;display:block;margin-bottom:0.5rem;"></i>No posts for this flair.</div>';
         return;
     }
-
     posts.forEach(p => {
         const card = document.createElement('div');
-        card.className = 'post-card' + (_selected.has(p.post_id) ? ' selected' : '');
+        card.className = 'fl-card' + (_selected.has(p.post_id) ? ' sel' : '');
         card.dataset.postId = p.post_id;
 
-        const thumbUrl = buildThumbUrl(p);
-        const fullUrl = p.web_path ? `/reddit_downloads/${p.web_path}` : null;
-        let imgHtml;
-        if (p.is_video) {
-            if (thumbUrl) {
-                imgHtml = `<img src="${thumbUrl}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-film\\'></i></div>'">`;
-            } else {
-                imgHtml = `<div class="post-card-no-thumb"><i class="fas fa-film"></i></div>`;
-            }
-        } else if (thumbUrl) {
-            imgHtml = `<img src="${thumbUrl}" loading="lazy" data-fallback="${fullUrl || ''}" onerror="flairThumbErr(this)">`;
-        } else if (fullUrl) {
-            imgHtml = `<img src="${fullUrl}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=post-card-no-thumb><i class=\\'fas fa-image\\'></i></div>'">`;
+        // Thumbnail HTML
+        let thumbHtml;
+        if (p.thumb_url) {
+            thumbHtml = `<img class="fl-card-thumb" src="${escAttr(p.thumb_url)}" loading="lazy" onerror="cardThumbErr(this,'${p.web_path ? escAttr('/reddit_downloads/'+p.web_path) : ''}')">`;
+        } else if (p.web_path) {
+            thumbHtml = `<img class="fl-card-thumb" src="${escAttr('/reddit_downloads/'+p.web_path)}" loading="lazy" onerror="cardThumbErr(this,'')">`;
         } else {
-            imgHtml = `<div class="post-card-no-thumb"><i class="fas fa-image"></i></div>`;
+            thumbHtml = `<div class="fl-card-no-thumb"><i class="fas fa-${p.is_video ? 'film' : 'image'}"></i></div>`;
         }
 
-        const date = p.created_utc ? p.created_utc.slice(0,10) : '';
+        const badges = [];
+        if (p.is_video) badges.push('<span class="fl-badge video"><i class="fas fa-play"></i></span>');
+        if ((p.image_count || 0) > 1) badges.push(`<span class="fl-badge">${p.image_count}</span>`);
+
+        const date = p.created_utc ? p.created_utc.slice(0, 10) : '';
         card.innerHTML = `
-            ${imgHtml}
-            <div class="sel-check"><i class="fas fa-times"></i></div>
-            <div class="post-card-info">
-                <div class="post-card-title" title="${escHtml(p.title)}">${escHtml(p.title)}</div>
-                <div class="post-card-meta">
-                    <span>${p.author ? 'u/'+escHtml(p.author) : ''}</span>
+            ${thumbHtml}
+            <div class="fl-card-cb" title="Select"><i class="fas fa-check"></i></div>
+            ${badges.length ? `<div class="fl-card-badges">${badges.join('')}</div>` : ''}
+            <div class="fl-card-info">
+                <div class="fl-card-title">${escHtml(p.title)}</div>
+                <div class="fl-card-sub">
+                    <span>${p.subreddit ? escHtml('r/'+p.subreddit) : ''}</span>
                     <span>${date}</span>
                 </div>
-                <div style="margin-top:2px;">
-                    <span style="color:var(--text-muted);">r/${escHtml(p.subreddit)}</span>
-                    ${p.image_count > 1 ? `<span style="color:var(--accent);float:right;">${p.image_count} imgs</span>` : ''}
-                </div>
             </div>`;
-        card.addEventListener('click', () => toggleCard(card, p.post_id));
+
+        // Checkbox click → select; rest of card → open details
+        card.querySelector('.fl-card-cb').addEventListener('click', e => {
+            e.stopPropagation();
+            toggleSel(card, p.post_id);
+        });
+        card.addEventListener('click', e => {
+            if (e.target.closest('.fl-card-cb')) return;
+            window.location.href = '/details/' + p.post_id;
+        });
+
         grid.appendChild(card);
     });
 }
 
-function renderPagination() {
-    const bar = document.getElementById('paginationBar');
-    const totalPages = Math.ceil(_totalPosts / _perPage);
-    if (totalPages <= 1) { bar.innerHTML = ''; return; }
-
-    let html = '';
-    const prev = _currentPage - 1;
-    const next = _currentPage + 1;
-
-    html += `<button class="page-btn" onclick="goPage(1)" ${_currentPage===1?'disabled':''}>«</button>`;
-    html += `<button class="page-btn" onclick="goPage(${prev})" ${_currentPage===1?'disabled':''}>‹</button>`;
-
-    const start = Math.max(1, _currentPage - 3);
-    const end   = Math.min(totalPages, _currentPage + 3);
-    for (let i = start; i <= end; i++) {
-        html += `<button class="page-btn${i===_currentPage?' active':''}" onclick="goPage(${i})">${i}</button>`;
+function cardThumbErr(img, fallback) {
+    img.onerror = null;
+    if (fallback) {
+        img.src = fallback;
+        img.onerror = () => {
+            img.onerror = null;
+            const ph = document.createElement('div');
+            ph.className = 'fl-card-no-thumb';
+            ph.innerHTML = '<i class="fas fa-image"></i>';
+            img.replaceWith(ph);
+        };
+    } else {
+        const ph = document.createElement('div');
+        ph.className = 'fl-card-no-thumb';
+        ph.innerHTML = '<i class="fas fa-image"></i>';
+        img.replaceWith(ph);
     }
-
-    html += `<button class="page-btn" onclick="goPage(${next})" ${_currentPage===totalPages?'disabled':''}>›</button>`;
-    html += `<button class="page-btn" onclick="goPage(${totalPages})" ${_currentPage===totalPages?'disabled':''}>»</button>`;
-    bar.innerHTML = html;
-}
-
-function goPage(n) {
-    _currentPage = n;
-    _selected.clear();
-    loadPosts();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ── Selection ─────────────────────────────────────────────────────────────
-function toggleCard(card, postId) {
+function toggleSel(card, postId) {
     if (_selected.has(postId)) {
         _selected.delete(postId);
-        card.classList.remove('selected');
+        card.classList.remove('sel');
     } else {
         _selected.add(postId);
-        card.classList.add('selected');
+        card.classList.add('sel');
     }
-    updateSelUI();
-}
-
-function updateSelUI() {
-    const n = _selected.size;
-    document.getElementById('selBadge').textContent = n > 0 ? `${n} selected` : '';
-    document.getElementById('deleteSelBtn').disabled = n === 0;
+    updateBulkBar();
 }
 
 function selectAll() {
-    document.querySelectorAll('.post-card').forEach(card => {
-        card.classList.add('selected');
-        _selected.add(parseInt(card.dataset.postId));
+    document.querySelectorAll('.fl-card').forEach(c => {
+        c.classList.add('sel');
+        _selected.add(+c.dataset.postId);
     });
-    updateSelUI();
+    updateBulkBar();
 }
 
 function selectNone() {
-    document.querySelectorAll('.post-card').forEach(card => card.classList.remove('selected'));
+    document.querySelectorAll('.fl-card').forEach(c => c.classList.remove('sel'));
     _selected.clear();
-    updateSelUI();
+    updateBulkBar();
 }
 
-// ── Delete ─────────────────────────────────────────────────────────────────
-function deleteSelected() {
-    const ids = [..._selected];
-    if (!ids.length) return;
-    if (!confirm(`Delete ${ids.length} selected post(s)? Files will be moved to the deleted folder.`)) return;
-    batchDelete(ids);
+function updateBulkBar() {
+    const n = _selected.size;
+    document.getElementById('bulkBar').style.display = n > 0 ? 'flex' : 'none';
+    document.getElementById('selBadge').textContent = n > 0 ? `${n} selected` : '';
+    const btn = document.getElementById('deleteSelBtn');
+    if (btn) btn.disabled = (n === 0);
 }
 
-function deleteAllInFlair() {
+// ── Block / Unblock ───────────────────────────────────────────────────────
+function toggleBlockActiveFlair() {
     if (!_activeFlair) return;
-    if (!confirm(`Delete ALL ${_totalPosts.toLocaleString()} post(s) in flair "${_activeFlair}"? This cannot be undone easily.`)) return;
-
-    const sr = document.getElementById('srFilter').value;
-    // Collect all post IDs by fetching every page
-    fetchAllPostIds(_activeFlair, sr).then(ids => {
-        if (!ids.length) return;
-        if (!confirm(`Confirm: permanently move files for ${ids.length} posts to the deleted folder?`)) return;
-        batchDelete(ids, true);
+    callBlockApi(_activeFlair, _activeBlocked, () => {
+        _activeBlocked = !_activeBlocked;
+        const f = _allFlairs.find(x => x.flair === _activeFlair);
+        if (f) f.is_blocked = _activeBlocked;
+        refreshPanelBlockUI();
+        renderSidebar();
+        updateFlairMeta();
+        toast(_activeBlocked ? 'Flair blocked' : 'Flair unblocked');
     });
 }
 
-function fetchAllPostIds(flair, subreddit) {
-    // Fetch a large page (max 100) repeatedly until we have all IDs
-    const allIds = [];
-    function fetchPage(page) {
-        let url = `/api/flairs/posts?flair=${encodeURIComponent(flair)}&page=${page}&per_page=100`;
-        if (subreddit) url += `&subreddit=${encodeURIComponent(subreddit)}`;
-        return fetch(url).then(r => r.json()).then(data => {
-            (data.posts || []).forEach(p => allIds.push(p.post_id));
-            const total = data.total || 0;
-            if (allIds.length < total) return fetchPage(page + 1);
-            return allIds;
-        });
-    }
-    return fetchPage(1);
+function toggleBlockItem(e, flair, isBlocked) {
+    e.stopPropagation();
+    callBlockApi(flair, isBlocked, () => {
+        const f = _allFlairs.find(x => x.flair === flair);
+        if (f) f.is_blocked = !isBlocked;
+        if (flair === _activeFlair) {
+            _activeBlocked = !isBlocked;
+            refreshPanelBlockUI();
+        }
+        renderSidebar();
+        updateFlairMeta();
+        toast(isBlocked ? 'Flair unblocked' : 'Flair blocked');
+    });
 }
 
-function batchDelete(ids, reloadFlairs = false) {
+function callBlockApi(flair, currentlyBlocked, onSuccess) {
+    const method   = currentlyBlocked ? 'DELETE' : 'POST';
+    const endpoint = currentlyBlocked ? '/api/unblock-flair' : '/api/block-flair';
+    fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flair }),
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (!d.success) { toast('Error: ' + (d.error || 'Failed')); return; }
+        onSuccess();
+    })
+    .catch(() => toast('Network error'));
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────
+function confirmDeleteAll() {
+    if (!_activeFlair) return;
+    if (!_delAllConfirm) {
+        _delAllConfirm = true;
+        const btn = document.getElementById('deleteAllBtn');
+        btn.className = 'fl-btn confirm';
+        document.getElementById('deleteAllText').textContent = `Confirm — Delete ${_totalPosts.toLocaleString()}?`;
+        _delAllTimer = setTimeout(resetDeleteAllBtn, 3500);
+    } else {
+        clearTimeout(_delAllTimer);
+        resetDeleteAllBtn();
+        _doDeleteAll();
+    }
+}
+
+function resetDeleteAllBtn() {
+    _delAllConfirm = false;
+    const btn = document.getElementById('deleteAllBtn');
+    if (btn) {
+        btn.className = 'fl-btn danger';
+        document.getElementById('deleteAllText').textContent = 'Delete All';
+    }
+}
+
+function _doDeleteAll() {
+    const sr = document.getElementById('srFilter').value;
+    toast('Collecting post IDs…');
+    fetchAllPostIds(_activeFlair, sr).then(ids => {
+        if (!ids.length) { toast('No posts to delete'); return; }
+        batchDelete(ids, true);
+    }).catch(() => toast('Failed to collect posts'));
+}
+
+function deleteSelected() {
+    const ids = [..._selected];
+    if (!ids.length) return;
+    batchDelete(ids, false);
+}
+
+function fetchAllPostIds(flair, subreddit) {
+    const all = [];
+    function page(n) {
+        let url = `/api/flairs/posts?flair=${encodeURIComponent(flair)}&page=${n}&per_page=500`;
+        if (subreddit) url += `&subreddit=${encodeURIComponent(subreddit)}`;
+        return fetch(url).then(r => r.json()).then(d => {
+            (d.posts || []).forEach(p => all.push(p.post_id));
+            if (all.length < (d.total || 0)) return page(n + 1);
+            return all;
+        });
+    }
+    return page(1);
+}
+
+function batchDelete(ids, reloadAll) {
+    const delAllBtn = document.getElementById('deleteAllBtn');
+    const delSelBtn = document.getElementById('deleteSelBtn');
+    if (delAllBtn) delAllBtn.disabled = true;
+    if (delSelBtn) delSelBtn.disabled = true;
+
     fetch('/api/delete-posts-batch', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -462,52 +995,83 @@ function batchDelete(ids, reloadFlairs = false) {
     })
     .then(r => r.json())
     .then(data => {
-        if (!data.success && !data.deleted_count) {
-            alert('Error: ' + (data.error || 'Failed'));
+        const n = data.deleted_count || 0;
+        if (!data.success && !n) {
+            toast('Error: ' + (data.error || 'Failed'));
             return;
         }
-        showToast(`${data.deleted_count} post(s) deleted`);
+        toast(`${n} post${n !== 1 ? 's' : ''} deleted`);
         _selected.clear();
-        if (reloadFlairs) {
+        updateBulkBar();
+        if (reloadAll) {
+            _activeFlair = null;
+            document.getElementById('emptyState').style.display = '';
+            document.getElementById('flairPanel').style.display = 'none';
+            history.replaceState(null, '', location.pathname);
             loadFlairs();
         } else {
             loadPosts();
-            // Refresh flair counts in sidebar
-            setTimeout(loadFlairs, 500);
+            setTimeout(() => loadFlairs(_activeFlair), 700);
         }
     })
-    .catch(err => alert('Error: ' + err));
+    .catch(err => toast('Error: ' + err))
+    .finally(() => {
+        if (delAllBtn) delAllBtn.disabled = false;
+        if (delSelBtn) delSelBtn.disabled = (_selected.size === 0);
+    });
 }
+
+// ── Pagination ─────────────────────────────────────────────────────────────
+function renderPagination() {
+    const bar = document.getElementById('pageBar');
+    const total = Math.ceil(_totalPosts / _perPage);
+    if (total <= 1) { bar.innerHTML = ''; return; }
+
+    const clamp = n => Math.max(1, Math.min(total, n));
+    let h = '';
+    h += `<button class="fl-pg-btn" onclick="goPage(1)" ${_currentPage===1?'disabled':''}>«</button>`;
+    h += `<button class="fl-pg-btn" onclick="goPage(${clamp(_currentPage-1)})" ${_currentPage===1?'disabled':''}>‹</button>`;
+    const s = Math.max(1, _currentPage - 3), e = Math.min(total, _currentPage + 3);
+    if (s > 1) h += `<span style="padding:3px 5px;color:var(--text-muted);font-size:0.7rem;">…</span>`;
+    for (let i = s; i <= e; i++) h += `<button class="fl-pg-btn${i===_currentPage?' active':''}" onclick="goPage(${i})">${i}</button>`;
+    if (e < total) h += `<span style="padding:3px 5px;color:var(--text-muted);font-size:0.7rem;">…</span>`;
+    h += `<button class="fl-pg-btn" onclick="goPage(${clamp(_currentPage+1)})" ${_currentPage===total?'disabled':''}>›</button>`;
+    h += `<button class="fl-pg-btn" onclick="goPage(${total})" ${_currentPage===total?'disabled':''}>»</button>`;
+    bar.innerHTML = h;
+}
+
+function goPage(n) {
+    _currentPage = n;
+    _selected.clear();
+    loadPosts();
+    document.getElementById('flMain').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Keyboard ──────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'Escape') {
+        if (_selected.size > 0) { selectNone(); return; }
+        if (_delAllConfirm) { clearTimeout(_delAllTimer); resetDeleteAllBtn(); }
+    }
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-function buildThumbUrl(p) {
-    return p.thumb_url || null;
-}
-
-function flairThumbErr(img) {
-    img.onerror = null;
-    const fallback = img.dataset.fallback;
-    if (fallback) {
-        img.src = fallback;
-    } else {
-        const ph = document.createElement('div');
-        ph.className = 'post-card-no-thumb';
-        ph.innerHTML = '<i class="fas fa-image"></i>';
-        img.replaceWith(ph);
-    }
-}
-
 function escHtml(s) {
-    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return escHtml(s); }
+function escJs(s) {
+    return String(s || '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
 }
 
-function showToast(msg) {
-    const t = document.createElement('div');
-    t.className = 'position-fixed top-0 start-50 translate-middle-x mt-3';
-    t.style.cssText = 'z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:0.5rem 1.25rem;font-size:0.8rem;color:var(--text);box-shadow:0 4px 16px rgba(0,0,0,0.4);';
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 2500);
+function toast(msg, ms) {
+    document.querySelectorAll('.fl-toast').forEach(t => t.remove());
+    const el = document.createElement('div');
+    el.className = 'fl-toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), ms || 2500);
 }
 </script>
 {% endblock %}
