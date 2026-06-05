@@ -172,7 +172,7 @@ _PG_DSN = config.get('postgresql', 'dsn', fallback='')
 _pg_pool = None
 try:
     pool_size = config.getint('postgresql', 'pool_size', fallback=5)
-    _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, pool_size, _PG_DSN)
+    _pg_pool = psycopg2.pool.ThreadedConnectionPool(1, pool_size, _PG_DSN, connect_timeout=5)
     print(f"PostgreSQL connection pool created (size={pool_size})")
 except Exception as e:
     print(f"Warning: Could not create PostgreSQL connection pool: {e}")
@@ -207,9 +207,9 @@ def _get_db_connection():
     try:
         if _pg_pool:
             return _PooledConn(_pg_pool.getconn())
-        return psycopg2.connect(_PG_DSN)
+        return psycopg2.connect(_PG_DSN, connect_timeout=5)
     except Exception:
-        return psycopg2.connect(_PG_DSN)
+        return psycopg2.connect(_PG_DSN, connect_timeout=5)
 
 
 def _ensure_blocked_users_table():
