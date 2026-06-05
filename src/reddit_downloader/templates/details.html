@@ -1,678 +1,1221 @@
 {% extends "base.html" %}
 
-{% block title %}Details — Reddit Vault{% endblock %}
+{% block title %}{{ image.title or 'Post' }} — Reddit Vault{% endblock %}
 
 {% block content %}
 <style>
-.deleted-image { opacity: 0.5; }
-.detail-nav-btn {
+/* ── RESET PAGE PADDING FOR FULL-BLEED ────────────── */
+.page-wrap { padding: 0 !important; }
+
+/* ── ROOT LAYOUT ──────────────────────────────────── */
+.det-layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    height: calc(100vh - 50px);
+    overflow: hidden;
+}
+
+/* ── LEFT: MEDIA PANE ─────────────────────────────── */
+.det-media {
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+    position: relative;
+}
+
+/* ── MEDIA TOPBAR ─────────────────────────────────── */
+.det-topbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    flex-shrink: 0;
+    z-index: 10;
+}
+
+.det-back {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 32px; height: 32px;
-    background: var(--surface-2);
+    gap: 5px;
+    padding: 3px 9px;
+    background: var(--surface);
     border: 1px solid var(--border-2);
     border-radius: var(--r);
     color: var(--text-dim);
+    font-size: 0.62rem;
     text-decoration: none;
-    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    transition: color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+.det-back:hover { color: var(--text); border-color: var(--border-2); text-decoration: none; }
+
+.det-crumb {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.det-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-size: 0.62rem;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    text-decoration: none;
+    transition: border-color 0.15s, color 0.15s;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.det-tag.sub { color: var(--accent); border-color: rgba(255,69,0,0.2); }
+.det-tag.sub:hover { border-color: var(--accent); text-decoration: none; }
+.det-tag.user { color: var(--info); border-color: rgba(96,165,250,0.2); }
+.det-tag.user:hover { border-color: var(--info); text-decoration: none; }
+.det-tag.score { color: var(--accent); border-color: rgba(255,69,0,0.15); font-family: var(--font-head); font-weight: 700; }
+.det-tag.deleted { color: var(--danger); border-color: rgba(239,68,68,0.3); }
+
+.det-nav-pair {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+}
+.det-nav-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.det-nav-link:first-child { border-radius: var(--r) 0 0 var(--r); border-right: none; }
+.det-nav-link:last-child  { border-radius: 0 var(--r) var(--r) 0; }
+.det-nav-link:hover { background: var(--surface-2); color: var(--text); border-color: var(--accent); text-decoration: none; }
+.det-nav-link.dim { opacity: 0.28; pointer-events: none; }
+
+/* ── VIEWER ────────────────────────────────────────── */
+.det-viewer {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.det-slot {
+    display: none;
+    width: 100%; height: 100%;
+    align-items: center;
+    justify-content: center;
+}
+.det-slot.active { display: flex; }
+
+.det-main-img {
+    max-width: 100%; max-height: 100%;
+    width: auto; height: auto;
+    object-fit: contain;
+    display: block;
+    cursor: zoom-in;
+    user-select: none;
+    transition: opacity 0.2s;
+}
+
+.det-main-video {
+    max-width: 100%; max-height: 100%;
+    width: auto; height: auto;
+    display: block;
+    outline: none;
+}
+
+.det-missing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+}
+.det-missing i { font-size: 2.5rem; }
+.det-missing span { font-size: 0.72rem; letter-spacing: 0.1em; }
+
+/* Prev / Next arrows on viewer */
+.det-arr {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    width: 36px; height: 56px;
+    background: rgba(0,0,0,0.45);
+    border: none;
+    border-radius: 2px;
+    color: rgba(255,255,255,0.7);
+    font-size: 0.85rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    z-index: 5;
+    backdrop-filter: blur(4px);
+}
+.det-arr:hover { background: rgba(0,0,0,0.75); color: #fff; }
+.det-arr.prev { left: 8px; }
+.det-arr.next { right: 8px; }
+
+/* Image counter badge */
+.det-img-counter {
+    position: absolute;
+    bottom: 10px; right: 10px;
+    background: rgba(0,0,0,0.65);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.75);
+    font-size: 0.62rem;
+    font-family: var(--font-mono);
+    padding: 2px 8px;
+    border-radius: 2px;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    z-index: 4;
+}
+
+/* Keyboard hint bar (bottom-left of viewer) */
+.det-kb-bar {
+    position: absolute;
+    bottom: 10px; left: 10px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    pointer-events: none;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.det-media:hover .det-kb-bar { opacity: 1; }
+
+.det-kb {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 2px;
+    padding: 2px 6px;
+    font-size: 0.58rem;
+    font-family: var(--font-mono);
+    color: rgba(255,255,255,0.55);
+    backdrop-filter: blur(4px);
+}
+.det-kb kbd {
+    font-family: inherit;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px;
+    padding: 0 4px;
+    font-size: 0.56rem;
+}
+
+/* ── FILMSTRIP ─────────────────────────────────────── */
+.det-filmstrip {
+    display: flex;
+    gap: 3px;
+    padding: 6px 10px;
+    background: rgba(0,0,0,0.85);
+    border-top: 1px solid rgba(255,255,255,0.04);
+    overflow-x: auto;
+    flex-shrink: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-2) transparent;
+    align-items: center;
+}
+.det-filmstrip::-webkit-scrollbar { height: 3px; }
+.det-filmstrip::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
+
+.det-film-item {
+    position: relative;
+    width: 52px; height: 38px;
+    flex-shrink: 0;
+    border-radius: 2px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 1.5px solid transparent;
+    transition: border-color 0.15s, opacity 0.15s;
+    background: var(--surface-2);
+    opacity: 0.5;
+}
+.det-film-item:hover { opacity: 0.85; }
+.det-film-item.active { border-color: var(--accent); opacity: 1; }
+
+.det-film-item img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.det-film-item .vid-icon {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.6); font-size: 0.65rem;
+    background: rgba(0,0,0,0.3);
+}
+
+/* ── RIGHT: SIDEBAR ────────────────────────────────── */
+.det-sidebar {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    background: var(--surface);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-2) transparent;
+}
+.det-sidebar::-webkit-scrollbar { width: 4px; }
+.det-sidebar::-webkit-scrollbar-thumb { background: var(--border-2); }
+
+/* ── POST HEADER ───────────────────────────────────── */
+.det-header {
+    padding: 14px 14px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+{% if image.flair %}
+.det-flair-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: rgba(96,165,250,0.1);
+    border: 1px solid rgba(96,165,250,0.22);
+    border-radius: 2px;
+    color: var(--info);
+    font-size: 0.57rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+{% endif %}
+
+.det-title {
+    font-family: var(--font-head);
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #f0f0f0;
+    line-height: 1.35;
+    margin: 0 0 10px;
+    letter-spacing: -0.015em;
+}
+
+.det-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.det-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-size: 0.62rem;
+    font-family: var(--font-mono);
+    text-decoration: none;
     transition: border-color 0.15s, color 0.15s;
 }
-.detail-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
-.detail-img-wrap { background: #050505; border-radius: var(--r); overflow: hidden; }
-.detail-img-wrap img, .detail-img-wrap video {
-    max-width: 100%;
-    max-height: 70vh;
-    width: auto;
-    height: auto;
-    display: block;
-    margin: 0 auto;
-}
-.comment-thread {
+.det-pill.sub { color: var(--accent); }
+.det-pill.sub:hover { border-color: rgba(255,69,0,0.4); text-decoration: none; }
+.det-pill.user { color: var(--info); }
+.det-pill.user:hover { border-color: rgba(96,165,250,0.4); text-decoration: none; }
+.det-pill.date { color: var(--text-dim); }
+
+/* ── STATS STRIP ───────────────────────────────────── */
+.det-stats {
     display: flex;
-    gap: 0;
-    margin-top: 0.4rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
 }
-.comment-thread + .comment-thread { margin-top: 0.4rem; }
-.comment-collapse-bar {
-    width: 6px;
-    min-width: 6px;
-    border-radius: 3px;
+
+.det-stat-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 9px 6px;
+    border-right: 1px solid var(--border);
+    cursor: default;
+}
+.det-stat-box:last-child { border-right: none; }
+
+.det-stat-n {
+    font-family: var(--font-head);
+    font-size: 1.05rem;
+    font-weight: 800;
+    line-height: 1;
+}
+.det-stat-n.accent { color: var(--accent); }
+.det-stat-n.info   { color: var(--info); }
+.det-stat-n.success{ color: var(--success); }
+.det-stat-n.muted  { color: var(--text-dim); }
+
+.det-stat-l {
+    font-size: 0.52rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+/* ── ACTIONS ───────────────────────────────────────── */
+.det-acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.act-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 11px;
+    border-radius: var(--r);
+    font-size: 0.62rem;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    border: 1px solid;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+    background: transparent;
+}
+.act-btn.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.act-btn.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); text-decoration: none; color: #fff; }
+.act-btn.ghost  { color: var(--text-dim); border-color: var(--border-2); }
+.act-btn.ghost:hover  { color: var(--text); background: var(--surface-2); text-decoration: none; }
+.act-btn.danger { color: var(--danger); border-color: rgba(239,68,68,0.3); }
+.act-btn.danger:hover { background: rgba(239,68,68,0.08); text-decoration: none; }
+.act-btn.warn   { color: var(--warn); border-color: rgba(245,158,11,0.3); }
+.act-btn.warn:hover   { background: rgba(245,158,11,0.08); text-decoration: none; }
+.act-btn.reddit { color: var(--accent); border-color: rgba(255,69,0,0.3); }
+.act-btn.reddit:hover { background: rgba(255,69,0,0.07); text-decoration: none; }
+
+/* ── META SECTION ──────────────────────────────────── */
+.det-section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+    transition: color 0.15s, background 0.15s;
+    flex-shrink: 0;
+}
+.det-section-toggle:hover { color: var(--text); background: rgba(255,255,255,0.015); }
+.det-section-toggle .chevron { font-size: 0.55rem; transition: transform 0.2s; }
+.det-section-toggle.open .chevron { transform: rotate(180deg); }
+
+.det-meta-rows {
+    display: none;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.det-meta-rows.open { display: block; }
+
+.det-mrow {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 5px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.025);
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+}
+.det-mrow:last-child { border-bottom: none; }
+
+.det-mk {
+    font-size: 0.56rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    width: 72px;
+    padding-top: 1px;
+}
+
+.det-mv {
+    color: var(--text);
+    word-break: break-all;
+    min-width: 0;
+    flex: 1;
+}
+
+.det-mv code {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    padding: 1px 5px;
+    border-radius: 2px;
+    cursor: pointer;
+    user-select: all;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    transition: border-color 0.15s, color 0.15s;
+}
+.det-mv code:hover { border-color: var(--accent); color: var(--accent-hi); }
+
+.det-mv .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    font-size: 0.6rem;
+}
+.det-mv .status-badge.ok { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.25); color: var(--success); }
+.det-mv .status-badge.del{ background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: var(--danger); }
+
+/* ── COMMENTS ──────────────────────────────────────── */
+.det-comments-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.det-comments-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.det-comments-hdr span { color: var(--text-dim); }
+
+.det-comments-list {
+    padding: 6px 10px 16px;
+    overflow-y: auto;
+}
+
+/* Comment styles (refined) */
+.cmt-thread { display: flex; gap: 0; margin-top: 5px; }
+.cmt-thread + .cmt-thread { margin-top: 5px; }
+
+.cmt-bar {
+    width: 2px; min-width: 2px;
+    border-radius: 2px;
     cursor: pointer;
     margin-right: 7px;
     flex-shrink: 0;
     align-self: stretch;
-    min-height: 16px;
-    opacity: 0.7;
-    transition: opacity 0.15s;
+    min-height: 18px;
+    opacity: 0.45;
+    transition: opacity 0.15s, width 0.15s;
 }
-.comment-collapse-bar:hover { opacity: 1; }
-.comment-content { flex: 1; min-width: 0; }
-.comment-replies { margin-top: 0.25rem; }
-.comment-thread.collapsed > .comment-content > .comment-replies,
-.comment-thread.collapsed > .comment-content > .comment-item > .comment-body { display: none; }
-.comment-thread.collapsed > .comment-content > .comment-item::after {
-    content: ' [collapsed]';
-    font-size: 0.6rem;
+.cmt-bar:hover { opacity: 1; width: 3px; }
+
+.cmt-body { flex: 1; min-width: 0; }
+.cmt-replies { margin-top: 2px; }
+.cmt-thread.collapsed > .cmt-body > .cmt-replies,
+.cmt-thread.collapsed > .cmt-body > .cmt-item > .cmt-text { display: none; }
+.cmt-thread.collapsed > .cmt-body > .cmt-item::after {
+    content: ' · [+]';
+    font-size: 0.58rem;
     color: var(--text-muted);
-    margin-left: 0.4rem;
 }
-.comment-item { padding: 0.3rem 0 0.2rem; }
-.comment-author { font-size: 0.7rem; color: var(--accent); font-weight: 600; display: inline; }
-.comment-author.deleted { color: var(--text-muted); text-decoration: line-through; }
-.comment-score { font-size: 0.62rem; color: var(--text-muted); display: inline; margin-left: 0.4rem; }
-.comment-score.positive { color: #ff4500; }
-.comment-score.negative { color: #9494ff; }
-.comment-meta   { font-size: 0.58rem; color: var(--text-muted); margin: 1px 0 3px; }
-.comment-body   { font-size: 0.72rem; color: var(--text); line-height: 1.45; }
-.comment-md p { margin: 0 0 0.3rem; }
-.comment-md p:last-child { margin-bottom: 0; }
-.comment-md a { color: var(--accent); }
-.comment-md code { font-size: 0.68rem; background: var(--surface-2); padding: 1px 4px; border-radius: 3px; border: 1px solid var(--border-2); }
-.comment-md pre { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 4px; padding: 0.5rem; overflow-x: auto; margin: 0.3rem 0; }
-.comment-md pre code { background: none; border: none; padding: 0; }
-.comment-md blockquote { border-left: 2px solid var(--border-2); margin: 0.3rem 0; padding: 0 0.6rem; color: var(--text-dim); }
-.comment-md ul, .comment-md ol { padding-left: 1.2rem; margin: 0.2rem 0; }
-.comment-md strong { color: var(--text); }
-.sidebar-section { margin-bottom: 0.75rem; }
+
+.cmt-item { padding: 1px 0 2px; }
+.cmt-hdr {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+    flex-wrap: wrap;
+}
+.cmt-author { font-size: 0.67rem; color: var(--accent); font-weight: 600; }
+.cmt-author.del { color: var(--text-muted); text-decoration: line-through; }
+.cmt-score { font-size: 0.58rem; color: var(--text-muted); }
+.cmt-score.pos { color: var(--accent); }
+.cmt-score.neg { color: #9494ff; }
+.cmt-time { font-size: 0.56rem; color: var(--text-muted); margin-left: auto; }
+
+.cmt-text { font-size: 0.69rem; color: var(--text); line-height: 1.5; }
+.cmt-text p { margin: 0 0 0.25rem; }
+.cmt-text p:last-child { margin-bottom: 0; }
+.cmt-text a { color: var(--accent); }
+.cmt-text code { font-size: 0.65rem; background: var(--surface-2); border: 1px solid var(--border-2); padding: 0 3px; border-radius: 2px; }
+.cmt-text pre { background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 3px; padding: 0.35rem; overflow-x: auto; margin: 0.25rem 0; }
+.cmt-text pre code { background: none; border: none; }
+.cmt-text blockquote { border-left: 2px solid var(--border-2); margin: 0.25rem 0; padding: 0 0.6rem; color: var(--text-dim); }
+.cmt-text ul, .cmt-text ol { padding-left: 1.2rem; margin: 0.2rem 0; }
+.cmt-text strong { color: #e0e0e0; }
+
+.cmt-empty {
+    padding: 24px 10px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+.cmt-empty i { display: block; font-size: 1.6rem; margin-bottom: 8px; opacity: 0.3; }
+
+/* ── LIGHTBOX ───────────────────────────────────────── */
+#detLightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 9900;
+    background: rgba(0,0,0,0.97);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: zoom-out;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    backdrop-filter: blur(8px);
+}
+#detLightbox.open { opacity: 1; pointer-events: all; }
+#detLightbox img {
+    max-width: 96vw;
+    max-height: 96vh;
+    object-fit: contain;
+    cursor: default;
+    border-radius: 2px;
+    box-shadow: 0 0 80px rgba(0,0,0,0.8);
+}
+#detLightboxClose {
+    position: absolute;
+    top: 14px; right: 14px;
+    width: 34px; height: 34px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 50%;
+    color: rgba(255,255,255,0.7);
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+    z-index: 2;
+}
+#detLightboxClose:hover { background: rgba(255,255,255,0.16); }
+
+/* ── DELETED OVERLAY ─────────────────────────────────── */
+.det-del-overlay {
+    position: absolute;
+    top: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: var(--danger);
+    padding: 4px 14px;
+    border-radius: 2px;
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+    z-index: 6;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+}
+
+/* ── MOBILE ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+    .det-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+        overflow: visible;
+    }
+    .det-media {
+        height: 55vw;
+        min-height: 260px;
+        max-height: 65vw;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+    .det-sidebar {
+        overflow-y: visible;
+        max-height: none;
+    }
+    .det-kb-bar { display: none; }
+}
+@media (max-width: 540px) {
+    .det-title { font-size: 0.88rem; }
+    .det-stat-n { font-size: 0.95rem; }
+    .det-acts { padding: 8px 10px; }
+    .act-btn { padding: 4px 9px; font-size: 0.59rem; }
+    .det-media { height: 58vw; min-height: 220px; }
+}
+
+/* Toast */
+.det-toast {
+    position: fixed;
+    top: 60px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    color: var(--text);
+    padding: 7px 18px;
+    border-radius: var(--r);
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    pointer-events: none;
+    animation: toastIn 0.2s ease;
+}
+@keyframes toastIn { from { opacity:0; transform: translateX(-50%) translateY(-6px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
 </style>
-<div class="row">
-    <div class="col-md-8">
-        <div class="card{% if image.is_deleted %} deleted-image{% endif %}">
-            <div class="card-header d-flex justify-content-between align-items-center gap-2">
-                <h4 style="font-size:0.85rem;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin:0;">
-                    <i class="fas fa-image me-2"></i>Details
-                </h4>
-                <div class="d-flex align-items-center gap-2 ms-auto">
-                    {% if image.post_images and image.post_images|length > 1 %}
-                        {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
-                        <span style="font-size:0.65rem;color:var(--text-muted);">{{ current_index + 1 }} / {{ image.post_images|length }}</span>
-                    {% endif %}
-                    {% if image.prev_post_id %}
-                    <a href="/details/{{ image.prev_post_id }}" class="detail-nav-btn" title="Previous Post"><i class="fas fa-arrow-left"></i></a>
-                    {% endif %}
-                    {% if image.next_post_id %}
-                    <a href="/details/{{ image.next_post_id }}" class="detail-nav-btn" title="Next Post"><i class="fas fa-arrow-right"></i></a>
-                    {% endif %}
-                </div>
+
+{% set post_images = image.post_images if image.post_images else [image] %}
+{% set image_count = image.image_count if image.image_count else 1 %}
+
+<!-- ── LIGHTBOX ─────────────────────────────────── -->
+<div id="detLightbox">
+    <button id="detLightboxClose" title="Close (Esc)"><i class="fas fa-times"></i></button>
+    <img id="detLightboxImg" src="" alt="">
+</div>
+
+<!-- ── ROOT LAYOUT ─────────────────────────────────── -->
+<div class="det-layout">
+
+    <!-- ═══════════════ LEFT: MEDIA ════════════════ -->
+    <div class="det-media">
+
+        <!-- Top bar -->
+        <div class="det-topbar">
+            <a class="det-back" href="/" title="Back to gallery">
+                <i class="fas fa-arrow-left"></i> Gallery
+            </a>
+
+            <div class="det-crumb">
+                {% if image.subreddit %}
+                <a class="det-tag sub" href="/?subreddit={{ image.subreddit }}">
+                    <i class="fab fa-reddit-alien" style="font-size:0.6rem;"></i>
+                    r/{{ image.subreddit }}
+                </a>
+                {% endif %}
+                {% if image.author %}
+                <a class="det-tag user" href="/?user={{ image.author }}">
+                    <i class="fas fa-user" style="font-size:0.55rem;"></i>
+                    u/{{ image.author }}
+                </a>
+                {% endif %}
+                {% if image.score is not none %}
+                <span class="det-tag score">
+                    <i class="fas fa-arrow-up" style="font-size:0.55rem;"></i>
+                    {{ image.score }}
+                </span>
+                {% endif %}
+                {% if image.is_deleted %}
+                <span class="det-tag deleted">
+                    <i class="fas fa-trash-alt" style="font-size:0.55rem;"></i>
+                    Deleted
+                </span>
+                {% endif %}
             </div>
-            <div class="card-body">
-                <h5>
-                    {% if image.flair %}
-                    <span class="badge bg-info me-2">{{ image.flair }}</span>
-                    {% endif %}
-                    {{ image.title or 'Untitled' }}
-                </h5>
-                <div class="mb-2">
-                    <span class="badge bg-primary">r/{{ image.subreddit or 'Unknown' }}</span>
-                    <span class="badge bg-info text-dark">u/{{ image.author or 'Unknown' }}</span>
-                </div>
-                {# Use only the local served file on the details page; do NOT use remote URLs or fallbacks #}
-                <div class="detail-img-wrap mb-4 text-center p-3">
-                    {% set post_images = image.post_images if image.post_images else [image] %}
-                    {% set image_count = image.image_count if image.image_count else 1 %}
-                    {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
-                    
-                    {% if image_count > 1 %}
-                        {# Carousel for multiple images #}
-                        <div id="carousel-details" class="carousel slide" data-bs-ride="carousel" data-bs-interval="false">
-                            <div class="carousel-inner">
-                                {% for post_img in post_images %}
-                                <div class="carousel-item {% if loop.index0 == current_index %}active{% endif %}">
-                                    {% if post_img.web_path %}
-                                        {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
-                                        {% if ext == 'mp4' %}
-                                            <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
-                                                <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
-                                                Your browser does not support the video tag.
-                                            </video>
-                                        {% else %}
-                                            <img src="{{ url_for('static', filename=post_img.web_path) }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
-                                        {% endif %}
-                                    {% else %}
-                                        <div class="alert alert-warning">Image not found.</div>
-                                    {% endif %}
-                                </div>
-                                {% endfor %}
-                            </div>
-                            <button class="carousel-control-prev" type="button" data-bs-target="#carousel-details" data-bs-slide="prev">
-                                <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                                <span class="visually-hidden">Previous</span>
-                            </button>
-                            <button class="carousel-control-next" type="button" data-bs-target="#carousel-details" data-bs-slide="next">
-                                <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                                <span class="visually-hidden">Next</span>
-                            </button>
-                            <div class="carousel-indicators">
-                                {% for post_img in post_images %}
-                                <button type="button" data-bs-target="#carousel-details" data-bs-slide-to="{{ loop.index0 }}" {% if loop.index0 == current_index %}class="active" aria-current="true"{% endif %} aria-label="Slide {{ loop.index }}"></button>
-                                {% endfor %}
-                            </div>
-                            <div class="position-absolute top-0 end-0 m-2">
-                                <span class="badge bg-dark opacity-75">{{ current_index + 1 }} / {{ image_count }}</span>
-                            </div>
-                        </div>
+
+            <div class="det-nav-pair">
+                {% if image.prev_post_id %}
+                <a class="det-nav-link" href="/details/{{ image.prev_post_id }}" title="Previous post (←)">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+                {% else %}
+                <span class="det-nav-link dim"><i class="fas fa-chevron-left"></i></span>
+                {% endif %}
+                {% if image.next_post_id %}
+                <a class="det-nav-link" href="/details/{{ image.next_post_id }}" title="Next post (→)">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+                {% else %}
+                <span class="det-nav-link dim"><i class="fas fa-chevron-right"></i></span>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Viewer -->
+        <div class="det-viewer" id="detViewer">
+            {% if image.is_deleted %}
+            <div class="det-del-overlay"><i class="fas fa-trash-alt me-1"></i> Deleted</div>
+            {% endif %}
+
+            {% for post_img in post_images %}
+            {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
+            <div class="det-slot{% if loop.first %} active{% endif %}" data-index="{{ loop.index0 }}">
+                {% if post_img.web_path %}
+                    {% if ext == 'mp4' %}
+                    <video class="det-main-video" controls playsinline preload="metadata"
+                        {% if post_img.thumb_path %}poster="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}"{% endif %}>
+                        <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
+                    </video>
                     {% else %}
-                        {# Single image #}
-                        {% if image.web_path %}
-                            {% set ext = image.filename.split('.')[-1].lower() %}
-                            {% if ext == 'mp4' %}
-                                <video controls class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;">
-                                    <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
-                                    Your browser does not support the video tag.
-                                </video>
-                            {% else %}
-                                <img src="{{ url_for('static', filename=image.web_path) }}" class="img-fluid rounded shadow mx-auto" style="max-width:100%;height:auto;max-height:600px;" alt="{{ image.title or 'Reddit Image' }}">
-                            {% endif %}
-                        {% else %}
-                            <div class="alert alert-warning">Image not found.</div>
-                        {% endif %}
+                    <img class="det-main-img" id="detImg{{ loop.index0 }}"
+                        src="{{ url_for('static', filename=post_img.web_path) }}"
+                        alt="{{ image.title or 'Image' }}"
+                        {% if post_img.thumb_path %}data-full="{{ url_for('static', filename=post_img.web_path) }}"{% endif %}>
                     {% endif %}
+                {% else %}
+                <div class="det-missing">
+                    <i class="fas fa-image-slash"></i>
+                    <span>File not found</span>
                 </div>
-
-                <!-- Collapsible Metadata Panel -->
-                <div class="accordion mb-4" id="metaAccordion">
-                    <div class="accordion-item bg-dark text-light">
-                        <h2 class="accordion-header" id="metaHeading">
-                            <button class="accordion-button collapsed bg-dark text-light" type="button" data-bs-toggle="collapse" data-bs-target="#metaCollapse" aria-expanded="false" aria-controls="metaCollapse">
-                                Metadata & File Info
-                            </button>
-                        </h2>
-                        <div id="metaCollapse" class="accordion-collapse collapse" aria-labelledby="metaHeading" data-bs-parent="#metaAccordion">
-                            <div class="accordion-body">
-                                <div class="row mt-2">
-                                    <div class="col-md-6">
-                                        <h6><i class="fas fa-subreddit"></i> Reddit Information</h6>
-                                        <table class="table table-borderless table-sm">
-                                            <tr>
-                                                <td><strong>Subreddit:</strong></td>
-                                                <td><a href="/?subreddit={{ image.subreddit }}" class="text-decoration-none">
-                                                    r/{{ image.subreddit or 'Unknown' }}
-                                                </a></td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>Author:</strong></td>
-                                                {% if image.author %}
-                                                <td><a href="/?user={{ image.author }}" class="text-decoration-none">
-                                                    u/{{ image.author }}
-                                                </a></td>
-                                                {% else %}
-                                                <td>Unknown</td>
-                                                {% endif %}
-                                            </tr>
-                                            <tr>
-                                                <td><strong>Posted:</strong></td>
-                                                <td>{{ image.download_date }} {{ image.download_time }}</td>
-                                            </tr>
-                                            {% if image.permalink %}
-                                            <tr>
-                                                <td><strong>Reddit Link:</strong></td>
-                                                <td><a href="https://reddit.com{{ image.permalink }}" target="_blank"
-                                                       class="btn btn-sm btn-outline-primary">
-                                                    <i class="fab fa-reddit"></i> View on Reddit
-                                                </a></td>
-                                            </tr>
-                                            {% endif %}
-                                        </table>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <h6><i class="fas fa-file"></i> File Information</h6>
-                                        <table class="table table-borderless table-sm">
-                                            <tr>
-                                                <td><strong>Filename:</strong></td>
-                                                <td><code>{{ image.filename or 'Unknown' }}</code></td>
-                                            </tr>
-                                            {% if image.file_size %}
-                                            <tr>
-                                                <td><strong>Size:</strong></td>
-                                                <td>{{ "%.1f"|format(image.file_size/1024) }} KB ({{ "%.1f"|format(image.file_size/1024/1024) }} MB)</td>
-                                            </tr>
-                                            {% endif %}
-                                            {% if image.file_hash %}
-                                            <tr>
-                                                <td><strong>MD5 Hash:</strong></td>
-                                                <td><code style="font-size: 0.8rem;">{{ image.file_hash }}</code></td>
-                                            </tr>
-                                            {% endif %}
-                                            <tr>
-                                                <td><strong>Downloaded:</strong></td>
-                                                <td>{{ image.download_date }} at {{ image.download_time }}</td>
-                                            </tr>
-                                            <tr>
-                                                <td><strong>File Path:</strong></td>
-                                                <td><code style="font-size: 0.8rem;">{{ image.file_path }}</code></td>
-                                            </tr>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                {% endif %}
             </div>
-            <div class="card-footer">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        {% set post_images = image.post_images if image.post_images else [image] %}
-                        {% set current_index = image.current_image_index if image.current_image_index is defined else 0 %}
-                        {% set current_img = post_images[current_index] if post_images else image %}
-                        
-                        {% if current_img.web_path %}
-                        <a href="{{ url_for('static', filename=current_img.web_path) }}" target="_blank" class="btn btn-primary">
-                            <i class="fas fa-external-link-alt"></i> View Full Size
-                        </a>
-                        <a href="{{ url_for('static', filename=current_img.web_path) }}" download="{{ current_img.filename or image.filename }}" class="btn btn-outline-primary">
-                            <i class="fas fa-download"></i> Download
-                        </a>
-                        {% endif %}
-                        {% if image.post_id %}
-                        <button type="button" class="btn btn-outline-danger" onclick="deletePost({{ image.post_id }})">
-                            <i class="fas fa-trash"></i> Delete Post
-                        </button>
-                        {% endif %}
-                    </div>
-                    <div>
-                        {# Image navigation within post is handled by carousel/gallery display #}
-                        <a href="/" class="btn btn-outline-secondary">
-                            <i class="fas fa-arrow-left"></i> Back to Gallery
-                        </a>
-                    </div>
-                </div>
+            {% endfor %}
+
+            {% if image_count > 1 %}
+            <button class="det-arr prev" id="detArrPrev" title="Previous image (A)">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            <button class="det-arr next" id="detArrNext" title="Next image (D)">
+                <i class="fas fa-chevron-right"></i>
+            </button>
+            <div class="det-img-counter" id="detCounter">1 / {{ image_count }}</div>
+            {% endif %}
+
+            <div class="det-kb-bar">
+                {% if image.prev_post_id or image.next_post_id %}
+                <span class="det-kb"><kbd>←</kbd><kbd>→</kbd> Post nav</span>
+                {% endif %}
+                {% if image_count > 1 %}
+                <span class="det-kb"><kbd>A</kbd><kbd>D</kbd> Image nav</span>
+                {% endif %}
+                <span class="det-kb"><kbd>F</kbd> Fullscreen</span>
             </div>
         </div>
-    </div>
-    <div class="col-md-4">
 
-         {% if image.comments %}
-    <!-- Comment Input Box -->
-    <div class="card mb-3">
-        <div class="card-header">
-            <h6><i class="fas fa-plus"></i> Add a Comment</h6>
-        </div>
-        <div class="card-body">
-            <form id="commentForm">
-                <div class="mb-2">
-                    <textarea class="form-control" id="commentText" name="comment" rows="2" placeholder="Write your comment..."></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary btn-sm">Post Comment</button>
-                <div id="commentStatus" class="mt-2" style="display:none;"></div>
-            </form>
-        </div>
-    </div>
-    <!-- End Comment Input Box -->
-
-    <div class="card">
-        <div class="card-header">
-            <h6><i class="fas fa-comments"></i> Top Comments</h6>
-        </div>
-        <div class="card-body p-2">
-            {% set comments = image.comments | safe | loads %}
-            {% if comments and comments|length > 0 %}
-            {% set depth_colors = ['#ff4500','#ff8717','#46d160','#24a0ed','#9494ff','#ff585b'] %}
-            {% macro render_comment(comment, depth) %}
-            <div class="comment-thread" data-depth="{{ depth }}">
-                <div class="comment-collapse-bar" style="background:{{ depth_colors[depth % 6] }};" title="Click to collapse" onclick="this.closest('.comment-thread').classList.toggle('collapsed')"></div>
-                <div class="comment-content">
-                    <div class="comment-item">
-                        <span class="comment-author{% if '(deleted)' in (comment.author or '') %} deleted{% endif %}">{{ comment.author or 'Unknown' }}</span>
-                        <span class="comment-score{% if (comment.score or 0) > 0 %} positive{% elif (comment.score or 0) < 0 %} negative{% endif %}">▲ {{ comment.score or 0 }}</span>
-                        <div class="comment-meta">{{ comment.created_utc | format_datetime }}</div>
-                        <div class="comment-body comment-md" data-md="{{ comment.body | e }}"></div>
-                    </div>
-                    {% if comment.replies and comment.replies|length > 0 %}
-                    <div class="comment-replies">
-                        {% for reply in comment.replies %}
-                        {{ render_comment(reply, depth + 1) }}
-                        {% endfor %}
-                    </div>
+        <!-- Filmstrip (multi-image only) -->
+        {% if image_count > 1 %}
+        <div class="det-filmstrip" id="detFilmstrip">
+            {% for post_img in post_images %}
+            {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
+            <div class="det-film-item{% if loop.first %} active{% endif %}" data-index="{{ loop.index0 }}" title="Image {{ loop.index }}">
+                {% if ext == 'mp4' %}
+                    {% if post_img.thumb_path %}
+                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" alt="">
+                    {% else %}
+                    <div class="vid-icon"><i class="fas fa-film"></i></div>
                     {% endif %}
-                </div>
+                {% elif post_img.thumb_path %}
+                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" alt="">
+                {% elif post_img.web_path %}
+                    <img src="{{ url_for('static', filename=post_img.web_path) }}" alt="">
+                {% else %}
+                    <div class="vid-icon"><i class="fas fa-image"></i></div>
+                {% endif %}
             </div>
-            {% endmacro %}
-            <div id="commentsList">
-                {% for comment in comments %}
-                {{ render_comment(comment, 0) }}
-                {% endfor %}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ═══════════════ RIGHT: SIDEBAR ════════════════ -->
+    <div class="det-sidebar">
+
+        <!-- Post Header -->
+        <div class="det-header">
+            {% if image.flair %}
+            <div class="det-flair-badge"><i class="fas fa-tag me-1" style="font-size:0.5rem;"></i>{{ image.flair }}</div>
+            {% endif %}
+            <h1 class="det-title">{{ image.title or 'Untitled Post' }}</h1>
+            <div class="det-pills">
+                {% if image.subreddit %}
+                <a class="det-pill sub" href="/?subreddit={{ image.subreddit }}">
+                    <i class="fab fa-reddit-alien" style="font-size:0.58rem;"></i> r/{{ image.subreddit }}
+                </a>
+                {% endif %}
+                {% if image.author %}
+                <a class="det-pill user" href="/?user={{ image.author }}">
+                    <i class="fas fa-user" style="font-size:0.54rem;"></i> u/{{ image.author }}
+                </a>
+                {% endif %}
+                {% if image.created_utc %}
+                <span class="det-pill date">
+                    <i class="fas fa-clock" style="font-size:0.54rem;"></i>
+                    {{ image.created_utc | format_datetime }}
+                </span>
+                {% endif %}
             </div>
-            {% else %}
-            <div class="text-muted ps-1">No comments found.</div>
+        </div>
+
+        <!-- Stats -->
+        <div class="det-stats">
+            <div class="det-stat-box">
+                <span class="det-stat-n accent">{{ image.score if image.score is not none else '—' }}</span>
+                <span class="det-stat-l">Score</span>
+            </div>
+            <div class="det-stat-box">
+                <span class="det-stat-n info">{{ image.comment_count if image.comment_count else '—' }}</span>
+                <span class="det-stat-l">Comments</span>
+            </div>
+            <div class="det-stat-box">
+                <span class="det-stat-n muted">{{ image_count }}</span>
+                <span class="det-stat-l">{{ 'Files' if image_count > 1 else 'File' }}</span>
+            </div>
+            <div class="det-stat-box">
+                <span class="det-stat-n {% if image.is_deleted %}accent{% else %}success{% endif %}">
+                    {% if image.is_deleted %}<i class="fas fa-trash-alt" style="font-size:0.85rem;"></i>{% else %}<i class="fas fa-check" style="font-size:0.85rem;"></i>{% endif %}
+                </span>
+                <span class="det-stat-l">{% if image.is_deleted %}Deleted{% else %}Active{% endif %}</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="det-acts">
+            {% set current_img = post_images[0] %}
+            {% if current_img.web_path %}
+            <a class="act-btn primary" href="{{ url_for('static', filename=current_img.web_path) }}" target="_blank">
+                <i class="fas fa-expand-alt"></i> Full Size
+            </a>
+            <a class="act-btn ghost" href="{{ url_for('static', filename=current_img.web_path) }}" download="{{ current_img.filename or image.filename }}">
+                <i class="fas fa-download"></i> Download
+            </a>
+            {% endif %}
+            {% if image.permalink %}
+            <a class="act-btn reddit" href="https://reddit.com{{ image.permalink }}" target="_blank" rel="noopener">
+                <i class="fab fa-reddit-alien"></i> Reddit
+            </a>
+            {% endif %}
+            {% if image.author %}
+            <button class="act-btn warn" onclick="blockUser('{{ image.author }}')">
+                <i class="fas fa-ban"></i> Block
+            </button>
+            <button class="act-btn warn" onclick="blockAndDelete('{{ image.author }}')">
+                <i class="fas fa-user-slash"></i> Block+Del
+            </button>
+            {% endif %}
+            {% if image.post_id %}
+            <button class="act-btn danger" onclick="deletePost({{ image.post_id }})">
+                <i class="fas fa-trash-alt"></i> Delete Post
+            </button>
             {% endif %}
         </div>
-    </div>
-    {% endif %}
 
-        <div class="card">
-            <div class="card-header">
-                <h6><i class="fas fa-chart-bar"></i> Quick Stats</h6>
+        <!-- File Metadata (collapsible) -->
+        <div class="det-section-toggle" id="metaToggle" onclick="toggleMeta()">
+            <span><i class="fas fa-database me-2" style="font-size:0.55rem;"></i>File &amp; Post Info</span>
+            <i class="fas fa-chevron-down chevron"></i>
+        </div>
+        <div class="det-meta-rows" id="metaRows">
+            {% if image.reddit_id %}
+            <div class="det-mrow">
+                <span class="det-mk">Reddit ID</span>
+                <span class="det-mv"><code title="Click to copy">{{ image.reddit_id }}</code></span>
             </div>
-            <div class="card-body">
-                <div class="list-group list-group-flush">
-                    <div class="list-group-item d-flex justify-content-between">
-                        <span>Database ID:</span>
-                        <code>{{ image.id }}</code>
-                    </div>
-                    <div class="list-group-item d-flex justify-content-between">
-                        <span>Status:</span>
-                        <span class="badge bg-{% if image.is_deleted %}danger{% else %}success{% endif %}">
-                            {% if image.is_deleted %}Deleted{% else %}Active{% endif %}
-                        </span>
-                    </div>
-                    {% if image.file_hash %}
-                    <div class="list-group-item">
-                        <small class="text-muted">File Integrity Verified</small><br>
-                        <code style="font-size: 0.7rem;">{{ image.file_hash }}</code>
-                    </div>
-                    {% endif %}
+            {% endif %}
+            <div class="det-mrow">
+                <span class="det-mk">Post ID</span>
+                <span class="det-mv"><code title="Click to copy">{{ image.post_id }}</code></span>
+            </div>
+            {% if image.filename %}
+            <div class="det-mrow">
+                <span class="det-mk">Filename</span>
+                <span class="det-mv"><code title="Click to copy">{{ image.filename }}</code></span>
+            </div>
+            {% endif %}
+            {% if image.file_size %}
+            <div class="det-mrow">
+                <span class="det-mk">Size</span>
+                <span class="det-mv" style="font-size:0.68rem;">
+                    {{ "%.2f"|format(image.file_size/1024/1024) }} MB
+                    <span style="color:var(--text-muted);">({{ "%.0f"|format(image.file_size/1024) }} KB)</span>
+                </span>
+            </div>
+            {% endif %}
+            {% if image.file_hash %}
+            <div class="det-mrow">
+                <span class="det-mk">MD5</span>
+                <span class="det-mv"><code title="Click to copy" style="font-size:0.58rem;">{{ image.file_hash }}</code></span>
+            </div>
+            {% endif %}
+            <div class="det-mrow">
+                <span class="det-mk">Downloaded</span>
+                <span class="det-mv" style="font-size:0.66rem;color:var(--text-dim);">
+                    {{ image.download_date }} {{ image.download_time }}
+                </span>
+            </div>
+            <div class="det-mrow">
+                <span class="det-mk">Status</span>
+                <span class="det-mv">
+                    <span class="status-badge {% if image.is_deleted %}del{% else %}ok{% endif %}">
+                        <i class="fas fa-{% if image.is_deleted %}trash-alt{% else %}check-circle{% endif %}" style="font-size:0.56rem;"></i>
+                        {% if image.is_deleted %}Deleted{% else %}Active{% endif %}
+                    </span>
+                </span>
+            </div>
+            {% if image.file_path %}
+            <div class="det-mrow">
+                <span class="det-mk">Path</span>
+                <span class="det-mv"><code title="Click to copy" style="font-size:0.57rem;">{{ image.file_path }}</code></span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Comments -->
+        <div class="det-comments-wrap">
+            <div class="det-comments-hdr">
+                <span><i class="fas fa-comments me-2" style="font-size:0.55rem;"></i>Comments</span>
+                <span id="cmtCount">—</span>
+            </div>
+            <div class="det-comments-list" id="commentsList">
+                <div class="cmt-empty">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    Loading…
                 </div>
             </div>
         </div>
-        
-        <div class="card mt-3">
-            <div class="card-header">
-                <h6><i class="fas fa-link"></i> Quick Links</h6>
-            </div>
-            <div class="card-body">
-                <div class="d-grid gap-2">
-                    {% if image.subreddit %}
-                    <a href="/?subreddit={{ image.subreddit }}" class="btn btn-outline-primary btn-sm">
-                        <i class="fas fa-filter"></i> More from r/{{ image.subreddit }}
-                    </a>
-                    {% endif %}
-                    {% if image.author %}
-                    <a href="/?user={{ image.author }}" class="btn btn-outline-info btn-sm">
-                        <i class="fas fa-user"></i> More from u/{{ image.author }}
-                    </a>
-                    {% endif %}
-                    {% if image.permalink %}
-                    <a href="https://reddit.com{{ image.permalink }}" target="_blank" class="btn btn-outline-danger btn-sm">
-                        <i class="fab fa-reddit"></i> Original Reddit Post
-                    </a>
-                    {% endif %}
-                    <a href="/" class="btn btn-outline-secondary btn-sm">
-                        <i class="fas fa-home"></i> Gallery Home
-                    </a>
-                </div>
-            </div>
-        </div>
     </div>
-</div>
-
-<!-- Post Metadata -->
-<div class="row mt-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex align-items-center gap-2">
-                <i class="fas fa-info-circle" style="color:var(--text-dim);font-size:0.75rem;"></i>
-                <span style="font-size:0.65rem;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:0.1em;color:var(--text-dim);">Post Metadata</span>
-            </div>
-            <div class="card-body p-0">
-                <table class="table table-dark table-sm mb-0" style="font-size:0.72rem;">
-                    <tbody>
-                        {% if image.reddit_id %}
-                        <tr>
-                            <td class="meta-label">Reddit ID</td>
-                            <td><code style="font-size:0.68rem;">{{ image.reddit_id }}</code></td>
-                        </tr>
-                        {% endif %}
-                        {% if image.score is not none %}
-                        <tr>
-                            <td class="meta-label">Score</td>
-                            <td><span class="badge" style="background:var(--surface-3);color:var(--accent);border:1px solid var(--border-2);">▲ {{ image.score }}</span></td>
-                        </tr>
-                        {% endif %}
-                        {% if image.created_utc %}
-                        <tr>
-                            <td class="meta-label">Posted</td>
-                            <td style="color:var(--text);">{{ image.created_utc | format_datetime }}</td>
-                        </tr>
-                        {% endif %}
-                        {% if image.flair %}
-                        <tr>
-                            <td class="meta-label">Flair</td>
-                            <td><span class="badge bg-info text-dark">{{ image.flair }}</span></td>
-                        </tr>
-                        {% endif %}
-                        {% if image.post_username %}
-                        <tr>
-                            <td class="meta-label">Username</td>
-                            <td style="color:var(--text);">{{ image.post_username }}</td>
-                        </tr>
-                        {% endif %}
-                        <tr>
-                            <td class="meta-label">Post ID</td>
-                            <td><code style="font-size:0.68rem;">{{ image.post_id }}</code></td>
-                        </tr>
-                        <tr>
-                            <td class="meta-label">Image ID</td>
-                            <td><code style="font-size:0.68rem;">{{ image.id }}</code></td>
-                        </tr>
-                        {% if image.file_hash %}
-                        <tr>
-                            <td class="meta-label">MD5</td>
-                            <td><code style="font-size:0.65rem;word-break:break-all;">{{ image.file_hash }}</code></td>
-                        </tr>
-                        {% endif %}
-                        {% if image.file_size %}
-                        <tr>
-                            <td class="meta-label">File Size</td>
-                            <td style="color:var(--text);">{{ "%.1f"|format(image.file_size/1024/1024) }} MB</td>
-                        </tr>
-                        {% endif %}
-                        <tr>
-                            <td class="meta-label">Downloaded</td>
-                            <td style="color:var(--text);">{{ image.download_date }} {{ image.download_time }}</td>
-                        </tr>
-                        {% if image.file_path %}
-                        <tr>
-                            <td class="meta-label">File Path</td>
-                            <td><code style="font-size:0.65rem;word-break:break-all;">{{ image.file_path }}</code></td>
-                        </tr>
-                        {% endif %}
-                        <tr>
-                            <td class="meta-label">Status</td>
-                            <td><span class="badge bg-{% if image.is_deleted %}danger{% else %}success{% endif %}">{% if image.is_deleted %}Deleted{% else %}Active{% endif %}</span></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-<style>
-.meta-label {
-    width: 110px;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 0.4rem 0.75rem;
-    white-space: nowrap;
-    vertical-align: middle;
-}
-</style>
+</div><!-- /.det-layout -->
 
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <script>
 marked.setOptions({ breaks: true, gfm: true });
-function renderMd(text) {
-    if (!text) return '';
-    return marked.parse(String(text));
+
+/* ── IMAGE VIEWER STATE ─────────────────────── */
+const TOTAL = {{ image_count }};
+let curIdx = 0;
+
+function showSlide(idx) {
+    if (idx < 0 || idx >= TOTAL) return;
+    document.querySelectorAll('.det-slot').forEach((s, i) => {
+        s.classList.toggle('active', i === idx);
+        // Pause videos on hidden slides
+        const vid = s.querySelector('video');
+        if (vid && i !== idx) vid.pause();
+    });
+    document.querySelectorAll('.det-film-item').forEach((t, i) => {
+        t.classList.toggle('active', i === idx);
+    });
+    const counter = document.getElementById('detCounter');
+    if (counter) counter.textContent = (idx + 1) + ' / ' + TOTAL;
+    curIdx = idx;
+
+    // Scroll filmstrip thumb into view
+    const thumb = document.querySelector(`.det-film-item[data-index="${idx}"]`);
+    if (thumb) thumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 }
 
-// Render any pre-rendered Jinja comment bodies
-document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.comment-md[data-md]').forEach(function(el) {
-        el.innerHTML = renderMd(el.getAttribute('data-md'));
-    });
+/* ── FILMSTRIP CLICKS ───────────────────────── */
+document.querySelectorAll('.det-film-item').forEach(item => {
+    item.addEventListener('click', () => showSlide(parseInt(item.dataset.index)));
 });
 
-// Auto-copy filename on click
-document.querySelectorAll('code').forEach(code => {
-    code.addEventListener('click', function() {
-        const text = this.textContent;
-        navigator.clipboard.writeText(text).then(() => {
-            // Show a small toast notification
-            const toast = document.createElement('div');
-            toast.className = 'position-fixed top-0 end-0 p-3';
-            toast.innerHTML = '<div class="toast show" role="alert"><div class="toast-body">Copied to clipboard!</div></div>';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2000);
-        });
-    });
-    
-    code.style.cursor = 'pointer';
-    code.title = 'Click to copy';
-});
+/* ── VIEWER ARROWS ──────────────────────────── */
+const prevBtn = document.getElementById('detArrPrev');
+const nextBtn = document.getElementById('detArrNext');
+if (prevBtn) prevBtn.addEventListener('click', () => showSlide(curIdx - 1));
+if (nextBtn) nextBtn.addEventListener('click', () => showSlide(curIdx + 1));
 
-// AJAX for comment submission
-const _commentForm = document.getElementById('commentForm');
-if (_commentForm) _commentForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    var commentText = document.getElementById('commentText').value.trim();
-    var statusDiv = document.getElementById('commentStatus');
-    if (!commentText) {
-        statusDiv.style.display = 'block';
-        statusDiv.className = 'alert alert-warning';
-        statusDiv.textContent = 'Comment cannot be empty.';
-        return;
-    }
-    statusDiv.style.display = 'none';
-    fetch('/api/post_comment', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            post_id: {{ image.post_id }},
-            comment: commentText
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            var commentsList = document.getElementById('commentsList');
-            if (commentsList) {
-                const newComment = Object.assign({replies: []}, data.comment);
-                commentsList.prepend(renderComment(newComment, 0));
-            }
-            statusDiv.style.display = 'block';
-            statusDiv.className = 'alert alert-success';
-            statusDiv.textContent = 'Comment posted successfully!';
-            document.getElementById('commentText').value = '';
-        } else {
-            statusDiv.style.display = 'block';
-            statusDiv.className = 'alert alert-danger';
-            statusDiv.textContent = data.error || 'Failed to post comment.';
+/* ── LIGHTBOX ────────────────────────────────── */
+const lightbox  = document.getElementById('detLightbox');
+const lbImg     = document.getElementById('detLightboxImg');
+const lbClose   = document.getElementById('detLightboxClose');
+
+function openLightbox(src) {
+    if (!src) return;
+    lbImg.src = src;
+    lightbox.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closeLightbox() {
+    lightbox.classList.remove('open');
+    document.body.style.overflow = '';
+    setTimeout(() => { lbImg.src = ''; }, 300);
+}
+
+document.querySelectorAll('.det-main-img').forEach(img => {
+    img.addEventListener('click', () => openLightbox(img.src));
+});
+lbClose.addEventListener('click', closeLightbox);
+lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox(); });
+
+/* ── KEYBOARD NAVIGATION ─────────────────────── */
+document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    switch(e.key) {
+        case 'ArrowLeft':
+            {% if image.prev_post_id %}
+            window.location.href = '/details/{{ image.prev_post_id }}';
+            {% endif %}
+            break;
+        case 'ArrowRight':
+            {% if image.next_post_id %}
+            window.location.href = '/details/{{ image.next_post_id }}';
+            {% endif %}
+            break;
+        case 'a': case 'A': showSlide(curIdx - 1); break;
+        case 'd': case 'D': showSlide(curIdx + 1); break;
+        case 'f': case 'F': {
+            const activeImg = document.querySelector('.det-slot.active .det-main-img');
+            if (activeImg) openLightbox(activeImg.src);
+            break;
         }
-    })
-    .catch(() => {
-        statusDiv.style.display = 'block';
-        statusDiv.className = 'alert alert-danger';
-        statusDiv.textContent = 'Network error.';
-    });
-}); // end if (_commentForm)
-
-// Update URL when carousel changes on details page
-document.addEventListener('DOMContentLoaded', function() {
-    const carousel = document.getElementById('carousel-details');
-    if (carousel) {
-        // Carousel navigation within post - no URL change needed since we're on post page
+        case 'Escape': closeLightbox(); break;
     }
 });
 
-// Reddit-like nested comment renderer
-const DEPTH_COLORS = ['#ff4500', '#ff8717', '#46d160', '#24a0ed', '#9494ff', '#ff585b'];
+/* ── META TOGGLE ─────────────────────────────── */
+function toggleMeta() {
+    const toggle = document.getElementById('metaToggle');
+    const rows   = document.getElementById('metaRows');
+    const open   = rows.classList.toggle('open');
+    toggle.classList.toggle('open', open);
+}
 
-function renderComment(comment, depth) {
+/* ── COPY ON CLICK ───────────────────────────── */
+document.querySelectorAll('.det-mv code').forEach(el => {
+    el.addEventListener('click', () => {
+        navigator.clipboard.writeText(el.textContent.trim()).then(() => toast('Copied!'));
+    });
+});
+
+/* ── TOAST ───────────────────────────────────── */
+function toast(msg) {
+    const el = document.createElement('div');
+    el.className = 'det-toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2000);
+}
+
+/* ── COMMENTS ────────────────────────────────── */
+const DEPTH_COLORS = ['#ff4500','#ff8717','#46d160','#24a0ed','#9494ff','#ff585b'];
+
+function renderComment(c, depth) {
     depth = depth || 0;
     const thread = document.createElement('div');
-    thread.className = 'comment-thread';
-    thread.dataset.depth = depth;
+    thread.className = 'cmt-thread';
 
     const bar = document.createElement('div');
-    bar.className = 'comment-collapse-bar';
+    bar.className = 'cmt-bar';
     bar.style.background = DEPTH_COLORS[depth % DEPTH_COLORS.length];
-    bar.title = 'Click to collapse';
-    bar.addEventListener('click', function() {
-        thread.classList.toggle('collapsed');
-    });
+    bar.title = 'Collapse';
+    bar.addEventListener('click', () => thread.classList.toggle('collapsed'));
 
-    const content = document.createElement('div');
-    content.className = 'comment-content';
+    const body = document.createElement('div');
+    body.className = 'cmt-body';
 
     const item = document.createElement('div');
-    item.className = 'comment-item';
-    const isDeleted = (comment.author || '').includes('(deleted)');
-    const score = comment.score || 0;
-    const scoreClass = score > 0 ? 'positive' : (score < 0 ? 'negative' : '');
-    const timeStr = comment.created_utc ? new Date(comment.created_utc * 1000).toLocaleString() : '';
-    item.innerHTML = `<span class="comment-author${isDeleted ? ' deleted' : ''}">${comment.author || 'Unknown'}</span>` +
-        `<span class="comment-score${scoreClass ? ' ' + scoreClass : ''}">▲ ${score}</span>` +
-        `<div class="comment-meta">${timeStr}</div>` +
-        `<div class="comment-body comment-md">${renderMd(comment.body || '')}</div>`;
-    content.appendChild(item);
+    item.className = 'cmt-item';
+    const isDel = (c.author || '').includes('(deleted)');
+    const score = c.score || 0;
+    const scoreClass = score > 0 ? 'pos' : (score < 0 ? 'neg' : '');
+    const timeStr = c.created_utc ? new Date(c.created_utc * 1000).toLocaleDateString(undefined, {year:'2-digit',month:'short',day:'numeric'}) : '';
 
-    if (comment.replies && comment.replies.length > 0) {
-        const repliesDiv = document.createElement('div');
-        repliesDiv.className = 'comment-replies';
-        comment.replies.forEach(function(reply) {
-            repliesDiv.appendChild(renderComment(reply, depth + 1));
-        });
-        content.appendChild(repliesDiv);
+    item.innerHTML =
+        `<div class="cmt-hdr">` +
+        `<span class="cmt-author${isDel?' del':''}">${c.author||'[deleted]'}</span>` +
+        `<span class="cmt-score${scoreClass?' '+scoreClass:''}">▲ ${score}</span>` +
+        `<span class="cmt-time">${timeStr}</span>` +
+        `</div>` +
+        `<div class="cmt-text">${marked.parse(String(c.body||''))}</div>`;
+    body.appendChild(item);
+
+    if (c.replies && c.replies.length > 0) {
+        const rep = document.createElement('div');
+        rep.className = 'cmt-replies';
+        c.replies.forEach(r => rep.appendChild(renderComment(r, depth + 1)));
+        body.appendChild(rep);
     }
 
     thread.appendChild(bar);
-    thread.appendChild(content);
+    thread.appendChild(body);
     return thread;
 }
 
-// Auto-fetch and update comments on page load
-window.addEventListener('DOMContentLoaded', function() {
-    var postId = {{ image.post_id }};
-    var commentsList = document.getElementById('commentsList');
-    var commentsCardBody = commentsList ? commentsList.parentElement : null;
-    fetch('/api/comments/' + postId)
-        .then(response => response.json())
+window.addEventListener('DOMContentLoaded', () => {
+    const list = document.getElementById('commentsList');
+    const cntEl = document.getElementById('cmtCount');
+
+    fetch('/api/comments/{{ image.post_id }}')
+        .then(r => r.json())
         .then(data => {
-            if (data.success && commentsList && commentsCardBody) {
-                if (data.comments.length > 0) {
-                    commentsList.innerHTML = '';
-                    data.comments.forEach(function(comment) {
-                        commentsList.appendChild(renderComment(comment, 0));
-                    });
-                } else {
-                    commentsList.innerHTML = '<div class="text-muted ps-1">No comments found.</div>';
-                }
+            list.innerHTML = '';
+            if (data.success && data.comments && data.comments.length > 0) {
+                if (cntEl) cntEl.textContent = data.comments.length;
+                data.comments.forEach(c => list.appendChild(renderComment(c, 0)));
+            } else {
+                if (cntEl) cntEl.textContent = '0';
+                list.innerHTML = '<div class="cmt-empty"><i class="fas fa-comment-slash"></i>No comments</div>';
             }
+        })
+        .catch(() => {
+            list.innerHTML = '<div class="cmt-empty"><i class="fas fa-exclamation-triangle"></i>Could not load</div>';
         });
 });
 
-// Delete post function
+/* ── ACTIONS ─────────────────────────────────── */
 function deletePost(postId) {
-    if (!confirm('Are you sure you want to delete this post? This will:\n- Delete the post from the database\n- If the image is not linked to other posts, it will be deleted and moved to /deleted folder\n\nThis action cannot be undone!')) {
-        return;
-    }
-    
+    if (!confirm('Delete this post? Files will be moved to /deleted.')) return;
     fetch(`/api/delete-post/${postId}`, {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        }
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }
     })
-    .then(response => response.json())
+    .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            alert('Post deleted successfully!');
-            window.location.href = '/';
-        } else {
-            alert('Error: ' + (data.error || 'Failed to delete post'));
-        }
+        if (data.success) { toast('Post deleted'); setTimeout(() => window.location.href = '/', 1200); }
+        else toast('Error: ' + (data.error || 'failed'));
     })
-    .catch(error => {
-        alert('Error: ' + error);
-    });
+    .catch(() => toast('Network error'));
+}
+
+function blockUser(username) {
+    fetch(`/api/block-user/${encodeURIComponent(username)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_posts: false })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { toast(`u/${username} blocked`); setTimeout(() => window.location.href = '/', 1200); }
+        else toast('Error: ' + (data.error || 'failed'));
+    })
+    .catch(() => toast('Network error'));
+}
+
+function blockAndDelete(username) {
+    fetch(`/api/block-user/${encodeURIComponent(username)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_posts: true })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { toast(`u/${username} blocked & ${data.deleted_count||0} posts deleted`); setTimeout(() => window.location.href = '/', 1400); }
+        else toast('Error: ' + (data.error || 'failed'));
+    })
+    .catch(() => toast('Network error'));
 }
 </script>
-
 {% endblock %}
