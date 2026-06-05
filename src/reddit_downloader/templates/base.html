@@ -74,32 +74,40 @@
             position: sticky;
             top: 0;
             z-index: 1000;
-            background: rgba(5,5,5,0.92);
-            backdrop-filter: blur(12px);
+            background: rgba(4,4,4,0.96);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: stretch;
             height: 50px;
-            padding: 0 1.5rem;
+            padding: 0 1.25rem;
         }
 
         .nav-brand {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding-right: 1.5rem;
+            gap: 9px;
+            padding-right: 1.25rem;
             border-right: 1px solid var(--border);
             text-decoration: none;
             flex-shrink: 0;
+            transition: opacity 0.15s;
         }
+        .nav-brand:hover { opacity: 0.75; text-decoration: none; }
 
-        .nav-brand-icon { color: var(--accent); font-size: 1.3rem; line-height: 1; }
+        .nav-brand-icon {
+            color: var(--accent);
+            font-size: 1.2rem;
+            line-height: 1;
+            filter: drop-shadow(0 0 5px rgba(255,69,0,0.35));
+        }
 
         .nav-brand-text {
             font-family: var(--font-head);
             font-weight: 800;
-            font-size: 1rem;
-            letter-spacing: 0.12em;
+            font-size: 0.95rem;
+            letter-spacing: 0.14em;
             text-transform: uppercase;
             color: #f0f0f0;
         }
@@ -116,40 +124,61 @@
         .nav-item-link {
             display: flex;
             align-items: center;
-            padding: 0 1.1rem;
+            padding: 0 0.9rem;
             color: var(--text-dim);
             text-decoration: none;
-            font-size: 0.68rem;
-            letter-spacing: 0.1em;
+            font-size: 0.66rem;
+            letter-spacing: 0.09em;
             text-transform: uppercase;
             border-right: 1px solid var(--border);
             transition: color 0.15s, background 0.15s;
-            gap: 7px;
+            gap: 6px;
             white-space: nowrap;
+            position: relative;
         }
-        .nav-item-link:hover { color: var(--text); background: var(--surface); }
-        .nav-item-link i { font-size: 0.8rem; }
-        .nav-item-link.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+        .nav-item-link:hover { color: var(--text); background: rgba(255,255,255,0.03); text-decoration: none; }
+        .nav-item-link i { font-size: 0.72rem; }
+        .nav-item-link.active {
+            color: var(--accent) !important;
+            background: rgba(255,69,0,0.05);
+        }
+        .nav-item-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 2px;
+            background: var(--accent);
+            border-radius: 1px 1px 0 0;
+        }
+
+        /* Visual group separator in desktop nav */
+        .nav-group-sep {
+            width: 1px;
+            background: var(--border-2);
+            margin: 13px 4px;
+            flex-shrink: 0;
+            align-self: stretch;
+        }
 
         .nav-counter {
             display: flex;
             align-items: center;
             margin-left: auto;
-            padding: 0 1.1rem;
+            padding: 0 1rem;
             border-left: 1px solid var(--border);
-            gap: 8px;
-            font-size: 0.7rem;
+            gap: 6px;
+            font-size: 0.65rem;
             color: var(--text-muted);
             flex-shrink: 0;
         }
         .nav-counter strong {
             font-family: var(--font-head);
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: 700;
             color: var(--accent);
         }
 
-        /* ── HAMBURGER (mobile only) ─────────────────── */
+        /* ── HAMBURGER ───────────────────────────────── */
         .nav-hamburger {
             display: none;
             align-items: center;
@@ -157,43 +186,95 @@
             margin-left: auto;
             width: 40px; height: 40px;
             background: none; border: none;
-            color: var(--text-dim); font-size: 1.1rem;
+            color: var(--text-dim); font-size: 0.95rem;
             cursor: pointer; flex-shrink: 0;
             transition: color 0.15s;
         }
         .nav-hamburger:hover { color: var(--text); }
 
+        /* ── BACKDROP ────────────────────────────────── */
+        .nav-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 998;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(2px);
+            -webkit-backdrop-filter: blur(2px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.22s ease;
+        }
+        .nav-backdrop.open { opacity: 1; pointer-events: all; }
+
         /* ── MOBILE DRAWER ───────────────────────────── */
         .nav-drawer {
-            display: none;
+            display: flex;
+            flex-direction: column;
             position: fixed;
             top: 50px; left: 0; right: 0;
             z-index: 999;
-            background: rgba(8,8,8,0.98);
-            backdrop-filter: blur(16px);
-            border-bottom: 1px solid var(--border);
-            flex-direction: column;
-            padding: 8px 0 16px;
+            background: rgba(7,7,7,0.99);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-2);
+            padding: 0 0 16px;
             max-height: calc(100vh - 50px);
             overflow-y: auto;
+            /* Slide animation */
+            visibility: hidden;
+            opacity: 0;
+            transform: translateY(-8px);
+            pointer-events: none;
+            transition: opacity 0.22s ease, transform 0.22s ease, visibility 0s 0.22s;
         }
-        .nav-drawer.open { display: flex; }
+        .nav-drawer.open {
+            visibility: visible;
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: all;
+            transition: opacity 0.22s ease, transform 0.22s ease, visibility 0s 0s;
+        }
+
+        .nav-drawer-section-label {
+            font-size: 0.56rem;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            color: var(--text-muted);
+            padding: 14px 18px 5px;
+            font-family: var(--font-head);
+        }
 
         .nav-drawer .nav-item-link {
-            padding: 12px 20px;
+            padding: 10px 18px;
             border-right: none;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.78rem;
-            letter-spacing: 0.08em;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            font-size: 0.74rem;
+            letter-spacing: 0.07em;
+            border-left: 2px solid transparent;
         }
-        .nav-drawer .nav-item-link:last-child { border-bottom: none; }
-        .nav-drawer .nav-item-link i { width: 18px; text-align: center; }
+        .nav-drawer .nav-item-link i { width: 17px; text-align: center; }
+        .nav-drawer .nav-item-link.active::after { display: none; }
+        .nav-drawer .nav-item-link.active {
+            border-left: 2px solid var(--accent);
+            padding-left: 16px;
+            background: rgba(255,69,0,0.06);
+        }
+
+        .nav-drawer-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 6px 0;
+        }
 
         .nav-drawer-counter {
-            padding: 10px 20px 4px;
-            font-size: 0.65rem; color: var(--text-muted);
+            padding: 12px 18px 4px;
+            font-size: 0.63rem;
+            color: var(--text-muted);
             border-top: 1px solid var(--border);
-            margin-top: 4px;
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         .nav-drawer-counter strong { color: var(--accent); font-family: var(--font-head); font-size: 0.9rem; }
 
@@ -202,7 +283,7 @@
             .nav-links { display: none; }
             .nav-counter { display: none; }
             .nav-hamburger { display: flex; }
-            .page-wrap { padding: 1rem 0.75rem; }
+            .page-wrap { padding: 0.75rem 0.6rem; }
         }
 
         /* ── PAGE WRAPPER ───────────────────────────── */
@@ -492,48 +573,28 @@
         <span class="nav-brand-text">Vault</span>
     </a>
     <div class="nav-links">
-        <a class="nav-item-link" href="/activity">
-            <i class="fas fa-chart-bar"></i> Activity
-        </a>
-        <a class="nav-item-link" href="/scrape-lists">
-            <i class="fas fa-list-ul"></i> Scrape Lists
-        </a>
-        <a class="nav-item-link" href="/socials">
-            <i class="fas fa-id-card"></i> Socials
-        </a>
-        <a class="nav-item-link" href="/subreddit-map">
-            <i class="fas fa-project-diagram"></i> Sub Map
-        </a>
-        <a class="nav-item-link" href="/duplicates">
-            <i class="fas fa-copy"></i> Duplicates
-        </a>
-        <a class="nav-item-link" href="/compress">
-            <i class="fas fa-compress-alt"></i> Compress
-        </a>
-        <a class="nav-item-link" href="/cleanup">
-            <i class="fas fa-broom"></i> Cleanup
-        </a>
-        <a class="nav-item-link" href="/blocked-users">
-            <i class="fas fa-user-slash"></i> Blocked
-        </a>
-        <a class="nav-item-link" href="/deleted">
-            <i class="fas fa-trash-alt"></i> Deleted
-        </a>
-        <a class="nav-item-link" href="/flairs">
-            <i class="fas fa-tags"></i> Flairs
-        </a>
-        <a class="nav-item-link" href="/files">
-            <i class="fas fa-folder-open"></i> Files
-        </a>
-        <a class="nav-item-link" href="/favourites">
-            <i class="fas fa-heart"></i> Favourites
-        </a>
-        <a class="nav-item-link" href="/reddit-deleted">
-            <i class="fas fa-ghost"></i> Reddit Deleted
-        </a>
-        <a class="nav-item-link" href="/update-posts">
-            <i class="fas fa-sync-alt"></i> Sync Posts
-        </a>
+        <!-- Discover -->
+        <a class="nav-item-link" href="/"><i class="fas fa-images"></i> Gallery</a>
+        <a class="nav-item-link" href="/activity"><i class="fas fa-chart-bar"></i> Activity</a>
+        <a class="nav-item-link" href="/favourites"><i class="fas fa-heart"></i> Favourites</a>
+        <div class="nav-group-sep"></div>
+        <!-- Library -->
+        <a class="nav-item-link" href="/scrape-lists"><i class="fas fa-list-ul"></i> Scrape Lists</a>
+        <a class="nav-item-link" href="/socials"><i class="fas fa-id-card"></i> Socials</a>
+        <a class="nav-item-link" href="/flairs"><i class="fas fa-tags"></i> Flairs</a>
+        <a class="nav-item-link" href="/files"><i class="fas fa-folder-open"></i> Files</a>
+        <a class="nav-item-link" href="/subreddit-map"><i class="fas fa-project-diagram"></i> Sub Map</a>
+        <div class="nav-group-sep"></div>
+        <!-- Tools -->
+        <a class="nav-item-link" href="/duplicates"><i class="fas fa-copy"></i> Duplicates</a>
+        <a class="nav-item-link" href="/compress"><i class="fas fa-compress-alt"></i> Compress</a>
+        <a class="nav-item-link" href="/cleanup"><i class="fas fa-broom"></i> Cleanup</a>
+        <a class="nav-item-link" href="/update-posts"><i class="fas fa-sync-alt"></i> Sync Posts</a>
+        <div class="nav-group-sep"></div>
+        <!-- Moderation -->
+        <a class="nav-item-link" href="/blocked-users"><i class="fas fa-user-slash"></i> Blocked</a>
+        <a class="nav-item-link" href="/deleted"><i class="fas fa-trash-alt"></i> Deleted</a>
+        <a class="nav-item-link" href="/reddit-deleted"><i class="fas fa-ghost"></i> Reddit Del</a>
     </div>
     <div class="nav-counter">
         <strong id="image-count">{{ stats.total_images if stats is defined else 0 }}</strong>
@@ -544,23 +605,33 @@
     </button>
 </nav>
 
+<div class="nav-backdrop" id="navBackdrop"></div>
+
 <div class="nav-drawer" id="navDrawer">
+    <div class="nav-drawer-section-label">Discover</div>
+    <a class="nav-item-link" href="/"><i class="fas fa-images"></i> Gallery</a>
     <a class="nav-item-link" href="/activity"><i class="fas fa-chart-bar"></i> Activity</a>
+    <a class="nav-item-link" href="/favourites"><i class="fas fa-heart"></i> Favourites</a>
+    <div class="nav-drawer-divider"></div>
+    <div class="nav-drawer-section-label">Library</div>
     <a class="nav-item-link" href="/scrape-lists"><i class="fas fa-list-ul"></i> Scrape Lists</a>
     <a class="nav-item-link" href="/socials"><i class="fas fa-id-card"></i> Socials</a>
+    <a class="nav-item-link" href="/flairs"><i class="fas fa-tags"></i> Flairs</a>
+    <a class="nav-item-link" href="/files"><i class="fas fa-folder-open"></i> Files</a>
     <a class="nav-item-link" href="/subreddit-map"><i class="fas fa-project-diagram"></i> Sub Map</a>
+    <div class="nav-drawer-divider"></div>
+    <div class="nav-drawer-section-label">Tools</div>
     <a class="nav-item-link" href="/duplicates"><i class="fas fa-copy"></i> Duplicates</a>
     <a class="nav-item-link" href="/compress"><i class="fas fa-compress-alt"></i> Compress</a>
     <a class="nav-item-link" href="/cleanup"><i class="fas fa-broom"></i> Cleanup</a>
-    <a class="nav-item-link" href="/blocked-users"><i class="fas fa-user-slash"></i> Blocked</a>
-    <a class="nav-item-link" href="/deleted"><i class="fas fa-trash-alt"></i> Deleted</a>
-    <a class="nav-item-link" href="/flairs"><i class="fas fa-tags"></i> Flairs</a>
-    <a class="nav-item-link" href="/files"><i class="fas fa-folder-open"></i> Files</a>
-    <a class="nav-item-link" href="/favourites"><i class="fas fa-heart"></i> Favourites</a>
-    <a class="nav-item-link" href="/reddit-deleted"><i class="fas fa-ghost"></i> Reddit Deleted</a>
     <a class="nav-item-link" href="/update-posts"><i class="fas fa-sync-alt"></i> Sync Posts</a>
+    <div class="nav-drawer-divider"></div>
+    <div class="nav-drawer-section-label">Moderation</div>
+    <a class="nav-item-link" href="/blocked-users"><i class="fas fa-user-slash"></i> Blocked Users</a>
+    <a class="nav-item-link" href="/deleted"><i class="fas fa-trash-alt"></i> Deleted</a>
+    <a class="nav-item-link" href="/reddit-deleted"><i class="fas fa-ghost"></i> Reddit Deleted</a>
     <div class="nav-drawer-counter">
-        <strong id="image-count-drawer">—</strong> images
+        <strong id="image-count-drawer">—</strong> images in vault
     </div>
 </div>
 
@@ -570,51 +641,96 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+/* ── SERVICE WORKER ────────────────────────── */
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    });
+}
+
+/* ── UTILS ─────────────────────────────────── */
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
+/* ── NAV ACTIVE STATE ──────────────────────── */
+function setNavActive() {
+    const path = window.location.pathname;
+    document.querySelectorAll('.nav-item-link[href]').forEach(link => {
+        const href = link.getAttribute('href');
+        if (!href) return;
+        const active = href === path || (href !== '/' && path.startsWith(href));
+        link.classList.toggle('active', active);
+    });
+}
+
+/* ── DRAWER OPEN / CLOSE ───────────────────── */
+function openDrawer() {
+    const drawer = document.getElementById('navDrawer');
+    const backdrop = document.getElementById('navBackdrop');
+    const icon = document.querySelector('#navHamburger i');
+    drawer && drawer.classList.add('open');
+    backdrop && backdrop.classList.add('open');
+    if (icon) icon.className = 'fas fa-times';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeDrawer() {
+    const drawer = document.getElementById('navDrawer');
+    const backdrop = document.getElementById('navBackdrop');
+    const icon = document.querySelector('#navHamburger i');
+    drawer && drawer.classList.remove('open');
+    backdrop && backdrop.classList.remove('open');
+    if (icon) icon.className = 'fas fa-bars';
+    document.body.style.overflow = '';
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    /* Nav counter */
     const imageCount = document.getElementById('image-count');
     const imageCountDrawer = document.getElementById('image-count-drawer');
-    if (imageCount) {
-        fetch('/api/stats')
-            .then(r => r.json())
-            .then(data => {
-                const val = (data.total_images || 0).toLocaleString();
-                if (imageCount) imageCount.textContent = val;
-                if (imageCountDrawer) imageCountDrawer.textContent = val;
-            })
-            .catch(() => {});
-    }
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            const val = (data.total_images || 0).toLocaleString();
+            if (imageCount) imageCount.textContent = val;
+            if (imageCountDrawer) imageCountDrawer.textContent = val;
+        })
+        .catch(() => {});
 
+    /* Active state */
+    setNavActive();
+
+    /* Hamburger */
     const hamburger = document.getElementById('navHamburger');
+    const backdrop = document.getElementById('navBackdrop');
     const drawer = document.getElementById('navDrawer');
-    if (hamburger && drawer) {
+
+    if (hamburger) {
         hamburger.addEventListener('click', function(e) {
             e.stopPropagation();
-            const open = drawer.classList.toggle('open');
-            hamburger.querySelector('i').className = open ? 'fas fa-times' : 'fas fa-bars';
-        });
-        drawer.querySelectorAll('.nav-item-link').forEach(link => {
-            link.addEventListener('click', () => {
-                drawer.classList.remove('open');
-                hamburger.querySelector('i').className = 'fas fa-bars';
-            });
-        });
-        document.addEventListener('click', function(e) {
-            if (drawer.classList.contains('open') && !drawer.contains(e.target) && e.target !== hamburger) {
-                drawer.classList.remove('open');
-                hamburger.querySelector('i').className = 'fas fa-bars';
-            }
+            drawer && drawer.classList.contains('open') ? closeDrawer() : openDrawer();
         });
     }
+    if (backdrop) {
+        backdrop.addEventListener('click', closeDrawer);
+    }
+    if (drawer) {
+        drawer.querySelectorAll('.nav-item-link').forEach(link => {
+            link.addEventListener('click', closeDrawer);
+        });
+    }
+
+    /* Escape key closes drawer */
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeDrawer();
+    });
 });
 
+/* ── LAZY IMAGE LOADING ────────────────────── */
 if ('IntersectionObserver' in window) {
     const imageObserver = new IntersectionObserver((entries, observer) => {
         entries.forEach(entry => {
@@ -622,16 +738,24 @@ if ('IntersectionObserver' in window) {
                 const img = entry.target;
                 if (img.dataset.src) {
                     img.src = img.dataset.src;
-                    img.classList.add('loaded');
+                    img.onload = () => img.classList.add('loaded');
+                    img.onerror = () => img.classList.add('loaded');
                     img.removeAttribute('data-src');
                 }
                 observer.unobserve(img);
             }
         });
-    }, { rootMargin: '100px' });
+    }, { rootMargin: '150px' });
 
     document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('img[data-src]').forEach(img => imageObserver.observe(img));
+    });
+} else {
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('img[data-src]').forEach(img => {
+            img.src = img.dataset.src;
+            img.classList.add('loaded');
+        });
     });
 }
 </script>

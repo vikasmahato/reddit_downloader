@@ -14,26 +14,29 @@
     border-radius: var(--r);
     margin-bottom: 0.6rem;
     overflow: hidden;
+    overflow-x: auto;
+    scrollbar-width: none;
 }
+.vault-stats::-webkit-scrollbar { display: none; }
 
 .vault-stat {
     display: flex;
     flex-direction: column;
-    padding: 0.55rem 1.25rem;
+    padding: 0.5rem 1.1rem;
     border-right: 1px solid var(--border);
     flex-shrink: 0;
 }
 
 .vault-stat-num {
     font-family: var(--font-head);
-    font-size: 1.4rem;
+    font-size: 1.3rem;
     font-weight: 800;
     color: #f0f0f0;
     line-height: 1;
 }
 
 .vault-stat-label {
-    font-size: 0.58rem;
+    font-size: 0.56rem;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--text-muted);
@@ -42,12 +45,16 @@
 
 .vault-sub-pills {
     display: flex;
-    gap: 6px;
-    padding: 0 1rem;
-    flex-wrap: wrap;
+    gap: 5px;
+    padding: 0 0.85rem;
+    flex-wrap: nowrap;
     align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
     flex: 1;
+    min-width: 0;
 }
+.vault-sub-pills::-webkit-scrollbar { display: none; }
 
 .sub-pill {
     display: inline-flex;
@@ -70,13 +77,19 @@
 .filter-strip {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.4rem;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r);
-    padding: 0.45rem 0.75rem;
-    margin-bottom: 0.75rem;
+    padding: 0.4rem 0.65rem;
+    margin-bottom: 0.65rem;
     flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+    .filter-strip { gap: 0.35rem; padding: 0.4rem 0.5rem; }
+    .filter-sep { display: none; }
+    .filter-label { display: none; }
+    .filter-strip .form-select { min-width: 100px !important; font-size: 0.7rem !important; }
 }
 
 .filter-label {
@@ -137,8 +150,20 @@
 /* ── GRID (row-first, left→right) ───────────── */
 .masonry-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(clamp(140px, 18vw, 220px), 1fr));
+    gap: 5px;
+}
+@media (max-width: 480px) {
+    .masonry-grid { grid-template-columns: repeat(2, 1fr); gap: 4px; }
+}
+@media (min-width: 481px) and (max-width: 767px) {
+    .masonry-grid { grid-template-columns: repeat(3, 1fr); gap: 4px; }
+}
+@media (min-width: 768px) and (max-width: 1199px) {
+    .masonry-grid { grid-template-columns: repeat(4, 1fr); }
+}
+@media (min-width: 1200px) {
+    .masonry-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 }
 
 .masonry-item {
@@ -154,10 +179,13 @@
     width: 100%;
     height: auto;
     display: block;
-    transition: transform 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-.masonry-item:hover .masonry-img { transform: scale(1.05); }
+.masonry-item:hover .masonry-img { transform: scale(1.04); }
+
+/* Video items — no scale on hover to avoid layout shift */
+.masonry-item.has-video:hover .masonry-img { transform: none; }
 
 .masonry-placeholder {
     height: 160px;
@@ -167,6 +195,55 @@
     color: var(--text-muted);
     font-size: 1.5rem;
 }
+
+/* Video thumbnail overlay */
+.video-play-badge {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 36px; height: 36px;
+    background: rgba(0,0,0,0.65);
+    border: 1.5px solid rgba(255,255,255,0.4);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 0.75rem;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    backdrop-filter: blur(4px);
+}
+.masonry-item:hover .video-play-badge { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+.video-type-badge {
+    position: absolute;
+    top: 6px; left: 6px;
+    background: rgba(0,0,0,0.7);
+    color: rgba(255,255,255,0.8);
+    font-size: 0.52rem;
+    padding: 2px 5px;
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    pointer-events: none;
+    letter-spacing: 0.06em;
+    backdrop-filter: blur(4px);
+}
+
+/* Full-screen video in masonry on hover */
+.masonry-video {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0; left: 0;
+    object-fit: cover;
+    display: none;
+    z-index: 1;
+    background: #000;
+}
+.masonry-item.has-video { overflow: hidden; }
+.masonry-item.has-video .masonry-video-wrap { position: relative; }
+.masonry-item.has-video.playing .masonry-video { display: block; }
+.masonry-item.has-video.playing .masonry-img { visibility: hidden; }
 
 /* Carousel inside masonry */
 .masonry-item .carousel,
@@ -441,7 +518,9 @@
 {% for image in images %}
 {% set post_images = image.post_images if image.post_images else [image] %}
 {% set image_count = image.image_count if image.image_count else 1 %}
-<div class="masonry-item" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
+{% set top_ext = image.filename.split('.')[-1].lower() if image.filename else 'jpg' %}
+{% set is_video = (top_ext == 'mp4' or top_ext == 'gif') and image_count == 1 %}
+<div class="masonry-item{% if is_video %} has-video{% endif %}" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
 
     {% if image_count > 1 %}
     <!-- Carousel -->
@@ -451,15 +530,18 @@
             <div class="carousel-item {% if loop.first %}active{% endif %}">
                 {% set ext = post_img.filename.split('.')[-1].lower() if post_img.filename else 'jpg' %}
                 {% if post_img.thumb_path %}
-                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+                    <img src="{{ url_for('serve_thumbnail', filename=post_img.thumb_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy" decoding="async">
                 {% elif post_img.web_path %}
                     {% if ext == 'mp4' %}
-                        <video controls class="masonry-img"><source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4"></video>
+                        <video class="masonry-img" muted playsinline preload="none" loop>
+                            <source src="{{ url_for('static', filename=post_img.web_path) }}" type="video/mp4">
+                        </video>
+                        <span class="video-type-badge">MP4</span>
                     {% else %}
-                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+                        <img src="{{ url_for('static', filename=post_img.web_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy" decoding="async">
                     {% endif %}
                 {% elif post_img.url %}
-                    <img data-src="{{ post_img.url.split(',')[0].strip() }}" class="masonry-img lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy">
+                    <img data-src="{{ post_img.url.split(',')[0].strip() }}" class="masonry-img lazy-load" alt="{{ image.title or 'Image' }}">
                 {% else %}
                     <div class="masonry-placeholder"><i class="fas fa-image"></i></div>
                 {% endif %}
@@ -476,22 +558,35 @@
     </div>
 
     {% else %}
-    <!-- Single image -->
-    {% set ext = image.filename.split('.')[-1].lower() if image.filename else 'jpg' %}
+    <!-- Single item -->
     {% if image.thumb_path %}
-        <img src="{{ url_for('serve_thumbnail', filename=image.thumb_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+        <img src="{{ url_for('serve_thumbnail', filename=image.thumb_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy" decoding="async">
+        {% if top_ext == 'mp4' and image.web_path %}
+        <video class="masonry-video" muted playsinline preload="none" loop
+               data-video-src="{{ url_for('static', filename=image.web_path) }}"></video>
+        <span class="video-play-badge"><i class="fas fa-play"></i></span>
+        <span class="video-type-badge">MP4</span>
+        {% elif top_ext == 'gif' %}
+        <span class="video-type-badge">GIF</span>
+        {% endif %}
     {% elif image.web_path %}
-        {% if ext == 'mp4' %}
-            <video controls class="masonry-img"><source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4"></video>
+        {% if top_ext == 'mp4' %}
+        <video class="masonry-img" muted playsinline preload="metadata" loop>
+            <source src="{{ url_for('static', filename=image.web_path) }}" type="video/mp4">
+        </video>
+        <span class="video-play-badge"><i class="fas fa-play"></i></span>
+        <span class="video-type-badge">MP4</span>
         {% else %}
-            <img src="{{ url_for('static', filename=image.web_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy">
+        <img src="{{ url_for('static', filename=image.web_path) }}" class="masonry-img" alt="{{ image.title or 'Image' }}" loading="lazy" decoding="async">
         {% endif %}
     {% elif image.url %}
         {% set thumb = image.url.split(',')[0].strip() %}
-        {% if ext == 'mp4' %}
-            <video controls class="masonry-img lazy-load" data-src="{{ thumb }}"></video>
+        {% if top_ext == 'mp4' %}
+        <video class="masonry-img" muted playsinline preload="none" loop data-src="{{ thumb }}"></video>
+        <span class="video-play-badge"><i class="fas fa-play"></i></span>
+        <span class="video-type-badge">MP4</span>
         {% else %}
-            <img data-src="{{ thumb }}" class="masonry-img lazy-load" alt="{{ image.title or 'Image' }}" loading="lazy">
+        <img data-src="{{ thumb }}" class="masonry-img lazy-load" alt="{{ image.title or 'Image' }}">
         {% endif %}
     {% else %}
         <div class="masonry-placeholder"><i class="fas fa-image"></i></div>
@@ -538,20 +633,24 @@
     <!-- Thumbnail -->
     <div style="position:relative;flex-shrink:0;">
     {% if first_img.thumb_path %}
-        <img src="{{ url_for('serve_thumbnail', filename=first_img.thumb_path) }}" class="list-thumb" alt="" loading="lazy">
+        <img src="{{ url_for('serve_thumbnail', filename=first_img.thumb_path) }}" class="list-thumb" alt="" loading="lazy" decoding="async">
     {% elif first_img.web_path %}
         {% if ext == 'mp4' %}
-            <video class="list-thumb" style="object-fit:cover;"><source src="{{ url_for('static', filename=first_img.web_path) }}" type="video/mp4"></video>
+            <video class="list-thumb" muted playsinline preload="none" style="object-fit:cover;">
+                <source src="{{ url_for('static', filename=first_img.web_path) }}" type="video/mp4">
+            </video>
         {% else %}
-            <img src="{{ url_for('static', filename=first_img.web_path) }}" class="list-thumb" alt="" loading="lazy">
+            <img src="{{ url_for('static', filename=first_img.web_path) }}" class="list-thumb" alt="" loading="lazy" decoding="async">
         {% endif %}
     {% elif first_img.url %}
-        <img data-src="{{ first_img.url.split(',')[0].strip() }}" class="list-thumb lazy-load" alt="" loading="lazy">
+        <img data-src="{{ first_img.url.split(',')[0].strip() }}" class="list-thumb lazy-load" alt="">
     {% else %}
         <div class="list-thumb-placeholder"><i class="fas fa-image"></i></div>
     {% endif %}
     {% if image_count > 1 %}
     <span style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.7);color:#fff;font-size:0.55rem;padding:1px 5px;border-radius:2px;">{{ image_count }}</span>
+    {% elif ext == 'mp4' %}
+    <span style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,0.7);color:rgba(255,255,255,0.8);font-size:0.52rem;padding:1px 5px;border-radius:2px;font-family:var(--font-mono);">MP4</span>
     {% endif %}
     </div>
 
@@ -829,17 +928,63 @@ document.addEventListener('DOMContentLoaded', function() {
         const obs = new IntersectionObserver((entries, o) => {
             entries.forEach(e => {
                 if (e.isIntersecting) {
-                    const img = e.target;
-                    if (img.dataset.src) { img.src = img.dataset.src; img.classList.add('loaded'); img.removeAttribute('data-src'); }
-                    o.unobserve(img);
+                    const el = e.target;
+                    if (el.dataset.src) {
+                        el.src = el.dataset.src;
+                        el.onload = () => el.classList.add('loaded');
+                        el.removeAttribute('data-src');
+                    }
+                    o.unobserve(el);
                 }
             });
-        }, { rootMargin: '100px' });
+        }, { rootMargin: '200px' });
         document.querySelectorAll('img[data-src]').forEach(img => obs.observe(img));
     } else {
-        document.querySelectorAll('img[data-src]').forEach(img => { img.src = img.dataset.src; img.classList.add('loaded'); });
+        document.querySelectorAll('img[data-src]').forEach(img => {
+            img.src = img.dataset.src;
+            img.classList.add('loaded');
+        });
     }
 });
+
+// ── VIDEO HOVER-TO-PLAY ──────────────────────
+(function() {
+    const grid = document.getElementById('cardView');
+    if (!grid) return;
+
+    function getVideoEl(item) {
+        return item.querySelector('video.masonry-video') || item.querySelector('video.masonry-img');
+    }
+
+    grid.addEventListener('mouseenter', function(e) {
+        const item = e.target.closest('.masonry-item.has-video');
+        if (!item) return;
+        const video = getVideoEl(item);
+        if (!video) return;
+
+        // Lazy-load video src on first hover
+        if (video.dataset.videoSrc) {
+            video.src = video.dataset.videoSrc;
+            delete video.dataset.videoSrc;
+        } else if (video.dataset.src) {
+            video.src = video.dataset.src;
+            delete video.dataset.src;
+        }
+
+        video.play().catch(() => {});
+        item.classList.add('playing');
+    }, true);
+
+    grid.addEventListener('mouseleave', function(e) {
+        const item = e.target.closest('.masonry-item.has-video');
+        if (!item) return;
+        const video = getVideoEl(item);
+        if (!video) return;
+        video.pause();
+        video.currentTime = 0;
+        item.classList.remove('playing');
+    }, true);
+})();
 </script>
 
 {% endblock %}

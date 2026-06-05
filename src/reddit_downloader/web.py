@@ -723,12 +723,29 @@ def serve_image(filename):
         download_dir = os.path.join(os.getcwd(), 'reddit_downloads')
         return send_from_directory(download_dir, filename)
 
+@app.route('/sw.js')
+def service_worker():
+    """Serve the service worker for thumbnail caching."""
+    sw_path = Path(__file__).parent / 'sw.js'
+    if sw_path.exists():
+        resp = send_from_directory(str(sw_path.parent), 'sw.js')
+    else:
+        resp = app.response_class(
+            response=b'',
+            status=200,
+            mimetype='application/javascript'
+        )
+    resp.headers['Content-Type'] = 'application/javascript'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Service-Worker-Allowed'] = '/'
+    return resp
+
 @app.route('/thumbs/<path:filename>')
 def serve_thumbnail(filename):
     """Serve thumbnail images."""
     try:
         resp = send_from_directory(str(_thumbs_folder), filename)
-        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
         return resp
     except Exception:
         return "Thumbnail not found", 404
