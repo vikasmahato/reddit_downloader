@@ -850,7 +850,7 @@ class RedditImageDownloader:
                    COALESCE(media_types, 'image,video') as media_types
             FROM scrape_lists
             WHERE type = %s AND status = 'enabled'
-            ORDER BY last_scraped_at ASC, name ASC
+            ORDER BY last_scraped_at ASC NULLS FIRST, name ASC
         """, (list_type,))
 
         results = cursor.fetchall()
