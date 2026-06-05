@@ -4,75 +4,6 @@
 
 {% block content %}
 <style>
-/* ── STATS ROW ──────────────────────────────── */
-.vault-stats {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    margin-bottom: 0.6rem;
-    overflow: hidden;
-    overflow-x: auto;
-    scrollbar-width: none;
-}
-.vault-stats::-webkit-scrollbar { display: none; }
-
-.vault-stat {
-    display: flex;
-    flex-direction: column;
-    padding: 0.5rem 1.1rem;
-    border-right: 1px solid var(--border);
-    flex-shrink: 0;
-}
-
-.vault-stat-num {
-    font-family: var(--font-head);
-    font-size: 1.3rem;
-    font-weight: 800;
-    color: #f0f0f0;
-    line-height: 1;
-}
-
-.vault-stat-label {
-    font-size: 0.56rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--text-muted);
-    margin-top: 3px;
-}
-
-.vault-sub-pills {
-    display: flex;
-    gap: 5px;
-    padding: 0 0.85rem;
-    flex-wrap: nowrap;
-    align-items: center;
-    overflow-x: auto;
-    scrollbar-width: none;
-    flex: 1;
-    min-width: 0;
-}
-.vault-sub-pills::-webkit-scrollbar { display: none; }
-
-.sub-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 9px;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--r);
-    color: var(--text-dim);
-    text-decoration: none;
-    font-size: 0.65rem;
-    letter-spacing: 0.03em;
-    transition: border-color 0.15s, color 0.15s;
-}
-.sub-pill:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
-.sub-pill .pill-count { color: var(--text-muted); font-size: 0.6rem; }
-
 /* ── FILTER BAR ─────────────────────────────── */
 .filter-strip {
     display: flex;
@@ -89,7 +20,6 @@
     .filter-strip { gap: 0.35rem; padding: 0.4rem 0.5rem; }
     .filter-sep { display: none; }
     .filter-label { display: none; }
-    .filter-strip .form-select { min-width: 100px !important; font-size: 0.7rem !important; }
 }
 
 .filter-label {
@@ -103,24 +33,84 @@
 
 .filter-sep { width: 1px; height: 14px; background: var(--border-2); flex-shrink: 0; }
 
-.filter-check-wrap {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    font-size: 0.68rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-    padding: 0 4px;
-}
-.filter-check-wrap input { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
-
 .filter-count {
     margin-left: auto;
     font-size: 0.62rem;
     color: var(--text-muted);
     white-space: nowrap;
 }
+
+/* ── SUBREDDIT PICKER ───────────────────────── */
+.sub-picker {
+    position: relative;
+    min-width: 160px;
+    flex-shrink: 0;
+}
+.sub-picker-input {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    color: var(--text);
+    padding: 3px 24px 3px 8px;
+    font-size: 0.75rem;
+    outline: none;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+.sub-picker-input:focus { border-color: var(--accent); }
+.sub-picker-chevron {
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-muted);
+    font-size: 0.6rem;
+}
+.sub-picker-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 3px);
+    left: 0;
+    min-width: 210px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    z-index: 300;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.sub-picker-dropdown.open { display: block; }
+.sub-picker-opt {
+    padding: 6px 11px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: background 0.1s;
+}
+.sub-picker-opt:hover,
+.sub-picker-opt.focused { background: var(--surface-2); color: var(--accent); }
+.sub-picker-opt.selected { color: var(--accent); font-weight: 600; }
+.sub-picker-opt-disabled {
+    background: rgba(90,90,90,0.18);
+    color: var(--text-muted);
+}
+.sub-picker-opt-disabled:hover,
+.sub-picker-opt-disabled.focused { background: rgba(90,90,90,0.3); color: var(--text-dim); }
+.sub-picker-section {
+    padding: 3px 11px 2px;
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    margin-top: 2px;
+}
+.sub-picker-section:first-child { border-top: none; margin-top: 0; }
 
 /* ── GALLERY HEADER ─────────────────────────── */
 .gallery-bar {
@@ -395,60 +385,36 @@
 }
 </style>
 
-<!-- ── STATS ──────────────────────────────────── -->
-{% set stats = stats if stats is defined else {} %}
-<div class="vault-stats mb-2 fade-in">
-    <div class="vault-stat">
-        <span class="vault-stat-num">{{ stats.total_images or 0 }}</span>
-        <span class="vault-stat-label">Images</span>
-    </div>
-    <div class="vault-stat">
-        <span class="vault-stat-num">{{ "%.1f"|format((stats.total_size_mb or 0)/1024) }}</span>
-        <span class="vault-stat-label">GB</span>
-    </div>
-    <div class="vault-stat">
-        <span class="vault-stat-num">{{ stats.total_users or 0 }}</span>
-        <span class="vault-stat-label">Authors</span>
-    </div>
-    {% if stats.total_subreddits %}
-    <div class="vault-stat">
-        <span class="vault-stat-num">{{ stats.total_subreddits }}</span>
-        <span class="vault-stat-label">Subs</span>
-    </div>
-    {% endif %}
-    {% if stats.subreddit_counts %}
-    <div class="vault-sub-pills">
-        {% set sorted_subs = stats.subreddit_counts.items() | list | sort(attribute='1', reverse=True) %}
-        {% for subreddit, count in sorted_subs[:7] %}
-        <a href="?subreddit={{ subreddit }}" class="sub-pill">
-            r/{{ subreddit[:14] }}{% if subreddit|length > 14 %}…{% endif %}
-            <span class="pill-count">{{ count }}</span>
-        </a>
-        {% endfor %}
-    </div>
-    {% endif %}
-</div>
-
 <!-- ── FILTER ─────────────────────────────────── -->
 <div class="filter-strip">
     <form method="GET" id="filterForm" style="display:contents;">
         <span class="filter-label">r/</span>
-        <select class="form-select form-select-sm" id="subreddit" name="subreddit" style="width:auto;min-width:130px;">
-            <option value="">all subreddits</option>
-            {% for sr in subreddits %}
-            <option value="{{ sr }}" {% if filter_subreddit == sr %}selected{% endif %}>{{ sr }}</option>
-            {% endfor %}
-        </select>
 
-        <div class="filter-sep"></div>
-
-        <span class="filter-label">u/</span>
-        <select class="form-select form-select-sm" id="user" name="user" style="width:auto;min-width:120px;">
-            <option value="">all users</option>
-            {% for u in users %}
-            <option value="{{ u }}" {% if filter_user == u %}selected{% endif %}>{{ u }}</option>
-            {% endfor %}
-        </select>
+        <!-- Searchable subreddit picker -->
+        <div class="sub-picker" id="subPicker">
+            <input type="text" class="sub-picker-input" id="subPickerInput"
+                   placeholder="all subreddits" autocomplete="off"
+                   value="{% if filter_subreddit %}r/{{ filter_subreddit }}{% endif %}">
+            <i class="fas fa-chevron-down sub-picker-chevron"></i>
+            <input type="hidden" name="subreddit" id="subPickerValue" value="{{ filter_subreddit or '' }}">
+            <div class="sub-picker-dropdown" id="subPickerDropdown">
+                <div class="sub-picker-opt {% if not filter_subreddit %}selected{% endif %}" data-value="">all subreddits</div>
+                {% set enabled_subs = subreddits | selectattr('enabled') | list %}
+                {% set disabled_subs = subreddits | rejectattr('enabled') | list %}
+                {% if enabled_subs %}
+                <div class="sub-picker-section">Active</div>
+                {% for sr in enabled_subs %}
+                <div class="sub-picker-opt {% if filter_subreddit == sr.name %}selected{% endif %}" data-value="{{ sr.name }}">r/{{ sr.name }}</div>
+                {% endfor %}
+                {% endif %}
+                {% if disabled_subs %}
+                <div class="sub-picker-section">Disabled</div>
+                {% for sr in disabled_subs %}
+                <div class="sub-picker-opt sub-picker-opt-disabled {% if filter_subreddit == sr.name %}selected{% endif %}" data-value="{{ sr.name }}">r/{{ sr.name }}</div>
+                {% endfor %}
+                {% endif %}
+            </div>
+        </div>
 
         <div class="filter-sep"></div>
 
@@ -459,17 +425,10 @@
             <option value="comments" {% if sort == 'comments' %}selected{% endif %}>comments</option>
         </select>
 
-        <div class="filter-sep"></div>
-
-        <label class="filter-check-wrap">
-            <input type="checkbox" id="onlyEnabled" name="only_enabled" value="1" {% if only_enabled %}checked{% endif %}>
-            <span>enabled only</span>
-        </label>
-
         <button type="submit" class="btn btn-sm btn-primary" title="Apply filter">
             <i class="fas fa-filter"></i>
         </button>
-        {% if filter_subreddit or filter_user %}
+        {% if filter_subreddit %}
         <a href="/" class="btn btn-sm btn-outline-secondary" title="Clear filters">
             <i class="fas fa-times"></i>
         </a>
@@ -759,6 +718,65 @@ function updateSelectedCount() {
     const el = document.getElementById('selectedCount');
     if (el) el.textContent = n;
 }
+
+/* ── SUBREDDIT PICKER ───────────────────────── */
+(function() {
+    const picker  = document.getElementById('subPicker');
+    const input   = document.getElementById('subPickerInput');
+    const hidden  = document.getElementById('subPickerValue');
+    const dropdown = document.getElementById('subPickerDropdown');
+    if (!picker) return;
+    const allOpts = Array.from(dropdown.querySelectorAll('.sub-picker-opt'));
+
+    function open() { dropdown.classList.add('open'); }
+    function close() { dropdown.classList.remove('open'); }
+
+    input.addEventListener('focus', () => { input.select(); open(); });
+    input.addEventListener('click', open);
+
+    input.addEventListener('input', () => {
+        const q = input.value.replace(/^r\//i, '').toLowerCase();
+        let anyVisible = false;
+        allOpts.forEach(o => {
+            const match = !q || o.dataset.value === '' || o.dataset.value.toLowerCase().includes(q);
+            o.style.display = match ? '' : 'none';
+            if (match) anyVisible = true;
+        });
+        // Show/hide section headers based on whether any option in their group is visible
+        dropdown.querySelectorAll('.sub-picker-section').forEach(sec => {
+            let next = sec.nextElementSibling;
+            let hasVisible = false;
+            while (next && !next.classList.contains('sub-picker-section')) {
+                if (next.style.display !== 'none') hasVisible = true;
+                next = next.nextElementSibling;
+            }
+            sec.style.display = hasVisible ? '' : 'none';
+        });
+        open();
+    });
+
+    allOpts.forEach(o => {
+        o.addEventListener('mousedown', e => {
+            e.preventDefault();
+            const val = o.dataset.value;
+            hidden.value = val;
+            input.value = val ? 'r/' + val : '';
+            // Update selected styling
+            allOpts.forEach(x => x.classList.remove('selected'));
+            o.classList.add('selected');
+            close();
+            document.getElementById('filterForm').submit();
+        });
+    });
+
+    document.addEventListener('click', e => {
+        if (!picker.contains(e.target)) close();
+    });
+    document.addEventListener('keydown', e => {
+        if (!dropdown.classList.contains('open')) return;
+        if (e.key === 'Escape') { close(); input.blur(); }
+    });
+})();
 
 document.addEventListener('DOMContentLoaded', function() {
     switchView(currentView);

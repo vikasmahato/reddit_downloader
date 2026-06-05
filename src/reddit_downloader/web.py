@@ -583,6 +583,27 @@ class RedditImageUI:
             print(f"Subreddits error: {e}")
             return []
 
+    def get_subreddits_with_status(self):
+        """Get all subreddits with enabled flag for searchable picker (cached 5 min)."""
+        cached, hit = _cache.get('subreddits_with_status', ttl=300)
+        if hit:
+            return cached
+        try:
+            conn = _get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT name, status FROM scrape_lists
+                WHERE type = 'subreddit'
+                ORDER BY CASE status WHEN 'enabled' THEN 0 ELSE 1 END, name
+            """)
+            results = [{'name': row[0], 'enabled': row[1] == 'enabled'} for row in cursor.fetchall()]
+            conn.close()
+            _cache.set('subreddits_with_status', results)
+            return results
+        except Exception as e:
+            print(f"Subreddits with status error: {e}")
+            return []
+
     def get_users(self):
         """Get top authors by post count (cached 5 min)."""
         cached, hit = _cache.get('users', ttl=300)
@@ -644,7 +665,6 @@ def index():
     deleted = request.args.get('deleted', '')
     sort = request.args.get('sort', '')
     hidden_users = request.args.getlist('hidden_users')
-    only_enabled = request.args.get('only_enabled', '1') == '1'  # Default to showing only enabled
     deleted_filter = None
     if deleted == '1':
         deleted_filter = True
@@ -661,15 +681,10 @@ def index():
         deleted=deleted_filter,
         sort=sort if sort else None
     )
-    stats = ui_handler.get_stats()
-    subreddits = ui_handler.get_subreddits(only_enabled=only_enabled)
-    users = ui_handler.get_users()
+    subreddits = ui_handler.get_subreddits_with_status()
     return render_template('index.html',
                          images=images,
-                         stats=stats,
                          subreddits=subreddits,
-                         only_enabled=only_enabled,
-                         users=users,
                          current_page=page,
                          search=search,
                          filter_subreddit=subreddit,
