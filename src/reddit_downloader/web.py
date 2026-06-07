@@ -382,7 +382,7 @@ class RedditImageUI:
             SELECT
                 p.id AS post_id,
                 p.title, p.author, p.subreddit, p.permalink, p.created_utc,
-                p.score, p.post_username, p.comments, p.flair,
+                p.score, p.post_username, p.comments, p.flair, p.is_deleted AS reddit_deleted,
 
                 i.id AS image_id, i.file_hash, i.file_path, i.filename,
                 i.file_size, i.download_date, i.download_time, i.is_deleted,
@@ -442,6 +442,7 @@ class RedditImageUI:
                         "comments": row["comments"],
                         "comment_count": comment_count,
                         "flair": row.get("flair"),
+                        "reddit_deleted": bool(row.get("reddit_deleted")),
                         "post_images": []
                     }
 

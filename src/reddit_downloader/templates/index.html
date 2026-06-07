@@ -164,6 +164,13 @@
     border-radius: var(--r);
     display: block;
 }
+.masonry-item.reddit-deleted {
+    box-shadow: inset 0 0 0 2px rgba(239,68,68,0.7);
+}
+.list-item.reddit-deleted {
+    border-color: rgba(239,68,68,0.6) !important;
+    box-shadow: inset 3px 0 0 rgba(239,68,68,0.8);
+}
 
 .masonry-img {
     width: 100%;
@@ -479,7 +486,7 @@
 {% set image_count = image.image_count if image.image_count else 1 %}
 {% set top_ext = image.filename.split('.')[-1].lower() if image.filename else 'jpg' %}
 {% set is_video = (top_ext == 'mp4' or top_ext == 'gif') and image_count == 1 %}
-<div class="masonry-item{% if is_video %} has-video{% endif %}" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
+<div class="masonry-item{% if is_video %} has-video{% endif %}{% if image.reddit_deleted %} reddit-deleted{% endif %}" {% if image.post_id %}data-post-id="{{ image.post_id }}"{% endif %}>
 
     {% if image_count > 1 %}
     <!-- Carousel -->
@@ -584,7 +591,7 @@
 {% set image_count = image.image_count if image.image_count else 1 %}
 {% set first_img = post_images[0] %}
 {% set ext = first_img.filename.split('.')[-1].lower() if first_img.filename else 'jpg' %}
-<div class="list-item" data-post-id="{{ image.post_id }}">
+<div class="list-item{% if image.reddit_deleted %} reddit-deleted{% endif %}" data-post-id="{{ image.post_id }}">
     {% if image.post_id %}
     <input type="checkbox" class="list-checkbox post-checkbox" data-post-id="{{ image.post_id }}">
     {% endif %}
