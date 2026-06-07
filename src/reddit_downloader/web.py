@@ -514,6 +514,47 @@ class RedditImageUI:
             print(f"Database error: {e}")
             return []
 
+    def get_posts_count(self, subreddit=None, user=None, search=None, deleted=None):
+        """Count posts matching the same filters as get_all_images."""
+        try:
+            conn = _get_db_connection()
+            cursor = conn.cursor()
+            search_param = search if search else None
+            search_like = f"%{search}%" if search else None
+
+            if deleted is not None:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT posts.id)
+                    FROM posts
+                    LEFT JOIN blocked_users bu ON bu.username = posts.author
+                    JOIN post_images pi ON pi.post_id = posts.id
+                    JOIN images i ON i.id = pi.image_id
+                    WHERE (%s IS NULL OR posts.subreddit = %s)
+                    AND (%s IS NULL OR posts.author = %s)
+                    AND (%s IS NULL OR posts.title LIKE %s OR posts.author LIKE %s)
+                    AND (posts.author IS NULL OR bu.username IS NULL)
+                    AND i.is_deleted = %s
+                """, [subreddit, subreddit, user, user,
+                      search_param, search_like, search_like, deleted])
+            else:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT posts.id)
+                    FROM posts
+                    LEFT JOIN blocked_users bu ON bu.username = posts.author
+                    WHERE (%s IS NULL OR subreddit = %s)
+                    AND (%s IS NULL OR author = %s)
+                    AND (%s IS NULL OR title LIKE %s OR author LIKE %s)
+                    AND (posts.author IS NULL OR bu.username IS NULL)
+                    AND EXISTS (SELECT 1 FROM post_images WHERE post_id = posts.id)
+                """, [subreddit, subreddit, user, user,
+                      search_param, search_like, search_like])
+
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count
+        except Exception as e:
+            print(f"Database error in get_posts_count: {e}")
+            return 0
 
     def get_stats(self):
         """Get download statistics from MySQL (cached 60 s)."""
@@ -681,11 +722,20 @@ def index():
         deleted=deleted_filter,
         sort=sort if sort else None
     )
+    total_posts = ui_handler.get_posts_count(
+        subreddit=subreddit if subreddit else None,
+        user=user if user else None,
+        search=search if search else None,
+        deleted=deleted_filter
+    )
+    total_pages = max(1, (total_posts + per_page - 1) // per_page)
     subreddits = ui_handler.get_subreddits_with_status()
     return render_template('index.html',
                          images=images,
                          subreddits=subreddits,
                          current_page=page,
+                         total_pages=total_pages,
+                         per_page=per_page,
                          search=search,
                          filter_subreddit=subreddit,
                          filter_user=user,

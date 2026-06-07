@@ -656,12 +656,28 @@
                 <a class="page-link" href="?page={{ current_page - 1 }}{{ pg_extra }}">‹ Prev</a>
             </li>
             {% endif %}
-            {% for page_num in range(max(1, current_page - 2), min(current_page + 3, 10)) %}
+            {% if current_page > 4 %}
+            <li class="page-item">
+                <a class="page-link" href="?page=1{{ pg_extra }}">1</a>
+            </li>
+            {% if current_page > 5 %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            {% endif %}
+            {% for page_num in range(max(1, current_page - 3), min(current_page + 4, total_pages + 1)) %}
             <li class="page-item {% if page_num == current_page %}active{% endif %}">
                 <a class="page-link" href="?page={{ page_num }}{{ pg_extra }}">{{ page_num }}</a>
             </li>
             {% endfor %}
-            {% if images|length == 20 %}
+            {% if current_page < total_pages - 3 %}
+            {% if current_page < total_pages - 4 %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ total_pages }}{{ pg_extra }}">{{ total_pages }}</a>
+            </li>
+            {% endif %}
+            {% if current_page < total_pages %}
             <li class="page-item">
                 <a class="page-link" href="?page={{ current_page + 1 }}{{ pg_extra }}">Next ›</a>
             </li>
@@ -875,24 +891,25 @@ function deleteAllUserPosts(username) {
 }
 
 function deletePost(postId, title) {
+    // Optimistically remove from UI immediately
+    const card = document.querySelector(`.masonry-item[data-post-id="${postId}"]`);
+    const li = document.querySelector(`.list-item[data-post-id="${postId}"]`);
+    [card, li].forEach(el => {
+        if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.2s'; setTimeout(() => el.remove(), 200); }
+    });
+    showToast('Post deleted');
+
     fetch(`/api/delete-post/${postId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            const card = document.querySelector(`.masonry-item[data-post-id="${postId}"]`);
-            const li = document.querySelector(`.list-item[data-post-id="${postId}"]`);
-            [card, li].forEach(el => {
-                if (el) { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }
-            });
-            showToast('Post deleted');
-        } else {
-            alert('Error: ' + (data.error || 'Failed'));
+        if (!data.success) {
+            showToast('Delete error: ' + (data.error || 'Failed'));
         }
     })
-    .catch(err => alert('Error: ' + err));
+    .catch(err => showToast('Delete error: ' + err));
 }
 
 function blockUser(username) {
@@ -964,6 +981,18 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// ── PREFETCH NEXT PAGE ──────────────────────
+(function() {
+    {% if current_page < total_pages %}
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('page', {{ current_page + 1 }});
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.href = nextUrl.toString();
+    document.head.appendChild(link);
+    {% endif %}
+})();
 
 // ── VIDEO HOVER-TO-PLAY ──────────────────────
 (function() {
